@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from typing import Literal, Optional
 from uuid import UUID
 
@@ -143,6 +144,11 @@ class BudgetCopyRequest(BaseModel):
 
 class VersionCreate(BaseModel):
     notes: str | None = None
+
+
+class PriceUpdateRequest(BaseModel):
+    # Prices on or before this date. None = today
+    fecha: date | None = None
 
 
 # ── Full budget creation (step-by-step) ─────────────────────────────────────

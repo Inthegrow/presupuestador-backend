@@ -10,6 +10,7 @@ from app.routers import (
     catalogs,
     excel,
     health,
+    indirects,
     standard_trees,
     templates,
 )
@@ -33,6 +34,7 @@ def create_app() -> FastAPI:
     app.include_router(excel.router, prefix="/budgets", tags=["Excel"])
     app.include_router(ai.router, prefix="/budgets", tags=["IA"])
     app.include_router(analysis.router, prefix="/budgets", tags=["Analisis"])
+    app.include_router(indirects.router, prefix="/indirects", tags=["Indirectos"])
     app.include_router(catalogs.router, prefix="/catalogs", tags=["Catalogos"])
     app.include_router(templates.router, prefix="/templates", tags=["Templates"])
     app.include_router(standard_trees.router, prefix="/standard-trees", tags=["Arbol estandar"])

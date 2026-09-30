@@ -1067,7 +1067,7 @@ async def insert_ai_suggestions(
 
     budget_result = (
         db.table("budgets")
-        .select("id")
+        .select("*")
         .eq("id", str(budget_id))
         .eq("org_id", org_id)
         .single()
@@ -1223,15 +1223,9 @@ async def insert_ai_suggestions(
     # After all items are inserted, apply cascade indirects
     if created_items:
         try:
+            from app.budget_prices import budget_config
             from app.calculations import calc_cascade_indirects
-            config_result = (
-                db.table("indirect_config")
-                .select("*")
-                .eq("org_id", org_id)
-                .limit(1)
-                .execute()
-            )
-            config = config_result.data[0] if config_result.data else {}
+            config = budget_config(db, org_id, budget_result.data)
 
             for item_row in created_items:
                 if float(item_row.get("directo_total", 0)) > 0:

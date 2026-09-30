@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { RefreshCw, Eye, GitCompare, Plus } from 'lucide-react'
+import { RefreshCw, Eye, GitCompare, Plus, CalendarClock } from 'lucide-react'
 import { budgetApi } from '../lib/api'
-import { fmtCurrency } from '../lib/format'
-import type { Budget, BudgetVersion } from '../types'
+import { fmtCurrency, fmtDate } from '../lib/format'
+import type { Budget, BudgetVersion, PriceUpdateResult } from '../types'
 
 type VersionRow = BudgetVersion & { neto: number; label: string; author: string; date: string }
 
@@ -14,12 +14,15 @@ export default function Versions() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
+  const [updating, setUpdating] = useState(false)
+  const [priceResult, setPriceResult] = useState<PriceUpdateResult | null>(null)
+  const [priceError, setPriceError] = useState<string | null>(null)
 
   function mapVersions(data: BudgetVersion[]): VersionRow[] {
     return data.map((v) => ({
       ...v,
       neto: (v.data as Record<string, number>)?.neto_total ?? 0,
-      label: `v${v.version}`,
+      label: v.notas || `v${v.version}`,
       author: 'Carlos',
       date: new Date(v.created_at).toLocaleDateString('es-AR'),
     }))
@@ -58,6 +61,22 @@ export default function Versions() {
     setCreating(false)
   }
 
+  async function updatePrices() {
+    if (!id) return
+    if (!window.confirm('Se toma el último precio de cada recurso y se recalcula el presupuesto. La versión actual queda guardada. ¿Seguir?')) return
+    setUpdating(true)
+    setPriceError(null)
+    try {
+      const result = await budgetApi.updatePrices(id)
+      setPriceResult(result)
+      setBudget((b) => (b ? { ...b, precios_al: result.precios_al } : b))
+      setVersions(mapVersions(await budgetApi.getVersions(id)))
+    } catch (err) {
+      setPriceError(err instanceof Error ? err.message : 'Error al actualizar precios')
+    }
+    setUpdating(false)
+  }
+
   const budgetName = budget?.name ?? 'Presupuesto'
   const current = versions[0]
 
@@ -70,7 +89,21 @@ export default function Versions() {
         <div className="flex items-center gap-3">
           <div className="w-1 h-7 bg-[#2D8D68] rounded-full" />
           <h1 className="text-xl font-extrabold text-gray-900">VERSIONES — {budgetName.toUpperCase()}</h1>
+          <span className="text-xs text-gray-500">Precios al {budget?.precios_al ? fmtDate(budget.precios_al) : 'sin fecha'}</span>
         </div>
+        <div className="flex gap-2">
+        <button
+          onClick={updatePrices}
+          disabled={updating}
+          className="border border-[#2D8D68] text-[#2D8D68] hover:bg-[#E8F5EE] disabled:opacity-60 font-semibold px-4 py-2 rounded-lg text-xs flex items-center gap-1.5 transition-colors"
+        >
+          {updating ? (
+            <div className="w-4 h-4 border-2 border-[#2D8D68] border-t-transparent rounded-full animate-spin" />
+          ) : (
+            <CalendarClock size={14} />
+          )}
+          Actualizar a precios de hoy
+        </button>
         <button
           onClick={createVersion}
           disabled={creating}
@@ -83,7 +116,27 @@ export default function Versions() {
           )}
           Guardar version actual
         </button>
+        </div>
       </div>
+
+      {priceError && (
+        <div className="max-w-2xl bg-red-50 border border-red-200 rounded-xl p-4 mb-4 text-sm text-red-700">{priceError}</div>
+      )}
+
+      {priceResult && (
+        <div className="max-w-2xl bg-[#E8F5EE] border border-[#2D8D68]/30 rounded-xl p-4 mb-4 text-xs text-[#143D34]">
+          <p className="font-semibold mb-1">
+            Precios al {fmtDate(priceResult.precios_al)}: {priceResult.precios_actualizados} recursos actualizados.
+            Nueva versión v{priceResult.version_nueva.version} (la anterior quedó en v{priceResult.version_anterior.version}).
+          </p>
+          {priceResult.sin_precio.length > 0 && (
+            <p>
+              Sin precio en el catálogo (quedan con el precio anterior):{' '}
+              {priceResult.sin_precio.map((p) => `${p.codigo ?? p.descripcion}${p.motivo === 'duplicado' ? ' (código repetido)' : ''}`).join(', ')}
+            </p>
+          )}
+        </div>
+      )}
 
       {loading && (
         <div className="flex items-center gap-2 text-sm text-gray-400 mb-4">
@@ -125,7 +178,7 @@ export default function Versions() {
                       v{v.version} — {v.label}
                     </div>
                     <div className="text-[10px] text-gray-400 mt-0.5">
-                      {v.author} · {v.date} · Neto: {fmtCurrency(v.neto)}
+                      {v.author} · {v.date}{v.precios_al ? ` · Precios al ${fmtDate(v.precios_al)}` : ''} · Neto: {fmtCurrency(v.neto)}
                     </div>
                     {!isCurrent && deltaNeto !== 0 && (
                       <div className={`text-[10px] mt-0.5 ${deltaNeto < 0 ? 'text-red-500' : 'text-green-600'}`}>

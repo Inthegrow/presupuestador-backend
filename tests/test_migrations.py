@@ -74,3 +74,33 @@ class TestRecipesMigration:
 
     def test_no_open_policies(self):
         assert not re.search(r"USING\s*\(\s*true\s*\)", self._sql(), re.IGNORECASE)
+
+
+MIGRATION_008 = MIGRATION_004.parent / "008_budget_prices_date.sql"
+
+
+class TestBudgetPricesMigration:
+    """008 only adds columns: safe to run twice, never drops data."""
+
+    def _sql(self) -> str:
+        text = MIGRATION_008.read_text(encoding="utf-8")
+        return "\n".join(line.split("--", 1)[0] for line in text.splitlines())
+
+    def test_only_idempotent_adds(self):
+        sql = self._sql()
+        for line in re.findall(r"ADD COLUMN[^\n]*", sql):
+            assert "IF NOT EXISTS" in line
+        assert not re.search(r"DROP\s+|DELETE\s+FROM|TRUNCATE|UPDATE\s+\w+\s+SET", sql, re.IGNORECASE)
+
+    def test_columns_used_by_the_code(self):
+        sql = self._sql()
+        for table, column in [
+            ("budgets", "indirectos"),
+            ("budgets", "precios_al"),
+            ("item_resources", "precio_fecha"),
+            ("budget_versions", "precios_al"),
+            ("budget_versions", "notas"),
+        ]:
+            assert re.search(
+                rf"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column}\b", sql
+            ), f"{table}.{column}"
