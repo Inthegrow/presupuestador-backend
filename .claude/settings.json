@@ -27,7 +27,6 @@
     "deny": [
       "Bash(rm -rf*)",
       "Bash(sudo*)",
-      "Bash(git push*)",
       "Bash(git push --force*)",
       "Bash(supabase db reset*)",
       "Bash(supabase db push*)"
