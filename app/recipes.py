@@ -243,8 +243,10 @@ def has_formula(row: dict) -> bool:
 
 
 def _rounding_key(row: dict) -> tuple:
+    """Rows are summed together only if they are the same material in the same unit."""
     name = (row.get("codigo") or row.get("descripcion") or "").strip().lower()
-    return (row.get("tipo"), name, float(_num(row.get("unidad_compra")) or 1))
+    unidad = (row.get("unidad") or "").strip().lower()
+    return (row.get("tipo"), name, unidad, float(_num(row.get("unidad_compra")) or 1))
 
 
 def apply_purchase_rounding(rows: list[dict]) -> list[dict]:
@@ -265,7 +267,7 @@ def apply_purchase_rounding(rows: list[dict]) -> list[dict]:
             groups.setdefault(_rounding_key(row), []).append(row)
 
     summary = []
-    for (_tipo, _name, unidad_compra), group in groups.items():
+    for (_tipo, _name, _unidad, unidad_compra), group in groups.items():
         necesaria = sum(float(r.get("cantidad_efectiva") or 0) for r in group)
         if necesaria <= 0:
             continue
@@ -274,6 +276,7 @@ def apply_purchase_rounding(rows: list[dict]) -> list[dict]:
         extra = compra - necesaria
 
         repartido = 0.0
+        costo_extra = 0.0
         for i, r in enumerate(group):
             base = float(r.get("cantidad_efectiva") or 0)
             if i == len(group) - 1:
@@ -283,9 +286,11 @@ def apply_purchase_rounding(rows: list[dict]) -> list[dict]:
                 repartido += share
             r["cantidad_redondeo"] = round(share, 4)
             r["cantidad_efectiva"] = round(base + share, 4)
+            before = float(r.get("subtotal") or 0)
             r["subtotal"] = round(r["cantidad_efectiva"] * float(r.get("precio_unitario") or 0), 2)
+            # Real increase of each row, with its own price
+            costo_extra += r["subtotal"] - before
 
-        precio = float(group[0].get("precio_unitario") or 0)
         summary.append({
             "codigo": group[0].get("codigo"),
             "descripcion": group[0].get("descripcion"),
@@ -295,7 +300,7 @@ def apply_purchase_rounding(rows: list[dict]) -> list[dict]:
             "cantidad_compra": round(compra, 4),
             "envases": envases,
             "extra": round(extra, 4),
-            "costo_extra": round(extra * precio, 2),
+            "costo_extra": round(costo_extra, 2),
             "items": len({r.get("item_id") for r in group}),
         })
     return summary

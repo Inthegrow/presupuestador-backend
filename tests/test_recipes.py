@@ -257,6 +257,33 @@ class TestPurchaseRounding:
         summary = apply_purchase_rounding(rows)
         assert len(summary) == 2
 
+    def test_same_code_different_units_apart(self):
+        # 4 kg + 4 l in packs of 10: 10 kg and 10 l, never one group of 8 -> 10
+        rows = [
+            self._row("a", 4, unidad="kg", unidad_compra=10),
+            self._row("b", 4, unidad="l", unidad_compra=10),
+        ]
+        summary = apply_purchase_rounding(rows)
+        assert len(summary) == 2
+        assert {s["unidad"]: s["cantidad_compra"] for s in summary} == {"kg": 10, "l": 10}
+        assert rows[0]["cantidad_efectiva"] == 10 and rows[1]["cantidad_efectiva"] == 10
+
+    def test_unit_case_and_spaces_do_not_split(self):
+        rows = [self._row("a", 0.4, unidad="Bolsa"), self._row("b", 0.4, unidad=" bolsa ")]
+        summary = apply_purchase_rounding(rows)
+        assert len(summary) == 1 and summary[0]["envases"] == 1
+
+    def test_extra_cost_uses_each_row_price(self):
+        # Same material, different prices: extra cost = sum of real increases
+        # 0.4 + 0.4 = 0.8 -> 1 bag; extra 0.2 split 0.1 / 0.1
+        rows = [self._row("a", 0.4, precio=100), self._row("b", 0.4, precio=300)]
+        before = sum(r["subtotal"] for r in rows)
+        summary = apply_purchase_rounding(rows)
+        after = sum(r["subtotal"] for r in rows)
+        assert summary[0]["costo_extra"] == pytest.approx(after - before)
+        assert summary[0]["costo_extra"] == pytest.approx(0.1 * 100 + 0.1 * 300)
+        # the old way (first row's price for the whole extra) would say 20
+
     def test_rerun_does_not_accumulate(self):
         rows = [self._row("a", 0.4)]
         apply_purchase_rounding(rows)
