@@ -29,10 +29,29 @@ INDIRECT_KEYS = tuple(INDIRECT_DEFAULTS)
 
 _TZ = ZoneInfo("America/Argentina/Buenos_Aires")
 
+# PostgREST returns at most this many rows per request (Supabase default)
+PAGE_SIZE = 1000
+
 
 def today() -> date:
     """Today in Argentina (the server runs in UTC)."""
     return datetime.now(_TZ).date()
+
+
+def fetch_all(make_query, page_size: int = PAGE_SIZE) -> list[dict]:
+    """Read every row of a query, page by page.
+
+    ``make_query()`` must return a fresh query with a stable order (ej. by id).
+    Without paging, the API silently cuts the result at ``page_size`` rows.
+    """
+    rows: list[dict] = []
+    start = 0
+    while True:
+        batch = make_query().range(start, start + page_size - 1).execute().data or []
+        rows.extend(batch)
+        if len(batch) < page_size:
+            return rows
+        start += page_size
 
 
 # ── Indirectos ──────────────────────────────────────────────────────────────
@@ -160,12 +179,8 @@ def load_price_lookup(db, org_id: str, fecha: date):
     price_for returns (precio, fecha_precio, entry_id) or None, and records
     resources without a price in ``problemas`` (list of dicts).
     """
-    entries = (
-        db.table("catalog_entries")
-        .select("*")
-        .eq("org_id", org_id)
-        .execute()
-        .data or []
+    entries = fetch_all(
+        lambda: db.table("catalog_entries").select("*").eq("org_id", org_id).order("id")
     )
     by_id = {str(e["id"]): e for e in entries}
     by_codigo: dict[str, list[dict]] = {}
@@ -177,13 +192,13 @@ def load_price_lookup(db, org_id: str, fecha: date):
     history: dict[str, list[dict]] = {}
     ids = list(by_id)
     for start in range(0, len(ids), 200):
-        rows = (
-            db.table("catalog_price_history")
+        chunk = ids[start:start + 200]
+        rows = fetch_all(
+            lambda chunk=chunk: db.table("catalog_price_history")
             .select("*")
             .eq("org_id", org_id)
-            .in_("entry_id", ids[start:start + 200])
-            .execute()
-            .data or []
+            .in_("entry_id", chunk)
+            .order("id")
         )
         for h in rows:
             history.setdefault(str(h["entry_id"]), []).append(h)

@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 from datetime import date
+
+os.environ.setdefault("SUPABASE_URL", "https://test.supabase.co")
+os.environ.setdefault("SUPABASE_KEY", "test-key")
 from unittest.mock import patch
 
 import pytest
@@ -13,7 +17,7 @@ from fastapi.testclient import TestClient
 
 from app.budget_prices import effective_indirects, find_entry, general_indirects, pick_price
 from app.main import create_app
-from tests.test_recipes_api import BUDGET, ITEM, MOCK_USER, ORG, FakeDB
+from tests.test_recipes_api import BUDGET, ITEM, MOCK_USER, ORG, FakeDB, Resp
 
 TODAY = date(2026, 9, 30)
 
@@ -25,6 +29,7 @@ def resource(**over):
         "catalog_entry_id": None, "formula": None, "rendimiento": None, "desperdicio_origen": None,
         "lo_compra_cliente": False, "redondear": False, "unidad_compra": 1, "cantidad_redondeo": 0,
         "trabajadores": 0, "dias": 0, "cargas_sociales_pct": 0, "precio_fecha": None,
+        "cantidad_efectiva": None,
     }
     return {**base, **over}
 
@@ -301,3 +306,122 @@ class TestUpdatePrices:
         r = client.get(f"/budgets/{BUDGET}/versions")
         assert r.status_code == 200
         assert {v["precios_al"] for v in r.json()} == {"2026-03-01", "2026-09-30"}
+
+
+# ── Fallos de escritura y paginación ────────────────────────────────────────
+
+
+class FailingDB(FakeDB):
+    """FakeDB whose writes fail for the chosen (table, id) pairs."""
+
+    def __init__(self, tables, fail_update=(), fail_restore=False, empty_update=(), **kw):
+        super().__init__(tables, **kw)
+        self.fail_update = set(fail_update)
+        self.empty_update = set(empty_update)
+        self.fail_restore = fail_restore
+        self.failed_once = False
+
+    def table(self, name):
+        query = super().table(name)
+        execute = query.execute
+
+        def guarded():
+            if query.action == "update":
+                ids = {v for c, v in query.filters if c == "id"}
+                if any((name, i) in self.fail_update for i in ids):
+                    if not self.failed_once or self.fail_restore:
+                        self.failed_once = True
+                        raise RuntimeError("write failed")
+                if any((name, i) in self.empty_update for i in ids) and not self.failed_once:
+                    # The row is gone: PostgREST answers OK with no rows
+                    self.failed_once = True
+                    return Resp([])
+            return execute()
+
+        query.execute = guarded
+        return query
+
+
+def _patched(fake):
+    return (
+        patch("app.routers.budgets.get_data_db", return_value=fake),
+        patch("app.routers.analysis.get_data_db", return_value=fake),
+        patch("app.routers.analysis.today", return_value=TODAY),
+    )
+
+
+class TestPriceUpdateFailure:
+    def _run(self, client, fake):
+        p1, p2, p3 = _patched(fake)
+        with p1, p2, p3:
+            return client.post(f"/budgets/{BUDGET}/actualizar-precios")
+
+    def test_failed_write_leaves_budget_as_it_was(self, client):
+        fake = FailingDB(tables(), fail_update={("item_resources", "r2")})
+        before = copy.deepcopy(fake.tables)
+        r = self._run(client, fake)
+        assert r.status_code == 500
+        assert "quedó como estaba" in r.json()["detail"]
+        # r1 was written before r2 failed: it is back to the old price
+        assert fake.tables["item_resources"] == before["item_resources"]
+        assert fake.tables["budget_items"] == before["budget_items"]
+        assert fake.tables["budgets"][0]["precios_al"] == "2026-03-01"
+        # No version says the prices were updated
+        assert fake.tables["budget_versions"] == []
+
+    def test_failed_restore_keeps_old_values_in_a_version(self, client):
+        fake = FailingDB(tables(), fail_update={("item_resources", "r2")}, fail_restore=True)
+        r = self._run(client, fake)
+        assert r.status_code == 500
+        assert "v1" in r.json()["detail"]
+        assert fake.tables["budgets"][0]["precios_al"] == "2026-03-01"
+        [version] = fake.tables["budget_versions"]
+        old = {x["id"]: x["precio_unitario"] for x in json.loads(version["data"])["resources"]}
+        assert old["r1"] == 1000
+
+    def test_update_that_matches_no_row_is_a_failure(self, client):
+        fake = FailingDB(tables(), empty_update={("item_resources", "r3")})
+        r = self._run(client, fake)
+        assert r.status_code == 500
+        assert fake.tables["budgets"][0]["precios_al"] == "2026-03-01"
+        assert res(fake, "r1")["precio_unitario"] == 1000
+        assert fake.tables["budget_versions"] == []
+
+
+class TestPagination:
+    """The API returns at most 1000 rows per request: every page must be read."""
+
+    def test_more_rows_than_one_page(self, client):
+        extra_entries = [
+            {"id": f"e{i:05d}", "org_id": ORG, "tipo": "material", "codigo": f"X{i}",
+             "precio_sin_iva": 1, "fecha_precio": "2026-01-01"}
+            for i in range(1200)
+        ]
+        # c1's newest price sorts last by id, past the first page
+        extra_history = [
+            {"id": f"h{i:05d}", "entry_id": "c1", "org_id": ORG, "precio_sin_iva": 100 + i,
+             "fecha_precio": "2026-02-01", "created_at": "2026-02-01"}
+            for i in range(1500)
+        ]
+        t = tables()
+        t["catalog_entries"] = extra_entries + t["catalog_entries"]
+        t["catalog_price_history"] = extra_history + t["catalog_price_history"]
+        t["catalog_price_history"].append(
+            {"id": "z-last", "entry_id": "c1", "org_id": ORG, "precio_sin_iva": 1800,
+             "fecha_precio": "2026-09-15", "created_at": "2026-09-15"}
+        )
+        fake = FakeDB(t, max_rows=1000)
+        p1, p2, p3 = _patched(fake)
+        with p1, p2, p3:
+            r = client.post(f"/budgets/{BUDGET}/actualizar-precios")
+        assert r.status_code == 200, r.text
+        # MO-OF (entry after 1200 others) is found, and c1 takes its newest price
+        assert res(fake, "r2")["precio_unitario"] == 300
+        assert res(fake, "r1")["precio_unitario"] == 1800
+        assert [p["codigo"] for p in r.json()["sin_precio"]] == ["XYZ"]
+
+    def test_fetch_all_reads_until_a_short_page(self):
+        from app.budget_prices import fetch_all
+        fake = FakeDB({"t": [{"id": f"{i:03d}"} for i in range(7)]}, max_rows=3)
+        rows = fetch_all(lambda: fake.table("t").select("*").order("id"), page_size=3)
+        assert [r["id"] for r in rows] == [f"{i:03d}" for i in range(7)]

@@ -15,6 +15,7 @@ from app.budget_prices import (
     INDIRECT_KEYS,
     budget_overrides,
     effective_indirects,
+    fetch_all,
     general_indirects,
     load_org_config,
     load_price_lookup,
@@ -55,13 +56,12 @@ _CONFIG_DEFAULTS: dict[str, float] = INDIRECT_DEFAULTS
 
 def _get_items(budget_id: str, org_id: str) -> list[dict]:
     db = get_data_db()
-    return (
-        db.table("budget_items")
+    return fetch_all(
+        lambda: db.table("budget_items")
         .select("*")
         .eq("budget_id", budget_id)
         .eq("org_id", org_id)
-        .execute()
-        .data or []
+        .order("id")
     )
 
 
@@ -266,11 +266,15 @@ async def cascade_recalculate(
     return _run_cascade(db, org_id, budget, items)
 
 
-def _run_cascade(db, org_id: str, budget: dict, items: list[dict], price_for=None) -> dict:
+def _run_cascade(
+    db, org_id: str, budget: dict, items: list[dict], price_for=None, strict: bool = False,
+) -> dict:
     """Recalculate a budget in place (see cascade_recalculate).
 
     ``price_for(resource)`` -> (precio, fecha, entry_id) or None: when given,
     each resource takes that price before its subtotal is calculated.
+    ``strict``: a write that fails (or updates nothing) raises instead of being
+    logged and skipped, so the caller can undo the whole update.
     """
     raw_config = load_org_config(db, org_id)
     config = _apply_config_defaults({**raw_config, **effective_indirects(raw_config, budget)})
@@ -368,9 +372,13 @@ def _run_cascade(db, org_id: str, budget: dict, items: list[dict], price_for=Non
             patch["desperdicio_origen"] = res.get("desperdicio_origen")
             patch["cantidad_redondeo"] = res.get("cantidad_redondeo") or 0
         try:
-            db.table("item_resources").update(patch).eq("id", res["id"]).execute()
+            written = db.table("item_resources").update(patch).eq("id", res["id"]).execute()
+            if strict and not written.data:
+                raise RuntimeError(f"No se actualizó el recurso {res['id']}")
             resources_updated += 1
         except Exception:
+            if strict:
+                raise
             logger.warning("Failed to update resource %s", res.get("id"), exc_info=True)
 
     # Steps 5-6: per item
@@ -405,7 +413,7 @@ def _run_cascade(db, org_id: str, budget: dict, items: list[dict], price_for=Non
         }
 
         try:
-            db.table("budget_items").update({**patch, **cascade_extras}).eq("id", item_id).execute()
+            written = db.table("budget_items").update({**patch, **cascade_extras}).eq("id", item_id).execute()
         except Exception:
             # New columns not yet in DB — fall back to legacy fields only
             logger.warning(
@@ -413,7 +421,9 @@ def _run_cascade(db, org_id: str, budget: dict, items: list[dict], price_for=Non
                 item_id,
                 exc_info=True,
             )
-            db.table("budget_items").update(patch).eq("id", item_id).execute()
+            written = db.table("budget_items").update(patch).eq("id", item_id).execute()
+        if strict and not written.data:
+            raise RuntimeError(f"No se actualizó el ítem {item_id}")
 
         items_updated += 1
 
@@ -461,19 +471,39 @@ async def update_prices(
         raise HTTPException(404, "Presupuesto sin items")
 
     anterior = budget.get("precios_al")
-    version_anterior = _save_version(
-        db, org_id, user["user_id"], budget, items,
-        f"Antes de actualizar precios (precios al {anterior or 'sin fecha'})",
-    )
+    # Photo of the current state: saved as a version only if the update works,
+    # and used to undo the update if any write fails.
+    before = _snapshot(db, org_id, budget, items)
+    notas_antes = f"Antes de actualizar precios (precios al {anterior or 'sin fecha'})"
 
     price_for, problemas = load_price_lookup(db, org_id, fecha)
-    result = _run_cascade(db, org_id, budget, items, price_for=price_for)
+    try:
+        result = _run_cascade(db, org_id, budget, items, price_for=price_for, strict=True)
+        written = db.table("budgets").update({
+            "precios_al": fecha.isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }).eq("id", bid).eq("org_id", org_id).execute()
+        if not written.data:
+            raise RuntimeError("No se guardó la fecha de precios")
+    except Exception as exc:
+        logger.exception("Price update failed for budget %s", bid)
+        try:
+            _restore(db, org_id, before)
+        except Exception:
+            logger.exception("Could not restore budget %s", bid)
+            # Keep the old numbers somewhere Carlos can get them back from
+            saved = _insert_version(db, org_id, user["user_id"], before, notas_antes + " — la actualización falló")
+            raise HTTPException(
+                500,
+                "La actualización de precios falló y el presupuesto quedó a medias. "
+                f"Los valores anteriores están guardados en la versión v{saved['version']}.",
+            ) from exc
+        raise HTTPException(
+            500,
+            "No se pudieron guardar los precios nuevos. El presupuesto quedó como estaba; probá de nuevo.",
+        ) from exc
 
-    db.table("budgets").update({
-        "precios_al": fecha.isoformat(),
-        "updated_at": datetime.now(timezone.utc).isoformat(),
-    }).eq("id", bid).eq("org_id", org_id).execute()
-
+    version_anterior = _insert_version(db, org_id, user["user_id"], before, notas_antes)
     budget = _get_budget(db, bid, org_id)
     version_nueva = _save_version(
         db, org_id, user["user_id"], budget, _get_items(bid, org_id),
@@ -511,20 +541,40 @@ async def get_analysis(
 # ── Versions ─────────────────────────────────────────────────────────────────
 
 
-def _save_version(db, org_id: str, user_id: str, budget: dict, items: list[dict], notes: str | None) -> dict:
-    """Save a snapshot of the budget, its items and their resources (with prices)."""
-    bid = budget["id"]
+def _snapshot(db, org_id: str, budget: dict, items: list[dict]) -> dict:
+    """The budget, its items and their resources (with prices), as they are now."""
     item_ids = [i["id"] for i in items]
     resources: list[dict] = []
     for start in range(0, len(item_ids), 200):
-        resources.extend(
-            db.table("item_resources")
+        chunk = item_ids[start:start + 200]
+        resources.extend(fetch_all(
+            lambda chunk=chunk: db.table("item_resources")
             .select("*")
             .eq("org_id", org_id)
-            .in_("item_id", item_ids[start:start + 200])
-            .execute()
-            .data or []
-        )
+            .in_("item_id", chunk)
+            .order("id")
+        ))
+    return {"budget": dict(budget), "items": list(items), "resources": resources}
+
+
+def _restore(db, org_id: str, snapshot: dict) -> None:
+    """Write back every resource, item and the budget date of a snapshot."""
+    for table, rows in (("item_resources", snapshot["resources"]), ("budget_items", snapshot["items"])):
+        for row in rows:
+            data = {k: v for k, v in row.items() if k != "id"}
+            written = db.table(table).update(data).eq("id", row["id"]).eq("org_id", org_id).execute()
+            if not written.data:
+                raise RuntimeError(f"No se pudo restaurar {table} {row['id']}")
+    budget = snapshot["budget"]
+    db.table("budgets").update({"precios_al": budget.get("precios_al")}).eq(
+        "id", budget["id"]
+    ).eq("org_id", org_id).execute()
+
+
+def _insert_version(db, org_id: str, user_id: str, snapshot: dict, notes: str | None) -> dict:
+    """Save a snapshot as the next version of its budget."""
+    budget = snapshot["budget"]
+    bid = budget["id"]
 
     # Auto-increment version number
     existing = (
@@ -544,9 +594,7 @@ def _save_version(db, org_id: str, user_id: str, budget: dict, items: list[dict]
         "precios_al": budget.get("precios_al"),
         "notas": notes,
         "data": json.dumps({
-            "budget": budget,
-            "items": items,
-            "resources": resources,
+            **snapshot,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "notes": notes,
         }),
@@ -557,6 +605,11 @@ def _save_version(db, org_id: str, user_id: str, budget: dict, items: list[dict]
         "version_id": result.data[0]["id"],
         "version": next_ver,
     }
+
+
+def _save_version(db, org_id: str, user_id: str, budget: dict, items: list[dict], notes: str | None) -> dict:
+    """Save a snapshot of the budget, its items and their resources (with prices)."""
+    return _insert_version(db, org_id, user_id, _snapshot(db, org_id, budget, items), notes)
 
 
 @router.post("/{budget_id}/versions")

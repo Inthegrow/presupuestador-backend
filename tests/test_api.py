@@ -44,6 +44,7 @@ class MockTable:
     def eq(self, *args, **kwargs): return self
     def order(self, *args, **kwargs): return self
     def limit(self, *args, **kwargs): return self
+    def range(self, *args, **kwargs): return self
     def single(self, **kwargs):
         self._single = True
         return self
