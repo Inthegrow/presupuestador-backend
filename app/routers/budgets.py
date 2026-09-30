@@ -14,6 +14,8 @@ from app.calculations import (
     recalc_all_items,
 )
 from app.db import get_data_db
+from app.formulas import FormulaError
+from app.recipes import ORIGEN_RECURSO, has_formula, requantify_row
 from app.schemas import (
     BudgetCopyRequest,
     BudgetCreate,
@@ -22,6 +24,7 @@ from app.schemas import (
     BudgetUpdate,
     BulkResourceCreate,
     CreateFullBudget,
+    ItemParamsUpdate,
     ResourceCreate,
     ResourceUpdate,
     SectionCreate,
@@ -34,6 +37,14 @@ logger = logging.getLogger(__name__)
 AUDITABLE_FIELDS = {"cantidad", "mat_unitario", "mo_unitario", "description", "unidad", "code", "notas_calculo"}
 
 router = APIRouter()
+
+# Fase 2 (recetas) columns. Copied only when the source row has them.
+_ITEM_RECIPE_FIELDS = ("template_id", "parametros")
+_RESOURCE_COPY_FIELDS = (
+    "trabajadores", "dias", "cargas_sociales_pct", "catalog_entry_id",
+    "formula", "rendimiento", "desperdicio_origen", "lo_compra_cliente",
+    "redondear", "unidad_compra", "cantidad_redondeo",
+)
 
 
 def _get_items(budget_id: str, org_id: str) -> list[dict]:
@@ -301,6 +312,13 @@ async def update_item(
 
     db.table("budget_items").update(update_data).eq("id", iid).execute()
 
+    # Recetas: resources with formula / rendimiento follow the new quantity
+    if "cantidad" in changes:
+        try:
+            _requantify_item(db, {**existing.data, **update_data}, org_id)
+        except FormulaError as exc:
+            logger.warning("Formula error recalculating item %s: %s", iid, exc)
+
     updated = (
         db.table("budget_items")
         .select("*")
@@ -452,7 +470,18 @@ def _calc_resource_subtotal(resource: dict) -> tuple[float, float]:
         cantidad_efectiva = cantidad * (1 + desperdicio_pct / 100)
 
     subtotal = round(cantidad_efectiva * precio_unitario, 2)
+    if resource.get("lo_compra_cliente"):
+        subtotal = 0.0
     return cantidad_efectiva, subtotal
+
+
+def _recipe_flags(data: dict) -> dict:
+    """Recipe flags sent by the client (only the ones that were set)."""
+    return {
+        k: data[k]
+        for k in ("lo_compra_cliente", "redondear", "unidad_compra")
+        if data.get(k) is not None
+    }
 
 
 def _recalc_item_from_resources(db, item_id: str, org_id: str) -> None:
@@ -464,7 +493,7 @@ def _recalc_item_from_resources(db, item_id: str, org_id: str) -> None:
         .eq("org_id", org_id)
         .execute()
     )
-    resources = resources_result.data or []
+    resources = [r for r in (resources_result.data or []) if not r.get("lo_compra_cliente")]
 
     mat_sum = sum(r.get("subtotal") or 0 for r in resources if r.get("tipo") == "material")
     mo_sum = sum(r.get("subtotal") or 0 for r in resources if r.get("tipo") == "mano_obra")
@@ -500,6 +529,78 @@ def _recalc_item_from_resources(db, item_id: str, org_id: str) -> None:
         "directo_total": round(directo_total, 2),
         "neto_total": round(neto_total, 2),
     }).eq("id", item_id).execute()
+
+
+def _requantify_item(db, item: dict, org_id: str) -> int:
+    """Re-evaluate formula / rendimiento resources of an item with its Q and parametros.
+
+    Returns how many resources changed. Raises FormulaError on a bad formula
+    (nothing is written in that case).
+    """
+    resources = (
+        db.table("item_resources")
+        .select("*")
+        .eq("item_id", item["id"])
+        .eq("org_id", org_id)
+        .execute()
+        .data or []
+    )
+    to_update = [r for r in resources if has_formula(r)]
+    if not to_update:
+        return 0
+
+    qty = float(item.get("cantidad") or 0)
+    params = item.get("parametros") or {}
+    recalculated = [requantify_row(dict(r), qty, params) for r in to_update]
+    for res in recalculated:
+        cantidad_efectiva, subtotal = _calc_resource_subtotal(res)
+        db.table("item_resources").update({
+            "cantidad": res.get("cantidad") or 0,
+            "dias": res.get("dias") or 0,
+            "cantidad_efectiva": cantidad_efectiva,
+            "subtotal": subtotal,
+        }).eq("id", res["id"]).execute()
+    _recalc_item_from_resources(db, item["id"], org_id)
+    return len(recalculated)
+
+
+@router.patch("/{budget_id}/items/{item_id}/parametros")
+async def update_item_params(
+    budget_id: UUID,
+    item_id: UUID,
+    payload: ItemParamsUpdate,
+    user: dict = Depends(get_current_user),
+):
+    """Change the recipe parameters of one item (ej. espesor = 0.15) and recalculate it."""
+    db = get_data_db()
+    org_id = user["org_id"]
+    iid = str(item_id)
+
+    existing = (
+        db.table("budget_items")
+        .select("*")
+        .eq("id", iid)
+        .eq("budget_id", str(budget_id))
+        .eq("org_id", org_id)
+        .single()
+        .execute()
+    )
+    if not existing.data:
+        raise HTTPException(404, "Item no encontrado")
+
+    item = existing.data
+    current = item.get("parametros") or {}
+    unknown = sorted(set(payload.parametros) - set(current))
+    if unknown:
+        raise HTTPException(422, [f"El ítem no tiene el parámetro '{unknown[0]}'"])
+    parametros = {**current, **payload.parametros}
+
+    try:
+        updated = _requantify_item(db, {**item, "parametros": parametros}, org_id)
+    except FormulaError as exc:
+        raise HTTPException(422, [str(exc)]) from exc
+    db.table("budget_items").update({"parametros": parametros}).eq("id", iid).execute()
+    return {"parametros": parametros, "resources_updated": updated}
 
 
 # ── Resource CRUD ───────────────────────────────────────────────────────────
@@ -549,6 +650,7 @@ async def create_resource(
         "dias": payload.dias or 0,
         "cargas_sociales_pct": payload.cargas_sociales_pct or 25,
         "catalog_entry_id": payload.catalog_entry_id,
+        **_recipe_flags(resource_data),
     }
 
     result = db.table("item_resources").insert(row).execute()
@@ -599,6 +701,14 @@ async def update_resource(
         raise HTTPException(404, "Recurso no encontrado")
 
     update_data = payload.model_dump(exclude_unset=True)
+    new_pct = update_data.get("desperdicio_pct")
+    if (
+        new_pct is not None
+        and "desperdicio_origen" in existing.data
+        and float(new_pct) != float(existing.data.get("desperdicio_pct") or 0)
+    ):
+        # Changed by hand: it no longer follows the budget / org value
+        update_data["desperdicio_origen"] = ORIGEN_RECURSO
     merged = {**existing.data, **update_data}
     cantidad_efectiva, subtotal = _calc_resource_subtotal(merged)
 
@@ -705,6 +815,7 @@ async def bulk_create_resources(
             "dias": resource.dias or 0,
             "cargas_sociales_pct": resource.cargas_sociales_pct or 25,
             "catalog_entry_id": resource.catalog_entry_id,
+            **_recipe_flags(resource_data),
         })
 
     if not rows:
@@ -1034,6 +1145,8 @@ async def copy_budget(
         "description": original.data.get("description"),
         "source_file": original.data.get("source_file"),
         "status": "draft",
+        # Fase 2 columns: copied only when present (DB may be pre-migration)
+        **{k: original.data[k] for k in ("desperdicio_pct",) if k in original.data},
     }).execute()
     new_budget_id = new_budget.data[0]["id"]
 
@@ -1063,6 +1176,7 @@ async def copy_budget(
             "neto_total": item.get("neto_total") or 0,
             "notas": item.get("notas"),
             "sort_order": item.get("sort_order") or 0,
+            **{k: item[k] for k in _ITEM_RECIPE_FIELDS if k in item},
         }
         result = db.table("budget_items").insert(new_item).execute()
         new_id = result.data[0]["id"]
@@ -1094,6 +1208,7 @@ async def copy_budget(
                 "cantidad_efectiva": res.get("cantidad_efectiva"),
                 "precio_unitario": res.get("precio_unitario"),
                 "subtotal": res.get("subtotal"),
+                **{k: res[k] for k in _RESOURCE_COPY_FIELDS if k in res},
             }
             db.table("item_resources").insert(new_res).execute()
             resources_copied += 1

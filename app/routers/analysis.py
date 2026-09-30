@@ -18,6 +18,14 @@ from app.calculations import (
     calc_resource_subtotal,
 )
 from app.db import get_data_db
+from app.formulas import FormulaError
+from app.recipes import (
+    ORIGEN_RECURSO,
+    apply_purchase_rounding,
+    has_formula,
+    requantify_row,
+    resolve_waste,
+)
 from app.schemas import AnalysisResponse, IndirectApplyRequest, IndirectConfigUpdate, VersionCreate
 
 logger = logging.getLogger(__name__)
@@ -220,9 +228,14 @@ async def cascade_recalculate(
     """Full cascade recalculation from scratch.
 
     For every leaf item:
-      1. Recalculate each resource subtotal (cantidad_efectiva, subtotal)
-      2. Derive item unit prices and directo from resources
-      3. Apply cascade indirects (indirecto → beneficio → taxes → IVA → total)
+      1. Re-evaluate formulas (Q = item quantity, item parametros) and MO rendimiento
+      2. Re-resolve inherited waste (presupuesto > plantilla > organización)
+      3. Recalculate each resource subtotal (cantidad_efectiva, subtotal)
+    Then, over the whole budget:
+      4. Round resources marked ``redondear`` up to whole purchase units
+    And for every leaf item:
+      5. Derive item unit prices and directo from resources
+      6. Apply cascade indirects (indirecto → beneficio → taxes → IVA → total)
     All DB records are updated in place.
     """
     db = get_data_db()
@@ -232,7 +245,7 @@ async def cascade_recalculate(
     # Verify budget ownership
     budget = (
         db.table("budgets")
-        .select("id")
+        .select("*")
         .eq("id", bid)
         .eq("org_id", org_id)
         .single()
@@ -253,45 +266,98 @@ async def cascade_recalculate(
         .limit(1)
         .execute()
     )
-    config = _apply_config_defaults(config_result.data[0] if config_result.data else {})
+    raw_config = config_result.data[0] if config_result.data else {}
+    config = _apply_config_defaults(raw_config)
 
-    resources_updated = 0
+    # Waste levels for inherited values
+    org_waste = raw_config.get("desperdicio_pct")
+    budget_waste = budget.data.get("desperdicio_pct")
+    template_ids = {i.get("template_id") for i in items if i.get("template_id")}
+    template_waste: dict[str, object] = {}
+    if template_ids:
+        templates = (
+            db.table("item_templates")
+            .select("*")
+            .eq("org_id", org_id)
+            .execute()
+            .data or []
+        )
+        template_waste = {
+            t["id"]: t.get("desperdicio_pct") for t in templates if t.get("id") in template_ids
+        }
+
     items_updated = 0
     items_skipped = 0
+    errores: list[str] = []
 
+    # Steps 1-3: per resource
+    leaf_items: list[tuple[dict, list[dict]]] = []
+    all_resources: list[dict] = []
     for item in items:
         if not _is_leaf_item(item):
             items_skipped += 1
             continue
 
-        item_id = item["id"]
-
-        # Step 1: Load and recalculate resources
-        resources_result = (
+        resources = (
             db.table("item_resources")
             .select("*")
-            .eq("item_id", item_id)
+            .eq("item_id", item["id"])
             .eq("org_id", org_id)
             .execute()
+            .data or []
         )
-        resources = resources_result.data or []
+        qty = float(item.get("cantidad") or 0)
+        params = item.get("parametros") or {}
 
         recalc_resources = []
         for res in resources:
-            updated_res = calc_resource_subtotal(dict(res))
-            recalc_resources.append(updated_res)
-            try:
-                db.table("item_resources").update({
-                    "cantidad_efectiva": updated_res["cantidad_efectiva"],
-                    "subtotal": updated_res["subtotal"],
-                }).eq("id", res["id"]).execute()
-                resources_updated += 1
-            except Exception:
-                logger.warning(
-                    "Failed to update resource %s", res["id"], exc_info=True
+            row = dict(res)
+            if has_formula(row):
+                try:
+                    requantify_row(row, qty, params)
+                except FormulaError as exc:
+                    errores.append(
+                        f"{item.get('code') or ''} {row.get('codigo') or row.get('descripcion') or ''}: {exc}".strip()
+                    )
+            origen = row.get("desperdicio_origen")
+            if origen and origen != ORIGEN_RECURSO and row.get("tipo") != "mano_obra":
+                pct, new_origen = resolve_waste(
+                    None, budget_waste, template_waste.get(item.get("template_id")), org_waste
                 )
+                row["desperdicio_pct"] = pct
+                row["desperdicio_origen"] = new_origen
+            calc_resource_subtotal(row)
+            recalc_resources.append(row)
+        leaf_items.append((item, recalc_resources))
+        all_resources.extend(recalc_resources)
 
-        # Step 2: Derive item unit prices and directo from resources
+    # Step 4: purchase rounding over the whole budget
+    redondeos = apply_purchase_rounding(all_resources)
+
+    resources_updated = 0
+    for res in all_resources:
+        patch = {
+            "cantidad": res.get("cantidad") or 0,
+            "dias": res.get("dias") or 0,
+            "desperdicio_pct": res.get("desperdicio_pct") or 0,
+            "cantidad_efectiva": res["cantidad_efectiva"],
+            "subtotal": res["subtotal"],
+        }
+        # Fase 2 columns: only written when the DB already has them
+        # ("formula" comes from the DB row; nothing above adds it)
+        if "formula" in res:
+            patch["desperdicio_origen"] = res.get("desperdicio_origen")
+            patch["cantidad_redondeo"] = res.get("cantidad_redondeo") or 0
+        try:
+            db.table("item_resources").update(patch).eq("id", res["id"]).execute()
+            resources_updated += 1
+        except Exception:
+            logger.warning("Failed to update resource %s", res.get("id"), exc_info=True)
+
+    # Steps 5-6: per item
+    for item, recalc_resources in leaf_items:
+        item_id = item["id"]
+
         item_copy = dict(item)
         if recalc_resources:
             calc_item_from_resources(item_copy, recalc_resources)
@@ -299,7 +365,6 @@ async def cascade_recalculate(
             # No resources — use existing unit prices to recalc totals
             item_copy = calc_item_totals(item_copy)
 
-        # Step 3: Apply cascade indirects
         calc_cascade_indirects(item_copy, config)
 
         # Patch fields to update in DB
@@ -342,6 +407,8 @@ async def cascade_recalculate(
         "items_updated": items_updated,
         "items_skipped": items_skipped,
         "resources_updated": resources_updated,
+        "redondeos": redondeos,
+        "errores": errores,
         "summary": summary,
     }
 

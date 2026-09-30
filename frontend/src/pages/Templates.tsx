@@ -1,30 +1,8 @@
 import { useEffect, useState } from 'react'
-import { Library, ChevronDown, ChevronRight, Trash2, Plus } from 'lucide-react'
+import { Library, ChevronDown, ChevronRight, Trash2, Plus, Pencil } from 'lucide-react'
 import { templateApi } from '../lib/api'
-
-// ─── Types ─────────────────────────────────────────────────────────────────────
-
-interface TemplateResource {
-  tipo: string
-  codigo?: string
-  descripcion?: string
-  unidad?: string
-  cantidad_por_unidad?: number
-  desperdicio_pct?: number
-  trabajadores_por_unidad?: number
-  dias_por_unidad?: number
-  cargas_sociales_pct?: number
-}
-
-interface Template {
-  id: string
-  org_id: string
-  nombre: string
-  descripcion?: string
-  unidad?: string
-  categoria?: string
-  recursos: TemplateResource[] | string
-}
+import TemplateEditor from '../components/ui/TemplateEditor'
+import type { Template, TemplateParam, TemplateResource } from '../types'
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -38,15 +16,29 @@ const TIPO_LABELS: Record<string, string> = {
 
 const TIPO_ORDER = ['material', 'mano_obra', 'equipo', 'mo_material', 'subcontrato']
 
-function parseRecursos(recursos: TemplateResource[] | string): TemplateResource[] {
-  if (typeof recursos === 'string') {
+function parseList<T>(value: T[] | string | undefined): T[] {
+  if (typeof value === 'string') {
     try {
-      return JSON.parse(recursos)
+      const parsed = JSON.parse(value)
+      return Array.isArray(parsed) ? parsed : []
     } catch {
       return []
     }
   }
-  return recursos || []
+  return value || []
+}
+
+/** How the quantity of a resource is calculated, in words. */
+function quantityText(r: TemplateResource): string {
+  if (r.tipo === 'mano_obra') {
+    if (r.rendimiento !== undefined && r.rendimiento !== '') {
+      return `${r.trabajadores ?? 1} trab · días = Q / ${r.rendimiento}`
+    }
+    return `${r.trabajadores_por_unidad ?? '—'} trab/u × ${r.dias_por_unidad ?? '—'} días`
+  }
+  if (r.formula) return r.formula
+  if (r.cantidad_por_unidad !== undefined) return `Q * ${r.cantidad_por_unidad}`
+  return '—'
 }
 
 function groupByTipo(recursos: TemplateResource[]): Record<string, TemplateResource[]> {
@@ -64,15 +56,18 @@ function groupByTipo(recursos: TemplateResource[]): Record<string, TemplateResou
 function TemplateCard({
   template,
   onDelete,
+  onEdit,
 }: {
   template: Template
   onDelete: (id: string) => void
+  onEdit: (t: Template) => void
 }) {
   const [open, setOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
 
-  const recursos = parseRecursos(template.recursos)
+  const recursos = parseList(template.recursos)
+  const parametros = parseList<TemplateParam>(template.parametros)
   const groups = groupByTipo(recursos)
 
   async function handleDelete() {
@@ -116,10 +111,25 @@ function TemplateCard({
           )}
           <p className="text-xs text-gray-400 mt-1">
             {recursos.length} {recursos.length === 1 ? 'recurso' : 'recursos'}
+            {parametros.length > 0 && (
+              <span className="ml-2 font-mono">
+                {parametros.map((p) => `${p.clave} = ${p.valor}${p.unidad ? ` ${p.unidad}` : ''}`).join(' · ')}
+              </span>
+            )}
+            {template.desperdicio_pct !== null && template.desperdicio_pct !== undefined && (
+              <span className="ml-2">desperdicio {template.desperdicio_pct}%</span>
+            )}
           </p>
         </div>
 
         <div className="flex items-center gap-2 flex-shrink-0">
+          <button
+            onClick={(e) => { e.stopPropagation(); onEdit(template) }}
+            className="text-xs px-2 py-1 rounded text-gray-400 hover:text-[#2D8D68] hover:bg-[#E8F5EE] flex items-center gap-1"
+            title="Editar fórmulas y parámetros"
+          >
+            <Pencil size={13} />
+          </button>
           {/* Delete button */}
           <button
             onClick={(e) => { e.stopPropagation(); handleDelete() }}
@@ -165,19 +175,11 @@ function TemplateCard({
                     <tr>
                       <th className="px-3 py-1.5 text-left text-gray-500 font-medium">Codigo</th>
                       <th className="px-3 py-1.5 text-left text-gray-500 font-medium">Descripcion</th>
-                      {tipo === 'mano_obra' ? (
-                        <>
-                          <th className="px-3 py-1.5 text-right text-gray-500 font-medium">Trabaj.</th>
-                          <th className="px-3 py-1.5 text-right text-gray-500 font-medium">Dias</th>
-                          <th className="px-3 py-1.5 text-right text-gray-500 font-medium">Cargas %</th>
-                        </>
-                      ) : (
-                        <>
-                          <th className="px-3 py-1.5 text-right text-gray-500 font-medium">Cant./Unid.</th>
-                          <th className="px-3 py-1.5 text-left text-gray-500 font-medium">Unidad</th>
-                          <th className="px-3 py-1.5 text-right text-gray-500 font-medium">Desperd. %</th>
-                        </>
-                      )}
+                      <th className="px-3 py-1.5 text-left text-gray-500 font-medium">Cantidad</th>
+                      <th className="px-3 py-1.5 text-left text-gray-500 font-medium">Unidad</th>
+                      <th className="px-3 py-1.5 text-right text-gray-500 font-medium">
+                        {tipo === 'mano_obra' ? 'Cargas %' : 'Desperd. %'}
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
@@ -185,19 +187,19 @@ function TemplateCard({
                       <tr key={i} className="border-b last:border-0 hover:bg-gray-50">
                         <td className="px-3 py-1.5 font-mono text-gray-400">{r.codigo || '—'}</td>
                         <td className="px-3 py-1.5 text-gray-800">{r.descripcion || '—'}</td>
-                        {tipo === 'mano_obra' ? (
-                          <>
-                            <td className="px-3 py-1.5 text-right text-gray-700">{r.trabajadores_por_unidad ?? '—'}</td>
-                            <td className="px-3 py-1.5 text-right text-gray-700">{r.dias_por_unidad ?? '—'}</td>
-                            <td className="px-3 py-1.5 text-right text-gray-700">{r.cargas_sociales_pct ?? 25}%</td>
-                          </>
-                        ) : (
-                          <>
-                            <td className="px-3 py-1.5 text-right text-gray-700">{r.cantidad_por_unidad ?? '—'}</td>
-                            <td className="px-3 py-1.5 text-gray-500">{r.unidad || '—'}</td>
-                            <td className="px-3 py-1.5 text-right text-gray-700">{r.desperdicio_pct ?? 0}%</td>
-                          </>
-                        )}
+                        <td className="px-3 py-1.5 font-mono text-gray-700">
+                          {quantityText(r)}
+                          {r.lo_compra_cliente && <span className="ml-1 font-sans bg-amber-100 text-amber-700 rounded px-1.5">cliente</span>}
+                          {r.redondear && <span className="ml-1 font-sans bg-blue-100 text-blue-700 rounded px-1.5">redondea</span>}
+                        </td>
+                        <td className="px-3 py-1.5 text-gray-500">{tipo === 'mano_obra' ? 'jornal' : r.unidad || '—'}</td>
+                        <td className="px-3 py-1.5 text-right text-gray-700">
+                          {tipo === 'mano_obra'
+                            ? `${r.cargas_sociales_pct ?? 25}%`
+                            : r.desperdicio_pct === undefined || r.desperdicio_pct === null || r.desperdicio_pct === ''
+                              ? <span className="text-gray-400">hereda</span>
+                              : `${r.desperdicio_pct}%`}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -219,6 +221,8 @@ export default function Templates() {
   const [activeCategory, setActiveCategory] = useState<string>('Todos')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  // undefined = closed, null = new template
+  const [editing, setEditing] = useState<Template | null | undefined>(undefined)
 
   useEffect(() => {
     templateApi.categories()
@@ -238,6 +242,13 @@ export default function Templates() {
 
   function handleDelete(id: string) {
     setTemplates((prev) => prev.filter((t) => t.id !== id))
+  }
+
+  function handleSaved(saved: Template) {
+    setTemplates((prev) =>
+      prev.some((t) => t.id === saved.id) ? prev.map((t) => (t.id === saved.id ? saved : t)) : [...prev, saved],
+    )
+    setEditing(undefined)
   }
 
   return (
@@ -304,18 +315,20 @@ export default function Templates() {
         )}
 
         {templates.map((t) => (
-          <TemplateCard key={t.id} template={t} onDelete={handleDelete} />
+          <TemplateCard key={t.id} template={t} onDelete={handleDelete} onEdit={setEditing} />
         ))}
 
-        {/* Nuevo Template button — placeholder */}
         <button
-          disabled
-          className="w-full border-2 border-dashed border-gray-200 text-gray-400 py-3 rounded-xl font-semibold text-sm transition-colors flex items-center justify-center gap-2 cursor-not-allowed"
-          title="Proximamente"
+          onClick={() => setEditing(null)}
+          className="w-full border-2 border-dashed border-gray-200 text-gray-500 hover:border-[#2D8D68] hover:text-[#2D8D68] py-3 rounded-xl font-semibold text-sm transition-colors flex items-center justify-center gap-2"
         >
-          <Plus size={16} /> Nuevo Template (proximamente)
+          <Plus size={16} /> Nueva plantilla
         </button>
       </div>
+
+      {editing !== undefined && (
+        <TemplateEditor template={editing} onSaved={handleSaved} onClose={() => setEditing(undefined)} />
+      )}
     </div>
   )
 }

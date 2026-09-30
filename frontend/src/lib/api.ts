@@ -11,6 +11,10 @@ import type {
   TreeNode,
   AIAnalysisResult,
   AIItemToInsert,
+  CascadeResult,
+  TemplateParam,
+  TemplatePreviewResponse,
+  TemplateResource,
 } from '../types'
 
 const BASE_URL = (import.meta.env.VITE_API_URL as string) || '/api'
@@ -109,8 +113,16 @@ export const budgetApi = {
   deleteResource: (budgetId: string, itemId: string, resourceId: string) =>
     del<void>(`/budgets/${budgetId}/items/${itemId}/resources/${resourceId}`),
 
+  // Full recalculation: formulas, inherited waste, purchase rounding, indirects
   cascadeRecalculate: (budgetId: string) =>
-    post<Budget>(`/budgets/${budgetId}/recalculate`),
+    post<CascadeResult>(`/budgets/${budgetId}/cascade-recalculate`),
+
+  // Recipe parameters of one item (ej. espesor)
+  updateItemParams: (budgetId: string, itemId: string, parametros: Record<string, number>) =>
+    patch<{ parametros: Record<string, number>; resources_updated: number }>(
+      `/budgets/${budgetId}/items/${itemId}/parametros`,
+      { parametros },
+    ),
 
   // Audits
   getItemAudits: (budgetId: string, itemId: string) =>
@@ -169,10 +181,18 @@ export const templateApi = {
   create: (data: any) => post<any>('/templates', data),
   update: (id: string, data: any) => patch<any>(`/templates/${id}`, data),
   remove: (id: string) => del<{ ok: boolean }>(`/templates/${id}`),
-  apply: (templateId: string, budgetId: string, itemId: string) =>
+  apply: (templateId: string, budgetId: string, itemId: string, parametros?: Record<string, number>) =>
     post<{ resources_created: number; item_updated: boolean }>(
-      `/templates/${templateId}/apply/${budgetId}/items/${itemId}`
+      `/templates/${templateId}/apply/${budgetId}/items/${itemId}`,
+      parametros ? { parametros } : undefined,
     ),
+  preview: (data: {
+    cantidad: number
+    recursos: TemplateResource[]
+    parametros: TemplateParam[]
+    valores?: Record<string, number>
+    desperdicio_pct?: number | null
+  }) => post<TemplatePreviewResponse>('/templates/preview', data),
 }
 
 // ─── Catalog API ───────────────────────────────────────────────────────────────

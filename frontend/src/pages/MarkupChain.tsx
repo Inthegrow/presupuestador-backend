@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, useSearchParams } from 'react-router-dom'
 import { Settings } from 'lucide-react'
 import { budgetApi } from '../lib/api'
-import type { IndirectConfig } from '../types'
+import type { CascadeResult, IndirectConfig } from '../types'
 
 const DEFAULT_CONFIG: IndirectConfig = {
   id: '',
@@ -60,6 +60,13 @@ function PctInput({
   )
 }
 
+function wasteNum(text: string): number | null {
+  const s = text.trim().replace(',', '.')
+  if (s === '') return null
+  const n = Number(s)
+  return Number.isFinite(n) ? n : null
+}
+
 function SectionDivider({ label }: { label: string }) {
   return (
     <div className="flex items-center gap-2 mt-5 mb-3">
@@ -71,14 +78,27 @@ function SectionDivider({ label }: { label: string }) {
 }
 
 export default function MarkupChain() {
-  const { id } = useParams<{ id: string }>()
+  // The route is /app/settings/markups?budget=<id> (older links used :id)
+  const params = useParams<{ id: string }>()
+  const [searchParams] = useSearchParams()
+  const id = params.id ?? searchParams.get('budget') ?? undefined
   const [cfg, setCfg] = useState<IndirectConfig>(DEFAULT_CONFIG)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(!!id)
+  // Waste: general (org) and this budget. '' = not set / inherit
+  const [orgWaste, setOrgWaste] = useState('')
+  const [budgetWaste, setBudgetWaste] = useState('')
+  const [recalculating, setRecalculating] = useState(false)
+  const [recalc, setRecalc] = useState<CascadeResult | null>(null)
+  const [recalcError, setRecalcError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!id) return
+    budgetApi
+      .get(id)
+      .then((b) => setBudgetWaste(b.desperdicio_pct === null || b.desperdicio_pct === undefined ? '' : String(b.desperdicio_pct)))
+      .catch(() => {/* ignore */})
     budgetApi
       .getIndirects(id)
       .then((data) => {
@@ -92,6 +112,7 @@ export default function MarkupChain() {
           imp_cheque_pct: data.imp_cheque_pct ?? DEFAULT_CONFIG.imp_cheque_pct,
           iva_pct: data.iva_pct ?? DEFAULT_CONFIG.iva_pct,
         })
+        setOrgWaste(data.desperdicio_pct === null || data.desperdicio_pct === undefined ? '' : String(data.desperdicio_pct))
       })
       .catch(() => {/* use defaults */})
       .finally(() => setLoading(false))
@@ -115,7 +136,10 @@ export default function MarkupChain() {
           ingresos_brutos_pct: cfg.ingresos_brutos_pct,
           imp_cheque_pct: cfg.imp_cheque_pct,
           iva_pct: cfg.iva_pct,
+          desperdicio_pct: wasteNum(orgWaste) ?? 0,
         })
+        // null = this budget inherits the general / template value
+        await budgetApi.update(id, { desperdicio_pct: wasteNum(budgetWaste) })
       }
       setSaved(true)
       setTimeout(() => setSaved(false), 3000)
@@ -123,6 +147,18 @@ export default function MarkupChain() {
       // ignore
     }
     setSaving(false)
+  }
+
+  async function handleRecalc() {
+    if (!id) return
+    setRecalculating(true)
+    setRecalcError(null)
+    try {
+      setRecalc(await budgetApi.cascadeRecalculate(id))
+    } catch (err) {
+      setRecalcError(err instanceof Error ? err.message : 'Error al recalcular')
+    }
+    setRecalculating(false)
   }
 
   const subtotalIndirectosPct = INDIRECTO_FIELDS.reduce(
@@ -225,6 +261,44 @@ export default function MarkupChain() {
               />
             </div>
 
+            {/* ── DESPERDICIO ── */}
+            <SectionDivider label="Desperdicio" />
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-sm text-gray-700">General</span>
+                  <span className="ml-2 text-[11px] text-gray-400">(toda la empresa)</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <input
+                    value={orgWaste}
+                    placeholder="0"
+                    onChange={(e) => setOrgWaste(e.target.value)}
+                    className="w-16 text-right px-2 py-1 text-sm font-semibold border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-[#2D8D68] tabular-nums"
+                  />
+                  <span className="text-sm text-gray-500 font-medium">%</span>
+                </div>
+              </div>
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-sm text-gray-700">Este presupuesto</span>
+                  <span className="ml-2 text-[11px] text-gray-400">(vacío = hereda plantilla / general)</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <input
+                    value={budgetWaste}
+                    placeholder={orgWaste || '0'}
+                    onChange={(e) => setBudgetWaste(e.target.value)}
+                    className="w-16 text-right px-2 py-1 text-sm font-semibold border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-[#2D8D68] tabular-nums"
+                  />
+                  <span className="text-sm text-gray-500 font-medium">%</span>
+                </div>
+              </div>
+              <p className="text-[11px] text-gray-400">
+                Orden: recurso → presupuesto → plantilla → general. Se aplica al recalcular la obra.
+              </p>
+            </div>
+
             {/* Save */}
             <div className="mt-6 flex justify-end">
               <button
@@ -239,6 +313,56 @@ export default function MarkupChain() {
               </button>
             </div>
           </div>
+        </div>
+
+        {/* Recalculate the whole budget */}
+        <div className="mt-4 bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-semibold text-gray-800">Recalcular obra</div>
+              <div className="text-[11px] text-gray-400">Fórmulas, desperdicio heredado, redondeo a unidad de compra e indirectos.</div>
+            </div>
+            <button
+              onClick={handleRecalc}
+              disabled={recalculating}
+              className="border border-[#2D8D68] text-[#2D8D68] hover:bg-[#E8F5EE] disabled:opacity-60 font-semibold px-4 py-2 rounded-xl text-sm"
+            >
+              {recalculating ? 'Recalculando...' : 'Recalcular'}
+            </button>
+          </div>
+          {recalcError && <p className="text-xs text-red-600 mt-2">{recalcError}</p>}
+          {recalc && (
+            <div className="mt-3 text-xs text-gray-600 space-y-2">
+              <p>{recalc.items_updated} ítems y {recalc.resources_updated} recursos recalculados.</p>
+              {recalc.errores.length > 0 && (
+                <ul className="text-red-700 list-disc ml-4">
+                  {recalc.errores.map((e, i) => <li key={i}>{e}</li>)}
+                </ul>
+              )}
+              {recalc.redondeos.length > 0 && (
+                <table className="w-full text-[11px]">
+                  <thead className="text-gray-500">
+                    <tr>
+                      <th className="text-left font-medium py-1">Material</th>
+                      <th className="text-right font-medium py-1">Necesario</th>
+                      <th className="text-right font-medium py-1">A comprar</th>
+                      <th className="text-right font-medium py-1">Envases</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {recalc.redondeos.map((r, i) => (
+                      <tr key={i} className="border-t border-gray-100">
+                        <td className="py-1">{r.codigo || r.descripcion}</td>
+                        <td className="py-1 text-right tabular-nums">{r.cantidad_necesaria} {r.unidad}</td>
+                        <td className="py-1 text-right tabular-nums">{r.cantidad_compra} {r.unidad}</td>
+                        <td className="py-1 text-right tabular-nums">{r.envases} × {r.unidad_compra}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Visual cascade summary */}
