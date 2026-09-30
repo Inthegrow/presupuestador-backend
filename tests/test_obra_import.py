@@ -189,6 +189,17 @@ def test_sql_script(plan: dict) -> None:
     assert "ya existe" in sql
     assert "ARRAY['4.1.7', '5.1.4', '5.2.3', '7.1.1', '8.3']::text[]" in sql
     assert "upper(e.codigo) = upper(r.codigo)" in sql
+    # Fase 4: indirectos de la obra, fecha de precios y fecha del precio de cada recurso
+    assert "Falta correr migrations/008" in sql
+    assert "status, indirectos, precios_al)" in sql
+    assert "'estructura_pct', coalesce((x.c->>'estructura_pct')::numeric, 15)" in sql
+    assert "cantidad_redondeo, precio_fecha)" in sql
+    # Auditoría: gana el precio más reciente aunque cambien las mayúsculas
+    assert "ORDER BY e.fecha_precio DESC NULLS LAST, pc.created_at DESC, (e.codigo = r.codigo) DESC" in sql
+    # Auditoría: sin precio se frena, salvo que se fuerce
+    assert "v_permitir_sin_precio boolean := false" in sql
+    assert "RAISE EXCEPTION 'Recursos sin precio en el catalogo" in sql
+    assert "Recalcular obra" in sql
     assert sql.count("$obra$") == 2
     pglast = pytest.importorskip("pglast")
     assert len(pglast.parse_sql(sql)) == 2

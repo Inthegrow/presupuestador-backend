@@ -11,16 +11,20 @@ Uso:
   python3 import_obra.py "EDIFICIO GINKGO_Computo y Presupuesto_V2.xlsx" \
       --maestro "MODELO DE PRESUPUESTACION RESUMEN.xlsx" --sql output/carga_obra_ginkgo.sql
 
-Antes de correr el SQL tienen que estar cargados los catálogos (Fase 1, import_maestro.py)
-y las plantillas del Maestro (Fase 3, import_recetas.py). Si falta alguna plantilla,
+Antes de correr el SQL tienen que estar cargados los catálogos (Fase 1, import_maestro.py),
+las plantillas del Maestro (Fase 3, import_recetas.py) y migrations/008 (Fase 4).
+El presupuesto arranca con los indirectos generales y precios al día de hoy, como uno nuevo en la app. Si falta alguna plantilla,
 el SQL se frena sin escribir nada.
 
 - Ítems con receta: los recursos salen de la plantilla con la cantidad del ítem;
   el precio se busca en el catálogo al correr el SQL.
 - Ítems sin receta: se cargan con el precio unitario del Excel de la obra.
 - El SQL es una sola transacción y no se puede correr dos veces: si el presupuesto
-  ya existe, se frena. Después de cargarlo, apretar "Recalcular" en el presupuesto
-  para aplicar indirectos y beneficio.
+  ya existe, se frena. También se frena si hay recursos sin precio en el catálogo
+  (se puede forzar con v_permitir_sin_precio := true al principio del SQL).
+- Después de cargarlo: Cadena de Markups (desde el presupuesto) > "Recalcular obra". Ese paso aplica
+  el redondeo de compra, los indirectos y el beneficio (el botón "Recalcular" de totales no).
+  Comparar contra el Excel recién después de ese paso.
 """
 
 from __future__ import annotations
@@ -32,6 +36,7 @@ from pathlib import Path
 
 import openpyxl
 
+from app.budget_prices import INDIRECT_DEFAULTS
 from app.obra_import import build_plan, item_notes, parse_obra, report_markdown
 
 
@@ -100,19 +105,28 @@ def sql_script(plan: dict, budget_name: str, source_file: str = "") -> str:
     n_sin = len(plan["sin_receta"])
     items_values = ",\n".join(item_rows)
     res_values = ",\n".join(res_rows) or "    (NULL::int, NULL, NULL, NULL, NULL, NULL, 0, 0, 0, 25, NULL, NULL, NULL, false, false, 1)"
+    indirect_pairs = ", ".join(
+        f"'{k}', coalesce((x.c->>'{k}')::numeric, {v})" for k, v in INDIRECT_DEFAULTS.items()
+    )
     codes_array = "ARRAY[" + ", ".join(_lit(c) for c in codes) + "]::text[]" if codes else "ARRAY[]::text[]"
 
     return f"""-- Fase 5: carga de {budget_name} ({n_items} items: {n_items - n_sin} con receta, {n_sin} sin receta).
 -- Generado por import_obra.py a partir de {source_file or 'el Excel de la obra'}.
 -- Pegar todo en el SQL Editor de Supabase (proyecto DATA) y apretar Run.
--- Antes: catalogos (Fase 1) y plantillas del Maestro (Fase 3) cargados.
--- Una sola transaccion: si algo falla, no se escribe nada. Si el presupuesto ya existe, se frena.
+-- Antes: catalogos (Fase 1), plantillas del Maestro (Fase 3) y migrations/008 (Fase 4).
+-- Una sola transaccion: si algo falla, no se escribe nada. Se frena si el presupuesto ya existe
+-- o si hay recursos sin precio en el catalogo.
+-- DESPUES DE CARGAR: abrir el presupuesto > Cadena de Markups > "Recalcular obra".
+-- Recien ahi se aplican el redondeo de compra, los indirectos y el beneficio. Comparar contra
+-- el Excel despues de ese paso, no antes.
 
 DO $obra$
 DECLARE
   v_org     uuid := NULL;  -- si hay mas de una organizacion, pegar aca el org_id de TERRAC entre comillas
   v_budget  uuid;
   v_waste   numeric;
+  v_ind     jsonb;
+  v_permitir_sin_precio boolean := false;  -- true = cargar igual los recursos sin precio (quedan en $0)
   n_orgs    int;
   faltan    text;
 BEGIN
@@ -137,13 +151,21 @@ BEGIN
   IF EXISTS (SELECT 1 FROM budgets WHERE org_id = v_org AND name = {_lit(budget_name)}) THEN
     RAISE EXCEPTION 'El presupuesto "%" ya existe: borrarlo desde la app antes de volver a cargarlo', {_lit(budget_name)};
   END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                 WHERE table_name = 'budgets' AND column_name = 'precios_al') THEN
+    RAISE EXCEPTION 'Falta correr migrations/008_budget_prices_date.sql (Fase 4)';
+  END IF;
   SELECT desperdicio_pct INTO v_waste FROM indirect_config WHERE org_id = v_org;
+  -- Indirectos de la obra: copia de los generales, igual que un presupuesto nuevo en la app (Fase 4)
+  SELECT jsonb_build_object({indirect_pairs}) INTO v_ind
+  FROM (SELECT (SELECT to_jsonb(ic) FROM indirect_config ic WHERE ic.org_id = v_org LIMIT 1) AS c) x;
 
   -- 1. Presupuesto
-  INSERT INTO budgets (org_id, name, description, source_file, status)
+  INSERT INTO budgets (org_id, name, description, source_file, status, indirectos, precios_al)
   VALUES (v_org, {_lit(budget_name)},
           'Fase 5: cantidades del Excel de la obra, precios con las recetas del Maestro',
-          {_lit(source_file)}, 'draft')
+          {_lit(source_file)}, 'draft', v_ind,
+          (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date)
   RETURNING id INTO v_budget;
 
   -- 2. Rubros, pisos e items (sort_order = orden del Excel)
@@ -177,7 +199,7 @@ BEGIN
   WHERE c.budget_id = v_budget AND c.sort_order = o.orden;
 
   -- 3. Recursos de los items con receta. Precio: catalogo del Maestro por codigo
-  --    (sin distinguir mayusculas; el de fecha mas reciente). Desperdicio: recurso > plantilla > organizacion.
+  --    (sin distinguir mayusculas: gana la fecha mas reciente). Desperdicio: recurso > plantilla > organizacion.
   CREATE TEMP TABLE obra_recursos ON COMMIT DROP AS
   SELECT * FROM (VALUES
 {res_values}
@@ -185,25 +207,36 @@ BEGIN
          cargas, desperdicio, formula, rendimiento, lo_compra_cliente, redondear, unidad_compra)
   WHERE orden IS NOT NULL;
 
+  -- Control: recursos con un codigo que no esta en el catalogo o no tiene precio
+  SELECT string_agg(DISTINCT r.codigo, ', ' ORDER BY r.codigo) INTO faltan
+  FROM obra_recursos r
+  WHERE NOT r.lo_compra_cliente AND NOT EXISTS (
+    SELECT 1 FROM catalog_entries e
+    WHERE e.org_id = v_org AND upper(e.codigo) = upper(r.codigo) AND coalesce(e.precio_sin_iva, 0) > 0);
+  IF faltan IS NOT NULL AND NOT v_permitir_sin_precio THEN
+    RAISE EXCEPTION 'Recursos sin precio en el catalogo: %. Cargar esos precios (o poner v_permitir_sin_precio := true para cargarlos en $0)', faltan;
+  END IF;
+
   INSERT INTO item_resources (item_id, org_id, tipo, codigo, descripcion, unidad, cantidad,
                               trabajadores, dias, cargas_sociales_pct, desperdicio_pct,
                               desperdicio_origen, cantidad_efectiva, precio_unitario, subtotal,
                               catalog_entry_id, formula, rendimiento, lo_compra_cliente,
-                              redondear, unidad_compra, cantidad_redondeo)
+                              redondear, unidad_compra, cantidad_redondeo, precio_fecha)
   SELECT bi.id, v_org, r.tipo, r.codigo, r.descripcion, r.unidad, r.cantidad,
          r.trabajadores, r.dias, r.cargas, w.pct, w.origen,
          q.efectiva, coalesce(ce.precio_sin_iva, 0),
          CASE WHEN r.lo_compra_cliente THEN 0
               ELSE round(q.efectiva * coalesce(ce.precio_sin_iva, 0), 2) END,
-         ce.id, r.formula, r.rendimiento, r.lo_compra_cliente, r.redondear, r.unidad_compra, 0
+         ce.id, r.formula, r.rendimiento, r.lo_compra_cliente, r.redondear, r.unidad_compra, 0,
+         ce.fecha_precio
   FROM obra_recursos r
   JOIN budget_items bi ON bi.budget_id = v_budget AND bi.sort_order = r.orden
   JOIN item_templates t ON t.org_id = v_org AND t.codigo = r.plantilla
   LEFT JOIN LATERAL (
-    SELECT e.id, e.precio_sin_iva FROM catalog_entries e
+    SELECT e.id, e.precio_sin_iva, e.fecha_precio FROM catalog_entries e
     JOIN price_catalogs pc ON pc.id = e.catalog_id
     WHERE e.org_id = v_org AND upper(e.codigo) = upper(r.codigo)
-    ORDER BY (e.codigo = r.codigo) DESC, e.fecha_precio DESC NULLS LAST, pc.created_at DESC, e.id
+    ORDER BY e.fecha_precio DESC NULLS LAST, pc.created_at DESC, (e.codigo = r.codigo) DESC, e.id
     LIMIT 1
   ) ce ON true
   CROSS JOIN LATERAL (
@@ -238,7 +271,7 @@ BEGIN
   ) s
   WHERE bi.id = s.item_id;
 
-  RAISE NOTICE 'Presupuesto cargado: %', v_budget;
+  RAISE NOTICE 'Presupuesto cargado: %. Falta: Cadena de Markups > Recalcular obra', v_budget;
 END
 $obra$;
 
