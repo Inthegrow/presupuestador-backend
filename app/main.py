@@ -2,7 +2,17 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
-from app.routers import ai, analysis, architect, budgets, catalogs, excel, health, templates
+from app.routers import (
+    ai,
+    analysis,
+    architect,
+    budgets,
+    catalogs,
+    excel,
+    health,
+    standard_trees,
+    templates,
+)
 
 
 def create_app() -> FastAPI:
@@ -25,6 +35,7 @@ def create_app() -> FastAPI:
     app.include_router(analysis.router, prefix="/budgets", tags=["Analisis"])
     app.include_router(catalogs.router, prefix="/catalogs", tags=["Catalogos"])
     app.include_router(templates.router, prefix="/templates", tags=["Templates"])
+    app.include_router(standard_trees.router, prefix="/standard-trees", tags=["Arbol estandar"])
     app.include_router(architect.router, prefix="/architect", tags=["ArquitectoAI"])
 
     return app
