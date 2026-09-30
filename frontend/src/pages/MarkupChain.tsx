@@ -67,6 +67,13 @@ function wasteNum(text: string): number | null {
   return Number.isFinite(n) ? n : null
 }
 
+/** Shows the general value when this budget uses a different one. */
+function GeneralHint({ general, field, value }: { general: Partial<IndirectConfig> | null; field: keyof IndirectConfig; value: number }) {
+  const g = general?.[field]
+  if (typeof g !== 'number' || g === value) return null
+  return <span className="ml-2 text-[11px] text-amber-600">(general: {g}%)</span>
+}
+
 function SectionDivider({ label }: { label: string }) {
   return (
     <div className="flex items-center gap-2 mt-5 mb-3">
@@ -85,22 +92,26 @@ export default function MarkupChain() {
   const [cfg, setCfg] = useState<IndirectConfig>(DEFAULT_CONFIG)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
-  const [loading, setLoading] = useState(!!id)
+  const [loading, setLoading] = useState(true)
   // Waste: general (org) and this budget. '' = not set / inherit
   const [orgWaste, setOrgWaste] = useState('')
   const [budgetWaste, setBudgetWaste] = useState('')
+  // Also save these % as the general values (the ones new budgets start with)
+  const [alsoGeneral, setAlsoGeneral] = useState(false)
+  const [general, setGeneral] = useState<Partial<IndirectConfig> | null>(null)
   const [recalculating, setRecalculating] = useState(false)
   const [recalc, setRecalc] = useState<CascadeResult | null>(null)
   const [recalcError, setRecalcError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!id) return
-    budgetApi
-      .get(id)
-      .then((b) => setBudgetWaste(b.desperdicio_pct === null || b.desperdicio_pct === undefined ? '' : String(b.desperdicio_pct)))
-      .catch(() => {/* ignore */})
-    budgetApi
-      .getIndirects(id)
+    if (id) {
+      budgetApi
+        .get(id)
+        .then((b) => setBudgetWaste(b.desperdicio_pct === null || b.desperdicio_pct === undefined ? '' : String(b.desperdicio_pct)))
+        .catch(() => {/* ignore */})
+    }
+    // With a budget: its own % (they start as the general ones). Without: the general ones.
+    ;(id ? budgetApi.getIndirects(id) : budgetApi.getGeneralIndirects())
       .then((data) => {
         setCfg({
           ...DEFAULT_CONFIG,
@@ -112,6 +123,7 @@ export default function MarkupChain() {
           imp_cheque_pct: data.imp_cheque_pct ?? DEFAULT_CONFIG.imp_cheque_pct,
           iva_pct: data.iva_pct ?? DEFAULT_CONFIG.iva_pct,
         })
+        setGeneral(data.general ?? null)
         setOrgWaste(data.desperdicio_pct === null || data.desperdicio_pct === undefined ? '' : String(data.desperdicio_pct))
       })
       .catch(() => {/* use defaults */})
@@ -125,21 +137,27 @@ export default function MarkupChain() {
   async function handleSave() {
     setSaving(true)
     try {
+      const pct = {
+        imprevistos_pct: cfg.imprevistos_pct,
+        estructura_pct: cfg.estructura_pct,
+        jefatura_pct: cfg.jefatura_pct,
+        logistica_pct: cfg.logistica_pct,
+        herramientas_pct: cfg.herramientas_pct,
+        beneficio_pct: cfg.beneficio_pct,
+        ingresos_brutos_pct: cfg.ingresos_brutos_pct,
+        imp_cheque_pct: cfg.imp_cheque_pct,
+        iva_pct: cfg.iva_pct,
+      }
+      const desperdicio_pct = wasteNum(orgWaste) ?? 0
       if (id) {
-        await budgetApi.updateIndirects(id, {
-          imprevistos_pct: cfg.imprevistos_pct,
-          estructura_pct: cfg.estructura_pct,
-          jefatura_pct: cfg.jefatura_pct,
-          logistica_pct: cfg.logistica_pct,
-          herramientas_pct: cfg.herramientas_pct,
-          beneficio_pct: cfg.beneficio_pct,
-          ingresos_brutos_pct: cfg.ingresos_brutos_pct,
-          imp_cheque_pct: cfg.imp_cheque_pct,
-          iva_pct: cfg.iva_pct,
-          desperdicio_pct: wasteNum(orgWaste) ?? 0,
-        })
+        // Only this budget: the other budgets keep their numbers
+        const data = await budgetApi.updateIndirects(id, { ...pct, desperdicio_pct })
+        setGeneral(data.general ?? null)
+        if (alsoGeneral) setGeneral(await budgetApi.updateGeneralIndirects(pct))
         // null = this budget inherits the general / template value
         await budgetApi.update(id, { desperdicio_pct: wasteNum(budgetWaste) })
+      } else {
+        await budgetApi.updateGeneralIndirects({ ...pct, desperdicio_pct })
       }
       setSaved(true)
       setTimeout(() => setSaved(false), 3000)
@@ -176,7 +194,9 @@ export default function MarkupChain() {
         <h1 className="text-xl font-extrabold text-gray-900">CADENA DE COSTOS INDIRECTOS</h1>
       </div>
       <p className="text-gray-500 text-sm mb-6 ml-4">
-        Configurá los porcentajes que se aplican en cascada sobre el costo directo.
+        {id
+          ? 'Porcentajes de esta obra. Arrancan con los valores generales; cambiarlos acá no toca las otras obras.'
+          : 'Valores generales: con estos porcentajes arranca cada obra nueva.'}
       </p>
 
       {loading && (
@@ -202,7 +222,10 @@ export default function MarkupChain() {
             <div className="space-y-2">
               {INDIRECTO_FIELDS.map((f) => (
                 <div key={f.key} className="flex items-center justify-between">
-                  <span className="text-sm text-gray-700">{f.label}</span>
+                  <span className="text-sm text-gray-700">
+                    {f.label}
+                    <GeneralHint general={general} field={f.key} value={cfg[f.key] as number} />
+                  </span>
                   <PctInput
                     value={(cfg[f.key] as number) ?? 0}
                     onChange={(v) => set(f.key, v)}
@@ -300,7 +323,13 @@ export default function MarkupChain() {
             </div>
 
             {/* Save */}
-            <div className="mt-6 flex justify-end">
+            <div className="mt-6 flex items-center justify-end gap-4">
+              {id && (
+                <label className="flex items-center gap-2 text-xs text-gray-600">
+                  <input type="checkbox" checked={alsoGeneral} onChange={(e) => setAlsoGeneral(e.target.checked)} />
+                  Usar también como valores generales
+                </label>
+              )}
               <button
                 onClick={handleSave}
                 disabled={saving}

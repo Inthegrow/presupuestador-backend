@@ -21,6 +21,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 
 from app.auth import get_current_user
+from app.budget_prices import budget_config, initial_indirects, today
 from app.calculations import fraction_to_pct, pct_or_default
 from app.db import get_data_db
 from app.tree import get_parent_candidates, normalize_item_code, safe_float
@@ -361,6 +362,8 @@ async def import_excel(
         "description": f"Importado desde {file.filename}",
         "source_file": file.filename,
         "status": "draft",
+        "indirectos": initial_indirects(db, org_id),
+        "precios_al": today().isoformat(),
     }).execute()
     budget_id = budget.data[0]["id"]
 
@@ -659,15 +662,8 @@ async def export_budget_pdf(
         raise HTTPException(404, "Presupuesto sin items")
     all_items = items_result.data
 
-    # Load indirect config (no error if missing — use defaults)
-    cfg_result = (
-        db.table("indirect_config")
-        .select("*")
-        .eq("org_id", org_id)
-        .limit(1)
-        .execute()
-    )
-    cfg = _apply_cfg_defaults(cfg_result.data[0] if cfg_result.data else {})
+    # Indirect % of this budget (no error if missing — use defaults)
+    cfg = _apply_cfg_defaults(budget_config(db, org_id, budget_data))
 
     # ── Compute totals from leaf items (non-section rows) ────────────────────
     leaf_items = [i for i in all_items if i.get("notas") != "Seccion" and float(i.get("cantidad") or 0) > 0]

@@ -279,7 +279,7 @@ async def apply_template(
         if row["codigo"]:
             ce = (
                 db.table("catalog_entries")
-                .select("id,precio_sin_iva")
+                .select("id,precio_sin_iva,fecha_precio")
                 .eq("org_id", org_id)
                 .eq("codigo", row["codigo"])
                 .limit(1)
@@ -294,6 +294,8 @@ async def apply_template(
             "org_id": org_id,
             "precio_unitario": precio,
             "catalog_entry_id": catalog_entry["id"] if catalog_entry else None,
+            # Fase 4: date of the price used
+            "precio_fecha": catalog_entry.get("fecha_precio") if catalog_entry else None,
         })
         calc_resource_subtotal(row)
         res = db.table("item_resources").insert(row).execute()

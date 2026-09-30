@@ -8,6 +8,8 @@ export interface Budget {
   created_at: string
   updated_at: string
   desperdicio_pct?: number | null // null = hereda (plantilla / organización)
+  indirectos?: Record<string, number> // % propios de la obra ({} = usa los generales)
+  precios_al?: string | null // fecha de los precios (YYYY-MM-DD)
 }
 
 export interface BudgetItem {
@@ -133,6 +135,8 @@ export interface IndirectConfig {
   imp_cheque_pct?: number
   iva_pct?: number
   desperdicio_pct?: number | null // desperdicio general de la organización
+  general?: Partial<IndirectConfig> // valores generales, para comparar
+  propios?: boolean // true = la obra tiene sus propios %
 }
 
 export interface BudgetVersion {
@@ -141,6 +145,17 @@ export interface BudgetVersion {
   version: number
   data: unknown
   created_at: string
+  precios_al?: string | null
+  notas?: string | null
+}
+
+export interface PriceUpdateResult extends CascadeResult {
+  precios_al: string
+  precios_al_anterior: string | null
+  precios_actualizados: number
+  version_anterior: { version_id: string; version: number }
+  version_nueva: { version_id: string; version: number }
+  sin_precio: { codigo: string | null; descripcion: string | null; motivo: 'sin_precio' | 'duplicado' }[]
 }
 
 export interface ItemAudit {

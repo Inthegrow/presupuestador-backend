@@ -27,6 +27,7 @@ class MockTable:
     """Chain-friendly mock for Supabase table operations."""
     def __init__(self, data=None):
         self._data = data or []
+        self._single = False
 
     def select(self, *args, **kwargs): return self
     def insert(self, data, **kwargs):
@@ -43,8 +44,13 @@ class MockTable:
     def eq(self, *args, **kwargs): return self
     def order(self, *args, **kwargs): return self
     def limit(self, *args, **kwargs): return self
-    def single(self, **kwargs): return self
+    def range(self, *args, **kwargs): return self
+    def single(self, **kwargs):
+        self._single = True
+        return self
     def execute(self):
+        if self._single:
+            return MockSupabaseResponse(self._data[0] if self._data else None)
         return MockSupabaseResponse(self._data)
 
 
@@ -179,10 +185,13 @@ class TestItemEndpoints:
         assert r.status_code == 200
 
 
+BUDGET_ROW = {"id": "00000000-0000-0000-0000-000000000001", "org_id": "test-org-uuid", "indirectos": {}}
+
+
 class TestAnalysisEndpoints:
     @patch("app.routers.analysis.get_data_db")
     def test_get_indirects_defaults(self, mock_db, client):
-        mock_db.return_value = MockDB({"indirect_config": []})
+        mock_db.return_value = MockDB({"indirect_config": [], "budgets": [BUDGET_ROW]})
         r = client.get("/budgets/00000000-0000-0000-0000-000000000001/indirects")
         assert r.status_code == 200
         data = r.json()
@@ -192,7 +201,7 @@ class TestAnalysisEndpoints:
 
     @patch("app.routers.analysis.get_data_db")
     def test_update_indirects(self, mock_db, client):
-        mock_db.return_value = MockDB({"indirect_config": []})
+        mock_db.return_value = MockDB({"indirect_config": [], "budgets": [BUDGET_ROW]})
         r = client.patch(
             "/budgets/00000000-0000-0000-0000-000000000001/indirects",
             json={"estructura_pct": 0.20}

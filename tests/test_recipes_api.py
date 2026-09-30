@@ -44,9 +44,20 @@ class Query:
         self.payload = None
         self._single = False
         self._limit = None
+        self._in: list[tuple[str, set]] = []
+        self._order: tuple[str, bool] | None = None
+        self._range: tuple[int, int] | None = None
 
     def select(self, *a, **k): return self
-    def order(self, *a, **k): return self
+    def order(self, col, desc=False, **k):
+        self._order = (col, desc)
+        return self
+    def range(self, start, end, **k):
+        self._range = (start, end)
+        return self
+    def in_(self, col, values):
+        self._in.append((col, {str(v) for v in values}))
+        return self
     def limit(self, n, **k):
         self._limit = n
         return self
@@ -67,7 +78,9 @@ class Query:
         return self
 
     def _match(self, row):
-        return all(str(row.get(c)) == v for c, v in self.filters)
+        return all(str(row.get(c)) == v for c, v in self.filters) and all(
+            str(row.get(c)) in vs for c, vs in self._in
+        )
 
     def execute(self):
         table = self.db.tables.setdefault(self.name, [])
@@ -86,8 +99,16 @@ class Query:
                 r.update(copy.deepcopy(self.payload))
         elif self.action == "delete":
             self.db.tables[self.name] = [r for r in table if not self._match(r)]
+        if self._order and self.action == "select":
+            col, desc = self._order
+            matched = sorted(matched, key=lambda r: (r.get(col) is None, r.get(col) or 0), reverse=desc)
+        if self._range is not None:
+            matched = matched[self._range[0]: self._range[1] + 1]
         if self._limit is not None:
             matched = matched[: self._limit]
+        if self.action == "select" and self.db.max_rows is not None:
+            # Like PostgREST: a select never returns more than max_rows
+            matched = matched[: self.db.max_rows]
         data = [copy.deepcopy(r) for r in matched]
         if self._single:
             return Resp(data[0] if data else None)
@@ -95,8 +116,9 @@ class Query:
 
 
 class FakeDB:
-    def __init__(self, tables):
+    def __init__(self, tables, max_rows=None):
         self.tables = copy.deepcopy(tables)
+        self.max_rows = max_rows
 
     def table(self, name):
         return Query(self, name)
