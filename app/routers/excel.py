@@ -21,6 +21,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 
 from app.auth import get_current_user
+from app.calculations import fraction_to_pct, pct_or_default
 from app.db import get_data_db
 from app.tree import get_parent_candidates, normalize_item_code, safe_float
 
@@ -216,6 +217,26 @@ def _parse_computation_sheet(
     return items, date_codes_corrected
 
 
+def _section_tipo(header: str) -> str | None:
+    """Map a detail-sheet section header (upper-cased) to an item_resources tipo.
+
+    Specific "MANO DE OBRA - X" headers must be checked before the generic
+    MATERIALES / MANO DE OBRA ones, otherwise equipos, materiales indirectos and
+    subcontratos get misclassified.
+    """
+    if "EQUIPO" in header:
+        return "equipo"
+    if "SUBCONTRAT" in header:
+        return "subcontrato"
+    if "MANO DE OBRA" in header and "MATERIAL" in header:
+        return "mo_material"
+    if "MANO DE OBRA" in header:
+        return "mano_obra"
+    if "MATERIALES" in header:
+        return "material"
+    return None
+
+
 def _parse_detail_sheets(
     df_dict: dict[str, pd.DataFrame],
     sheet_names: list[str],
@@ -240,20 +261,12 @@ def _parse_detail_sheets(
             upper = first_cell.upper()
 
             # Detect section headers
-            if "MATERIALES" in upper and "TOTAL" not in upper:
-                current_tipo = "material"
-                continue
-            if "MANO DE OBRA" in upper:
-                current_tipo = "mano_obra"
-                continue
-            if "EQUIPO" in upper and "TOTAL" not in upper:
-                current_tipo = "equipo"
-                continue
-            if "SUBCONTRAT" in upper and "TOTAL" not in upper:
-                current_tipo = "subcontrato"
-                continue
             if "TOTAL" in upper:
                 current_tipo = None
+                continue
+            section_tipo = _section_tipo(upper)
+            if section_tipo:
+                current_tipo = section_tipo
                 continue
 
             if current_tipo is None:
@@ -268,7 +281,8 @@ def _parse_detail_sheets(
                 continue
 
             cantidad = safe_float(df.iloc[i, 3] if df.shape[1] > 3 else None)
-            desperdicio = safe_float(df.iloc[i, 5] if df.shape[1] > 5 else None) or 0
+            dias = safe_float(df.iloc[i, 4] if df.shape[1] > 4 else None)
+            desperdicio = fraction_to_pct(safe_float(df.iloc[i, 5] if df.shape[1] > 5 else None))
             cantidad_eff = safe_float(df.iloc[i, 6] if df.shape[1] > 6 else None)
             precio = safe_float(df.iloc[i, 7] if df.shape[1] > 7 else None)
             subtotal = safe_float(df.iloc[i, 8] if df.shape[1] > 8 else None)
@@ -276,7 +290,7 @@ def _parse_detail_sheets(
             if cantidad is None and cantidad_eff is None:
                 continue
 
-            resources.append({
+            resource = {
                 "org_id": org_id,
                 "tipo": current_tipo,
                 "codigo": first_cell,
@@ -284,10 +298,18 @@ def _parse_detail_sheets(
                 "unidad": _cell_str(df, i, 2),
                 "cantidad": cantidad,
                 "desperdicio_pct": desperdicio,
-                "cantidad_efectiva": cantidad_eff or (cantidad * (1 + desperdicio) if cantidad else 0),
+                "cantidad_efectiva": cantidad_eff or (
+                    cantidad * (1 + desperdicio / 100) if cantidad else 0
+                ),
                 "precio_unitario": precio,
                 "subtotal": subtotal or 0,
-            })
+            }
+            if current_tipo == "mano_obra":
+                # Excel: Cantidad = trabajadores, Dias, "Desperdicio" = cargas/ineficiencia
+                resource["trabajadores"] = cantidad or 0
+                resource["dias"] = dias or 0
+                resource["cargas_sociales_pct"] = desperdicio
+            resources.append(resource)
 
         if resources:
             resources_by_code[code_norm] = resources
@@ -537,15 +559,15 @@ def _apply_cfg_defaults(cfg: dict) -> dict:
 
 def _cascade_from_config(directo: float, cfg: dict) -> dict:
     """Compute full cascade from a directo total and a config dict."""
-    imp = float(cfg.get("imprevistos_pct") or 3)
-    est = float(cfg.get("estructura_pct") or 15)
-    jef = float(cfg.get("jefatura_pct") or 8)
-    log = float(cfg.get("logistica_pct") or 5)
-    her = float(cfg.get("herramientas_pct") or 3)
-    ben_pct = float(cfg.get("beneficio_pct") or 10)
-    iibb = float(cfg.get("ingresos_brutos_pct") or 7)
-    cheque = float(cfg.get("imp_cheque_pct") or 1.2)
-    iva_pct = float(cfg.get("iva_pct") or 21)
+    imp = pct_or_default(cfg, "imprevistos_pct", 3)
+    est = pct_or_default(cfg, "estructura_pct", 15)
+    jef = pct_or_default(cfg, "jefatura_pct", 8)
+    log = pct_or_default(cfg, "logistica_pct", 5)
+    her = pct_or_default(cfg, "herramientas_pct", 3)
+    ben_pct = pct_or_default(cfg, "beneficio_pct", 10)
+    iibb = pct_or_default(cfg, "ingresos_brutos_pct", 7)
+    cheque = pct_or_default(cfg, "imp_cheque_pct", 1.2)
+    iva_pct = pct_or_default(cfg, "iva_pct", 21)
 
     total_ind_pct = imp + est + jef + log + her
     indirecto = round(directo * total_ind_pct / 100, 2)

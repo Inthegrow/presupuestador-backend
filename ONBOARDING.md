@@ -78,7 +78,7 @@ frontend/src/
 migrations/          # SQL a correr a mano en Supabase: 001, 002, 003 (en orden)
 seed_data/           # Obras de ejemplo (Las Heras, Lugones, El Encuentro) en JSON/CSV
 seed_database.py     # Carga los seed_data en Supabase
-tests/               # pytest (86 tests)
+tests/               # pytest (106 tests)
 ```
 
 Rutas del frontend: `/app/dashboard`, `/app/new-project`, `/app/import`, `/app/budgets/:id/{editor|analysis|ai|export|versions}`, `/app/budgets/:id/item/:itemId`, `/app/settings/markups`, `/app/catalogs`, `/app/templates`.
@@ -160,7 +160,7 @@ npm run dev
 
 En desarrollo, el frontend llama a `/api/...` y Vite lo redirige a `localhost:8000` (ver `frontend/vite.config.ts`).
 
-**Tests:** `pytest -q`. Hoy pasan 85 de 86; falla `test_get_indirects_defaults`.
+**Tests:** `pytest -q` (106 tests, todos en verde).
 
 **Claves:** nunca se suben al repo ni se mandan por mail. Se pasan por un gestor de contraseñas.
 
@@ -209,13 +209,13 @@ Regla acordada con Carlos (ver `ACUERDOS_CON_CARLOS.md`): **publicar siempre des
 - Importación de Excel de obra y exportación a PDF y Excel.
 - IA para leer planos (experimental).
 
+**Corregido en la Fase 0:** se pueden poner porcentajes en 0% en la cascada; el importador de Excel ahora clasifica bien las 5 secciones, toma los días de la mano de obra y convierte el desperdicio de fracción (0,1) a porcentaje (10).
+
 **Pendientes conocidos** (el detalle y la priorización están en `DIAGNOSTICO_MAESTRO_TERRAC.md`):
 - Login desactivado.
 - Los precios de los catálogos no tienen fecha ni historial, así que no se puede "actualizar el presupuesto a precios de hoy".
 - Las plantillas solo aceptan coeficientes fijos: no hay fórmulas, parámetros ni variantes.
 - No hay un desperdicio general por defecto.
-- El importador de Excel clasifica mal 3 de las 5 secciones de recursos y lee el desperdicio en la escala equivocada.
-- No se puede poner 0% en los porcentajes de la cascada (`or <default>` en `calculations.py`).
 - No hay módulo de certificación de avance.
 
 ---

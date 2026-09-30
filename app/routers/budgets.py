@@ -7,7 +7,12 @@ from uuid import UUID
 from fastapi import APIRouter, Body, Depends, HTTPException
 
 from app.auth import get_current_user
-from app.calculations import calc_budget_summary, calc_item_totals, recalc_all_items
+from app.calculations import (
+    calc_budget_summary,
+    calc_item_totals,
+    pct_or_default,
+    recalc_all_items,
+)
 from app.db import get_data_db
 from app.schemas import (
     BudgetCopyRequest,
@@ -439,7 +444,7 @@ def _calc_resource_subtotal(resource: dict) -> tuple[float, float]:
     if tipo == "mano_obra":
         trabajadores = float(resource.get("trabajadores") or 0)
         dias = float(resource.get("dias") or 0)
-        cargas_sociales_pct = float(resource.get("cargas_sociales_pct") or 25)
+        cargas_sociales_pct = pct_or_default(resource, "cargas_sociales_pct", 25)
         cantidad_efectiva = round(trabajadores * dias * (1 + cargas_sociales_pct / 100), 2)
     else:
         cantidad = float(resource.get("cantidad") or 0)
