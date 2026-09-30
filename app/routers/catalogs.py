@@ -5,11 +5,13 @@ from __future__ import annotations
 import csv
 import io
 import warnings
+from datetime import date
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, UploadFile
 
 from app.auth import get_current_user
+from app.catalog_prices import fecha_iso, history_row, price_changed, price_from_payload
 from app.db import get_data_db
 from app.schemas import CatalogTipo
 
@@ -34,6 +36,24 @@ TAB_TIPO_MAP: dict[str, str] = {
 
 # Flexible column aliases for price column
 _PRICE_ALIASES = {"precio_unitario", "precio_sin_iva", "precio", "costo", "precio_unit", "p_unitario"}
+_FECHA_ALIASES = {"fecha_precio", "fecha", "fecha precio", "fecha_act", "actualizado"}
+_PROVEEDOR_ALIASES = {"proveedor", "prov", "supplier"}
+
+
+def _record_history(db, entries: list[dict]) -> None:  # type: ignore[no-untyped-def]
+    """Insert one catalog_price_history row per saved entry that has a price."""
+    rows = [history_row(e) for e in entries if e.get("id") and e.get("precio_sin_iva") is not None]
+    if rows:
+        db.table("catalog_price_history").insert(rows).execute()
+
+
+def _fecha_or_warning(raw: object, where: str, warnings_list: list[str]) -> str | None:
+    """Parse a date from an uploaded file; unreadable dates are reported, not guessed."""
+    try:
+        return fecha_iso(raw)
+    except ValueError:
+        warnings_list.append(f"{where}: fecha '{raw}' no reconocida, quedo sin fecha")
+        return None
 
 
 # ── Upload CSV catalog ────────────────────────────────────────────────────
@@ -73,9 +93,12 @@ async def upload_csv_catalog(
 
     # Normalize fieldnames
     field_map = {c.strip().lower(): c for c in reader.fieldnames}
+    fecha_field = next((field_map[a] for a in _FECHA_ALIASES if a in field_map), None)
+    proveedor_field = next((field_map[a] for a in _PROVEEDOR_ALIASES if a in field_map), None)
 
     rows = []
-    for row in reader:
+    warnings_list: list[str] = []
+    for line_no, row in enumerate(reader, start=2):
         codigo = (row.get(field_map.get("codigo", "codigo")) or "").strip()
         descripcion = (row.get(field_map.get("descripcion", "descripcion")) or "").strip()
         unidad = (row.get(field_map.get("unidad", "unidad")) or "").strip()
@@ -91,12 +114,17 @@ async def upload_csv_catalog(
         except ValueError:
             continue
 
+        fecha_raw = (row.get(fecha_field) or "").strip() if fecha_field else ""
+        proveedor = (row.get(proveedor_field) or "").strip() if proveedor_field else ""
+
         rows.append({
             "codigo": codigo,
             "descripcion": descripcion,
             "unidad": unidad,
             "precio_sin_iva": precio,
             "tipo": tipo,
+            "fecha_precio": _fecha_or_warning(fecha_raw, f"Fila {line_no}", warnings_list),
+            "proveedor": proveedor or None,
         })
 
     if not rows:
@@ -122,21 +150,25 @@ async def upload_csv_catalog(
         }
         for row in rows
     ]
-    db.table("catalog_entries").insert(entries).execute()
+    inserted = db.table("catalog_entries").insert(entries).execute()
+    _record_history(db, inserted.data or [])
 
     return {
         "catalog_id": catalog_id,
         "name": catalog_name,
         "entries_count": len(entries),
         "tipo": tipo,
+        "warnings": warnings_list,
     }
 
 
 # ── Upload Excel catalog (multi-tab) ─────────────────────────────────────────
 
 
-def _parse_excel_rows(ws) -> list[dict]:  # type: ignore[no-untyped-def]
+def _parse_excel_rows(ws, warnings_list: list[str] | None = None) -> list[dict]:  # type: ignore[no-untyped-def]
     """Extract rows from an openpyxl worksheet using flexible column aliases."""
+    if warnings_list is None:
+        warnings_list = []
     data_rows = list(ws.iter_rows(values_only=True))
     if not data_rows:
         return []
@@ -169,6 +201,8 @@ def _parse_excel_rows(ws) -> list[dict]:  # type: ignore[no-untyped-def]
     descripcion_col = find_col({"descripcion", "descripción", "description", "nombre", "name"})
     unidad_col = find_col({"unidad", "unit", "ud"})
     precio_col = find_col(_PRICE_ALIASES)
+    fecha_col = find_col(_FECHA_ALIASES)
+    proveedor_col = find_col(_PROVEEDOR_ALIASES)
 
     if descripcion_col is None or precio_col is None:
         return []
@@ -180,7 +214,7 @@ def _parse_excel_rows(ws) -> list[dict]:  # type: ignore[no-untyped-def]
         return str(v).strip() if v is not None else ""
 
     rows: list[dict] = []
-    for row in data_rows[header_idx + 1:]:
+    for row_no, row in enumerate(data_rows[header_idx + 1:], start=header_idx + 2):
         if not any(v is not None for v in row):
             continue  # skip blank rows
 
@@ -202,11 +236,16 @@ def _parse_excel_rows(ws) -> list[dict]:  # type: ignore[no-untyped-def]
         except (ValueError, AttributeError):
             continue
 
+        fecha_raw = row[fecha_col] if fecha_col is not None and fecha_col < len(row) else None
+        proveedor = _cell(row, proveedor_col) if proveedor_col is not None else ""
+
         rows.append({
             "codigo": codigo,
             "descripcion": descripcion,
             "unidad": unidad,
             "precio_sin_iva": precio,
+            "fecha_precio": _fecha_or_warning(fecha_raw, f"{ws.title} fila {row_no}", warnings_list),
+            "proveedor": proveedor or None,
         })
 
     return rows
@@ -261,7 +300,7 @@ async def upload_excel_catalog(
 
         ws = wb[sheet_name]
         try:
-            rows = _parse_excel_rows(ws)
+            rows = _parse_excel_rows(ws, warnings_list)
         except Exception as exc:
             warnings_list.append(f"Solapa '{sheet_name}' con error al leer: {exc}")
             continue
@@ -294,7 +333,8 @@ async def upload_excel_catalog(
             }
             for row in rows
         ]
-        db.table("catalog_entries").insert(entries).execute()
+        inserted = db.table("catalog_entries").insert(entries).execute()
+        _record_history(db, inserted.data or [])
 
         catalogs_created += 1
         entries_summary[tipo] = entries_summary.get(tipo, 0) + len(entries)
@@ -467,19 +507,29 @@ async def create_catalog_entry(
     if not catalog.data:
         raise HTTPException(404, "Catalogo no encontrado")
 
+    try:
+        precio = price_from_payload(data)
+        fecha = fecha_iso(data.get("fecha_precio"))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
     entry = {
         "catalog_id": cid,
         "org_id": org_id,
         "codigo": data.get("codigo", ""),
         "descripcion": data.get("descripcion", ""),
         "unidad": data.get("unidad", ""),
-        "precio_sin_iva": data.get("precio_sin_iva", 0),
+        "precio_sin_iva": precio if precio is not None else 0,
         "tipo": data.get("tipo", "material"),
+        # A price typed in by hand is dated today unless the user says otherwise
+        "fecha_precio": fecha or date.today().isoformat(),
+        "proveedor": data.get("proveedor") or None,
     }
     result = db.table("catalog_entries").insert(entry).execute()
     if not result.data:
         raise HTTPException(500, "Error al crear entrada")
 
+    _record_history(db, result.data)
     return result.data[0]
 
 
@@ -502,7 +552,7 @@ async def update_catalog_entry(
     # Verify entry belongs to catalog and org
     entry = (
         db.table("catalog_entries")
-        .select("id")
+        .select("id, org_id, precio_sin_iva, fecha_precio")
         .eq("id", eid)
         .eq("catalog_id", cid)
         .eq("org_id", org_id)
@@ -513,10 +563,23 @@ async def update_catalog_entry(
         raise HTTPException(404, "Entrada no encontrada")
 
     # Only allow updating known fields
-    allowed = {"codigo", "descripcion", "unidad", "precio_sin_iva", "tipo"}
+    allowed = {"codigo", "descripcion", "unidad", "tipo", "proveedor"}
     update_data = {k: v for k, v in data.items() if k in allowed}
+    try:
+        precio = price_from_payload(data)
+        if precio is not None:
+            update_data["precio_sin_iva"] = precio
+        if "fecha_precio" in data:
+            update_data["fecha_precio"] = fecha_iso(data["fecha_precio"])
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
     if not update_data:
         raise HTTPException(400, "No hay campos validos para actualizar")
+
+    old = entry.data
+    if "fecha_precio" not in update_data and price_changed(old, update_data):
+        # New price without an explicit date: it is today's price
+        update_data["fecha_precio"] = date.today().isoformat()
 
     result = (
         db.table("catalog_entries")
@@ -525,7 +588,48 @@ async def update_catalog_entry(
         .eq("org_id", org_id)
         .execute()
     )
+
+    if price_changed(old, update_data):
+        _record_history(db, [{**old, **update_data, "id": eid, "org_id": org_id}])
+
     return result.data[0] if result.data else {"updated": True}
+
+
+# ── Price history of an entry ────────────────────────────────────────────────
+
+
+@router.get("/{catalog_id}/entries/{entry_id}/history")
+async def get_entry_price_history(
+    catalog_id: UUID,
+    entry_id: UUID,
+    user: dict = Depends(get_current_user),
+):
+    """List the price history of a catalog entry, newest first."""
+    db = get_data_db()
+    org_id = user["org_id"]
+    eid = str(entry_id)
+
+    entry = (
+        db.table("catalog_entries")
+        .select("id")
+        .eq("id", eid)
+        .eq("catalog_id", str(catalog_id))
+        .eq("org_id", org_id)
+        .single()
+        .execute()
+    )
+    if not entry.data:
+        raise HTTPException(404, "Entrada no encontrada")
+
+    result = (
+        db.table("catalog_price_history")
+        .select("*")
+        .eq("entry_id", eid)
+        .eq("org_id", org_id)
+        .order("created_at", desc=True)
+        .execute()
+    )
+    return result.data or []
 
 
 # ── Delete catalog entry ─────────────────────────────────────────────────────

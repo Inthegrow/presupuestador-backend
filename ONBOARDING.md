@@ -75,10 +75,11 @@ frontend/src/
   components/        # layout (Sidebar, AppLayout) y ui (DataTable, CostSummaryBar…)
   lib/api.ts         # Cliente HTTP (VITE_API_URL, o /api por proxy en desarrollo)
   lib/supabase.ts    # Cliente de Supabase para el login
-migrations/          # SQL a correr a mano en Supabase: 001, 002, 003 (en orden)
+migrations/          # SQL a correr a mano en Supabase: 001 a 004 (en orden)
 seed_data/           # Obras de ejemplo (Las Heras, Lugones, El Encuentro) en JSON/CSV
 seed_database.py     # Carga los seed_data en Supabase
-tests/               # pytest (106 tests)
+import_maestro.py    # Importa las listas 00_Mat/00_MO/00_Eq/00_Sub del Excel Maestro (informe en output/)
+tests/               # pytest (149 tests)
 ```
 
 Rutas del frontend: `/app/dashboard`, `/app/new-project`, `/app/import`, `/app/budgets/:id/{editor|analysis|ai|export|versions}`, `/app/budgets/:id/item/:itemId`, `/app/settings/markups`, `/app/catalogs`, `/app/templates`.
@@ -160,7 +161,7 @@ npm run dev
 
 En desarrollo, el frontend llama a `/api/...` y Vite lo redirige a `localhost:8000` (ver `frontend/vite.config.ts`).
 
-**Tests:** `pytest -q` (106 tests, todos en verde).
+**Tests:** `pytest -q` (149 tests, todos en verde).
 
 **Claves:** nunca se suben al repo ni se mandan por mail. Se pasan por un gestor de contraseñas.
 
@@ -211,9 +212,11 @@ Regla acordada con Carlos (ver `ACUERDOS_CON_CARLOS.md`): **publicar siempre des
 
 **Corregido en la Fase 0:** se pueden poner porcentajes en 0% en la cascada; el importador de Excel ahora clasifica bien las 5 secciones, toma los días de la mano de obra y convierte el desperdicio de fracción (0,1) a porcentaje (10).
 
+**Fase 1:** cada precio de catálogo guarda fecha y proveedor, y cada cambio queda en `catalog_price_history`. En Catálogos se ve y se edita la columna Fecha.
+
 **Pendientes conocidos** (el detalle y la priorización están en `DIAGNOSTICO_MAESTRO_TERRAC.md`):
 - Login desactivado.
-- Los precios de los catálogos no tienen fecha ni historial, así que no se puede "actualizar el presupuesto a precios de hoy".
+- Los precios ya tienen fecha e historial, pero todavía no está el botón "actualizar el presupuesto a precios de [fecha]".
 - Las plantillas solo aceptan coeficientes fijos: no hay fórmulas, parámetros ni variantes.
 - No hay un desperdicio general por defecto.
 - No hay módulo de certificación de avance.
