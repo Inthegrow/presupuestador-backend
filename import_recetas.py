@@ -9,17 +9,11 @@ Uso:
   # 2. Generar un SQL para pegar en el SQL Editor de Supabase (sin claves):
   python3 import_recetas.py "MODELO DE PRESUPUESTACION RESUMEN.xlsx" --sql output/carga_maestro_terrac.sql
 
-  # 3. O cargar directo en Supabase:
-  python3 import_recetas.py "MODELO DE PRESUPUESTACION RESUMEN.xlsx" --apply
-
-Para --apply hacen falta las variables de entorno:
-  DATA_SUPABASE_URL  o  SUPABASE_URL
-  DATA_SUPABASE_KEY  o  SUPABASE_KEY
-  ORG_ID
-
-Antes de --apply hay que correr migrations/006_maestro_recipes.sql.
-Se puede correr de nuevo: las plantillas se actualizan por código (los
-presupuestos que las usan no pierden el enlace) y el árbol se reemplaza.
+El SQL es la única vía de carga: es una sola transacción, así que el árbol
+se reemplaza completo o no se toca. Antes hay que correr
+migrations/006_maestro_recipes.sql. Se puede correr de nuevo: las plantillas
+se actualizan por código (los presupuestos no pierden el enlace) y no se
+pisan las editadas a mano ni las de otro origen.
 
 Siempre se escribe el informe ítem por ítem
 (por defecto en output/informe_maestro_recetas.md).
@@ -29,8 +23,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
-import sys
 import warnings
 from pathlib import Path
 
@@ -40,7 +32,6 @@ from app.maestro_import import parse_workbook
 from app.maestro_recipes import parse_maestro, report_markdown, template_payload
 
 TREE_NAME = "TERRAC - Maestro"
-ORIGEN = "maestro_terrac"
 
 
 def load_workbooks(path: str):  # type: ignore[no-untyped-def]
@@ -53,78 +44,6 @@ def parse_file(path: str) -> dict:
     wb_f, wb_v = load_workbooks(path)
     entries_by_tipo, _ = parse_workbook(wb_v)
     return parse_maestro(wb_f, wb_v, entries_by_tipo)
-
-
-def _delete_tree(db, org_id: str, tree_id: str) -> None:  # type: ignore[no-untyped-def]
-    # The FK cascades too; deleting the nodes first keeps it explicit
-    db.table("standard_tree_nodes").delete().eq("tree_id", tree_id).eq("org_id", org_id).execute()
-    db.table("standard_trees").delete().eq("id", tree_id).eq("org_id", org_id).execute()
-
-
-def apply_to_db(db, org_id: str, parsed: dict, source_file: str = "") -> dict:  # type: ignore[no-untyped-def]
-    """Upsert Maestro templates by (org_id, codigo) and replace the standard tree.
-
-    A template is only overwritten if it came from the Maestro and nobody edited
-    it after the import (``editado``). The others are kept and listed.
-    The new tree is built next to the old one and swapped in only when complete.
-    """
-    template_ids: dict[str, str] = {}
-    created = updated = 0
-    kept: list[dict] = []
-    for tmpl in parsed["plantillas"]:
-        payload = {**template_payload(tmpl), "org_id": org_id, "editado": False}
-        found = (
-            db.table("item_templates").select("id,origen,editado")
-            .eq("org_id", org_id).eq("codigo", payload["codigo"]).limit(1).execute()
-        )
-        if found.data:
-            current = found.data[0]
-            tid = current["id"]
-            if current.get("origen") != ORIGEN:
-                kept.append({"codigo": payload["codigo"], "motivo": "no viene del Maestro"})
-            elif current.get("editado"):
-                kept.append({"codigo": payload["codigo"], "motivo": "editada después de importar"})
-            else:
-                db.table("item_templates").update(payload).eq("id", tid).eq("org_id", org_id).execute()
-                updated += 1
-        else:
-            tid = db.table("item_templates").insert(payload).execute().data[0]["id"]
-            created += 1
-        template_ids[tmpl["codigo"]] = tid
-
-    # Build the new tree apart; the old one stays until the new one is complete
-    new_tree_id = db.table("standard_trees").insert({
-        "org_id": org_id, "nombre": f"{TREE_NAME} (cargando)", "source_file": source_file,
-    }).execute().data[0]["id"]
-    try:
-        node_ids: dict[str, str] = {}
-        for node in parsed["arbol"]:  # ordered: parents come first
-            row = {
-                "tree_id": new_tree_id,
-                "org_id": org_id,
-                "parent_id": node_ids.get(node["parent"]) if node["parent"] else None,
-                "codigo": node["codigo"],
-                "nombre": node["nombre"],
-                "unidad": node["unidad"] or None,
-                "nivel": node["nivel"],
-                "orden": node["orden"],
-                "template_id": template_ids.get(node.get("plantilla") or ""),
-                "libre": bool(node.get("libre")),
-            }
-            node_ids[node["codigo"]] = db.table("standard_tree_nodes").insert(row).execute().data[0]["id"]
-        if len(node_ids) != len(parsed["arbol"]):
-            raise RuntimeError("El árbol nuevo quedó incompleto")
-    except Exception:
-        _delete_tree(db, org_id, new_tree_id)
-        raise
-
-    old = db.table("standard_trees").select("id").eq("org_id", org_id).eq("nombre", TREE_NAME).execute()
-    for tree in old.data or []:
-        _delete_tree(db, org_id, tree["id"])
-    db.table("standard_trees").update({"nombre": TREE_NAME}).eq("id", new_tree_id).execute()
-
-    return {"plantillas_creadas": created, "plantillas_actualizadas": updated,
-            "plantillas_conservadas": kept, "arbol_id": new_tree_id, "nodos": len(node_ids)}
 
 
 def _lit(value: object) -> str:
@@ -143,7 +62,7 @@ def _jsonb(value: object) -> str:
 
 
 def sql_script(parsed: dict, source_file: str = "") -> str:
-    """Same load as apply_to_db, as one SQL script for the Supabase SQL Editor.
+    """Load templates and the standard tree as one SQL script (Supabase SQL Editor).
 
     The org_id is detected when the database has a single organization;
     otherwise the script stops and asks to paste it in v_org.
@@ -244,7 +163,6 @@ SELECT
 def main() -> None:
     parser = argparse.ArgumentParser(description="Importar recetas y árbol del Maestro TERRAC")
     parser.add_argument("excel", help="Ruta al Excel Maestro (.xlsx)")
-    parser.add_argument("--apply", action="store_true", help="Escribir en Supabase")
     parser.add_argument("--report", default="output/informe_maestro_recetas.md", help="Informe Markdown")
     parser.add_argument("--json", default=None, help="Guardar también el resultado en JSON")
     parser.add_argument("--sql", default=None,
@@ -268,20 +186,8 @@ def main() -> None:
     print(f"{len(parsed['plantillas'])} plantillas, {n_rec} recursos ({n_rev} para revisar), "
           f"{len(parsed['arbol'])} filas de árbol. Informe: {args.report}")
 
-    if not args.apply:
-        print("Modo informe: no se escribió nada en la base (usar --apply).")
-        return
-
-    from supabase import create_client
-
-    url = os.environ.get("DATA_SUPABASE_URL") or os.environ.get("SUPABASE_URL")
-    key = os.environ.get("DATA_SUPABASE_KEY") or os.environ.get("SUPABASE_KEY")
-    org_id = os.environ.get("ORG_ID")
-    if not url or not key or not org_id:
-        sys.exit("ERROR: faltan DATA_SUPABASE_URL, DATA_SUPABASE_KEY u ORG_ID")
-    result = apply_to_db(create_client(url, key), org_id, parsed, name)
-    print(f"Listo: {result}")
-
+    if not args.sql:
+        print("Solo informe: no se generó el SQL de carga (usar --sql).")
 
 if __name__ == "__main__":
     main()

@@ -23,7 +23,7 @@ from app.maestro_recipes import (
     template_status,
 )
 from app.recipes import expand_resource, param_defaults, validate_template
-from import_recetas import TREE_NAME, apply_to_db
+from import_recetas import TREE_NAME, sql_script
 from tests.test_recipes_api import MOCK_USER, ORG, FakeDB
 
 VLOOKUP = '=IF($A{r}=0,"",VLOOKUP($A{r},\'00_Mat\'!$A$4:$J$1175,2,FALSE))'
@@ -332,81 +332,22 @@ class TestOutput:
         assert slug("Ñandú año") == "nandu_ano"
 
 
-class TestApply:
-    def test_creates_templates_and_tree(self, parsed):
-        db = FakeDB({})
-        out = apply_to_db(db, ORG, parsed, "maestro.xlsx")
-        assert out["plantillas_creadas"] == len(parsed["plantillas"])
-        nodes = db.tables["standard_tree_nodes"]
-        assert len(nodes) == len(parsed["arbol"])
-        by_code = {n["codigo"]: n for n in nodes}
-        tid = {t["codigo"]: t["id"] for t in db.tables["item_templates"]}
-        assert by_code["4.1.1"]["template_id"] == tid["4.1.1"]
-        assert by_code["4.1.1"]["parent_id"] == by_code["4.1"]["id"]
-        assert by_code["9.1"]["template_id"] is None and by_code["9.1"]["libre"]
-        assert db.tables["standard_trees"][0]["nombre"] == TREE_NAME
-
-    def test_rerun_updates_in_place(self, parsed):
-        db = FakeDB({})
-        apply_to_db(db, ORG, parsed)
-        ids = sorted(t["id"] for t in db.tables["item_templates"])
-        out = apply_to_db(db, ORG, parsed)
-        assert out["plantillas_creadas"] == 0
-        assert sorted(t["id"] for t in db.tables["item_templates"]) == ids
-        assert len(db.tables["standard_trees"]) == 1
-        assert len(db.tables["standard_tree_nodes"]) == len(parsed["arbol"])
-
-
-class TestApplyProtections:
-    def test_edited_or_foreign_templates_are_kept(self, parsed):
-        db = FakeDB({})
-        apply_to_db(db, ORG, parsed)
-        rows = {t["codigo"]: t for t in db.tables["item_templates"]}
-        rows["4.1.1"].update({"editado": True, "recursos": [{"tipo": "material", "formula": "Q"}]})
-        rows["5.1.2"].update({"origen": None, "nombre": "Mía"})
-        out = apply_to_db(db, ORG, parsed)
-        rows = {t["codigo"]: t for t in db.tables["item_templates"]}
-        assert rows["4.1.1"]["recursos"] == [{"tipo": "material", "formula": "Q"}]
-        assert rows["5.1.2"]["nombre"] == "Mía"
-        assert {k["codigo"] for k in out["plantillas_conservadas"]} == {"4.1.1", "5.1.2"}
-        assert out["plantillas_actualizadas"] == len(parsed["plantillas"]) - 2
-
-    def test_failed_tree_load_keeps_the_old_tree(self, parsed):
-        db = FakeDB({})
-        apply_to_db(db, ORG, parsed)
-        old_tree = db.tables["standard_trees"][0]["id"]
-        old_nodes = len(db.tables["standard_tree_nodes"])
-
-        real_table = db.table
-        calls = {"n": 0}
-
-        def flaky(name):
-            query = real_table(name)
-            if name == "standard_tree_nodes":
-                original = query.insert
-
-                def insert(data, **k):
-                    calls["n"] += 1
-                    if calls["n"] == 5:
-                        raise RuntimeError("se cortó la conexión")
-                    return original(data, **k)
-                query.insert = insert
-            return query
-
-        db.table = flaky
-        with pytest.raises(RuntimeError):
-            apply_to_db(db, ORG, parsed)
-        assert [t["id"] for t in db.tables["standard_trees"]] == [old_tree]
-        assert db.tables["standard_trees"][0]["nombre"] == TREE_NAME
-        assert len(db.tables["standard_tree_nodes"]) == old_nodes
-        assert all(n["tree_id"] == old_tree for n in db.tables["standard_tree_nodes"])
+def _tree_tables(parsed) -> dict:
+    """What the SQL load leaves in the database, as fake tables."""
+    nodes = []
+    for n in parsed["arbol"]:
+        nodes.append({"id": f"n-{n['codigo']}", "tree_id": "t1", "org_id": ORG,
+                      "parent_id": f"n-{n['parent']}" if n["parent"] else None,
+                      "codigo": n["codigo"], "nombre": n["nombre"], "nivel": n["nivel"],
+                      "orden": n["orden"], "libre": n.get("libre", False)})
+    return {"standard_trees": [{"id": "t1", "org_id": ORG, "nombre": TREE_NAME}],
+            "standard_tree_nodes": nodes}
 
 
 class TestStandardTreeAPI:
     @pytest.fixture
     def client_db(self, parsed):
-        db = FakeDB({})
-        apply_to_db(db, ORG, parsed)
+        db = FakeDB(_tree_tables(parsed))
         db.tables["standard_trees"].append({"id": "otro", "org_id": "otra-org", "nombre": "X"})
         app = create_app()
         from app.auth import get_current_user
@@ -468,8 +409,6 @@ class TestMigration006:
 
 class TestSqlScript:
     def test_script_for_the_sql_editor(self, parsed):
-        from import_recetas import sql_script
-
         sql = sql_script(parsed, "maestro.xlsx")
         assert "v_org  uuid := NULL;" in sql
         assert "ADD COLUMN IF NOT EXISTS editado" in sql.split("DO $maestro$")[0]
@@ -486,3 +425,84 @@ class TestSqlScript:
 
         assert _lit("d'agua") == "'d''agua'"
         assert _lit(None) == "NULL" and _lit(True) == "true" and _lit(2.5) == "2.5"
+
+
+# ── The SQL on a real Postgres (optional: MAESTRO_PG_DSN=postgresql://...) ──
+
+PG_DSN = os.environ.get("MAESTRO_PG_DSN")
+ROOT = Path(__file__).resolve().parent.parent
+
+
+@pytest.mark.skipif(not PG_DSN, reason="sin Postgres de prueba (MAESTRO_PG_DSN)")
+class TestSqlOnPostgres:
+    """Runs the generated script with psql on a throwaway database."""
+
+    ORG_A = "11111111-1111-1111-1111-111111111111"
+
+    def psql(self, sql: str, check: bool = True):
+        import subprocess
+
+        return subprocess.run(["psql", PG_DSN, "-v", "ON_ERROR_STOP=1", "-q", "-At"],
+                              input=sql, text=True, capture_output=True, check=check)
+
+    @pytest.fixture(autouse=True)
+    def schema(self):
+        base = (ROOT / "migrations" / "003_unit_analysis.sql").read_text(encoding="utf-8")
+        templates = re.search(r"CREATE TABLE IF NOT EXISTS item_templates.*?\n\);", base, re.S).group(0)
+        alters = "\n".join(line for line in (ROOT / "migrations" / "005_template_recipes.sql")
+                           .read_text(encoding="utf-8").splitlines()
+                           if line.startswith("ALTER TABLE item_templates"))
+        self.psql(f"""
+            DROP TABLE IF EXISTS standard_tree_nodes, standard_trees, item_templates,
+                                 budgets, catalog_entries CASCADE;
+            DO $$ BEGIN CREATE ROLE anon; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+            DO $$ BEGIN CREATE ROLE authenticated; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+            CREATE TABLE budgets (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), org_id uuid NOT NULL);
+            CREATE TABLE catalog_entries (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), org_id uuid NOT NULL);
+            INSERT INTO budgets (org_id) VALUES ('{self.ORG_A}');
+            {templates}
+            {alters}
+        """)
+        self.psql((ROOT / "migrations" / "006_maestro_recipes.sql").read_text(encoding="utf-8"))
+
+    def counts(self) -> str:
+        return self.psql("SELECT (SELECT count(*) FROM item_templates) || '/' || "
+                         "(SELECT count(*) FROM standard_tree_nodes) || '/' || "
+                         "(SELECT count(*) FROM standard_trees);").stdout.strip()
+
+    def test_load_and_reload(self, parsed):
+        sql = sql_script(parsed)
+        self.psql(sql)
+        expected = f"{len(parsed['plantillas'])}/{len(parsed['arbol'])}/1"
+        assert self.counts() == expected
+        self.psql("UPDATE item_templates SET editado = true, nombre = 'A MANO' WHERE codigo = '4.1.1';"
+                  "UPDATE item_templates SET origen = NULL, nombre = 'OTRA' WHERE codigo = '5.1.2';")
+        self.psql(sql)
+        assert self.counts() == expected
+        names = self.psql("SELECT string_agg(nombre, '|' ORDER BY codigo) FROM item_templates "
+                          "WHERE codigo IN ('4.1.1', '5.1.2');").stdout.strip()
+        assert names == "A MANO|OTRA"
+        orphans = self.psql("SELECT count(*) FROM standard_tree_nodes n WHERE n.nivel <> 'rubro' "
+                            "AND n.parent_id IS NULL;").stdout.strip()
+        assert orphans == "0"
+
+    def test_failure_leaves_the_published_tree(self, parsed):
+        sql = sql_script(parsed)
+        self.psql(sql)
+        before = self.counts()
+        # Truncated paste, and a failure after the old tree's nodes were deleted
+        assert self.psql(sql[: len(sql) // 2], check=False).returncode != 0
+        broken = sql.replace("UPDATE standard_tree_nodes c SET parent_id = p.id",
+                             "PERFORM 1/0; UPDATE standard_tree_nodes c SET parent_id = p.id")
+        assert self.psql(broken, check=False).returncode != 0
+        assert self.counts() == before
+        self.psql(sql)  # and it can be run again
+        assert self.counts() == before
+
+    def test_several_orgs_need_the_id(self, parsed):
+        self.psql("INSERT INTO budgets (org_id) VALUES ('22222222-2222-2222-2222-222222222222');")
+        out = self.psql(sql_script(parsed), check=False)
+        assert out.returncode != 0 and "organizaciones" in out.stderr
+        fixed = sql_script(parsed).replace("v_org  uuid := NULL;", f"v_org  uuid := '{self.ORG_A}';")
+        self.psql(fixed)
+        assert self.counts().startswith(f"{len(parsed['plantillas'])}/")
