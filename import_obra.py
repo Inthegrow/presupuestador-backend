@@ -36,8 +36,8 @@ from pathlib import Path
 
 import openpyxl
 
-from app.budget_prices import INDIRECT_DEFAULTS
-from app.obra_import import build_plan, item_notes, parse_obra, report_markdown
+from app.budget_prices import INDIRECT_DEFAULTS, today
+from app.obra_import import build_plan, item_notes, parse_obra, price_problems, report_markdown
 
 
 def load(path: str, data_only: bool = True):  # type: ignore[no-untyped-def]
@@ -46,15 +46,16 @@ def load(path: str, data_only: bool = True):  # type: ignore[no-untyped-def]
         return openpyxl.load_workbook(path, data_only=data_only)
 
 
-def maestro_templates(path: str) -> dict[str, dict]:
-    """Plantillas del Maestro, igual que las carga la Fase 3 (import_recetas.py)."""
+def maestro_templates(path: str) -> tuple[dict[str, dict], list[dict]]:
+    """Plantillas del Maestro (igual que las carga la Fase 3, import_recetas.py) y sus catálogos."""
     from app.maestro_import import parse_workbook
     from app.maestro_recipes import parse_maestro, template_payload
 
     wb_f, wb_v = load(path, data_only=False), load(path)
     entries_by_tipo, _ = parse_workbook(wb_v)
     parsed = parse_maestro(wb_f, wb_v, entries_by_tipo)
-    return {t["codigo"]: template_payload(t) for t in parsed["plantillas"]}
+    entries = [e for tipo in entries_by_tipo.values() for e in tipo]
+    return {t["codigo"]: template_payload(t) for t in parsed["plantillas"]}, entries
 
 
 def _lit(value: object) -> str:
@@ -331,16 +332,20 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
 
     parsed = parse_obra(load(args.excel))
-    plan = build_plan(parsed, maestro_templates(args.maestro))
+    templates, entries = maestro_templates(args.maestro)
+    plan = build_plan(parsed, templates)
+    precios = price_problems(plan, entries, today())
     name = Path(args.excel).name
     budget_name = args.nombre or f"{Path(args.excel).stem} (Fase 5)"
 
     Path(args.report).parent.mkdir(parents=True, exist_ok=True)
-    Path(args.report).write_text(report_markdown(parsed, plan, name), encoding="utf-8")
+    Path(args.report).write_text(report_markdown(parsed, plan, name, precios), encoding="utf-8")
 
     n_items = sum(1 for i in plan["items"] if i["nivel"] == "item")
     print(f"{n_items} ítems: {n_items - len(plan['sin_receta'])} con receta, "
           f"{len(plan['sin_receta'])} sin receta. Informe: {args.report}")
+    if precios:
+        print(f"Recursos sin precio válido: {len(precios)} códigos (ver el informe). El SQL se va a frenar.")
     if plan["plantillas_faltantes"]:
         print("Faltan plantillas en el Maestro: " + ", ".join(plan["plantillas_faltantes"]))
 

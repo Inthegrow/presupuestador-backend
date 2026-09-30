@@ -204,3 +204,27 @@ def test_sql_script(plan: dict) -> None:
     assert sql.count("$obra$") == 2
     pglast = pytest.importorskip("pglast")
     assert len(pglast.parse_sql(sql)) == 2
+
+
+def test_price_problems_in_report(parsed: dict, plan: dict) -> None:
+    from datetime import date
+
+    from app.obra_import import price_problems
+
+    entries = [
+        {"tipo": "material", "codigo": "LH18", "precio_sin_iva": 500, "fecha_precio": None},
+        {"tipo": "material", "codigo": "HADN6", "precio_sin_iva": 0, "fecha_precio": None},       # sin precio
+        {"tipo": "material", "codigo": "H30", "precio_sin_iva": 100, "fecha_precio": "2099-01-01"},  # futuro
+        {"tipo": "material", "codigo": "ES", "precio_sin_iva": 10, "fecha_precio": None},
+        {"tipo": "material", "codigo": "es", "precio_sin_iva": 12, "fecha_precio": None},          # duplicado
+    ]
+    probs = {p["codigo"]: p for p in price_problems(plan, entries, date(2026, 9, 30))}
+    assert probs["HADN6"]["motivo"] == "sin precio"
+    assert probs["H30"]["motivo"] == "sin precio"
+    assert probs["ES"]["motivo"] == "código duplicado en el catálogo"
+    assert probs["MO-OF"]["motivo"] == "no está en el catálogo"
+    assert "LH18" not in probs
+    assert "RP-PORC" not in probs  # lo compra el cliente: no hace falta precio
+    md = report_markdown(parsed, plan, "obra.xlsx", list(probs.values()))
+    assert "## Recursos sin precio válido (la carga se frena)" in md
+    assert "`HADN6`" in md

@@ -19,6 +19,28 @@ Archivo: `EDIFICIO GINKGO_Computo y Presupuesto_V2.xlsx` (hoja `01_C&P`). Títul
 
 Ojo: 3 ítems con receta están en $0 en el Excel (3.1.1, 3.1.2, 3.1.3): ahí la comparación no sirve.
 
+## Recursos sin precio válido (la carga se frena)
+
+Según los catálogos del Maestro: **15 códigos**, en **41 ítems** con receta. El SQL se frena y lista estos códigos. Si se fuerza (`v_permitir_sin_precio := true`), esos recursos quedan en $0 y esos ítems salen **más baratos que en la realidad**.
+
+| Código | Motivo | Recursos | Ítems |
+|---|---|---:|---|
+| `D-FIJ` | código duplicado en el catálogo | 7 | 5.1.1, 5.2.1, 5.3.1, 5.4.1, 5.5.1, 5.6.1… (7) |
+| `EPS-500` | sin precio | 3 | 4.9.2, 4.9.8, 4.10.6 (3) |
+| `RE-CIN` | sin precio | 13 | 5.1.3, 5.2.6, 5.2.8, 5.3.6, 5.3.8, 5.4.6… (13) |
+| `RE-FIJ` | sin precio | 13 | 5.1.3, 5.2.6, 5.2.8, 5.3.6, 5.3.8, 5.4.6… (13) |
+| `RE-LIJ150` | sin precio | 13 | 5.1.3, 5.2.6, 5.2.8, 5.3.6, 5.3.8, 5.4.6… (13) |
+| `RE-LIJ220` | sin precio | 13 | 5.1.3, 5.2.6, 5.2.8, 5.3.6, 5.3.8, 5.4.6… (13) |
+| `RE-PINC15` | sin precio | 13 | 5.1.3, 5.2.6, 5.2.8, 5.3.6, 5.3.8, 5.4.6… (13) |
+| `RE-PINC25` | sin precio | 13 | 5.1.3, 5.2.6, 5.2.8, 5.3.6, 5.3.8, 5.4.6… (13) |
+| `RE-PLI20` | sin precio | 13 | 5.1.3, 5.2.6, 5.2.8, 5.3.6, 5.3.8, 5.4.6… (13) |
+| `RE-ROD` | sin precio | 13 | 5.1.3, 5.2.6, 5.2.8, 5.3.6, 5.3.8, 5.4.6… (13) |
+| `SUB-PI` | código duplicado en el catálogo | 13 | 5.1.3, 5.2.6, 5.2.8, 5.3.6, 5.3.8, 5.4.6… (13) |
+| `SUB-YES-AGARGANTA` | sin precio | 12 | 5.2.4, 5.2.5, 5.3.4, 5.3.5, 5.4.4, 5.4.5… (12) |
+| `Y-L1X1` | sin precio | 18 | 5.2.2, 5.2.4, 5.2.5, 5.3.2, 5.3.4, 5.3.5… (18) |
+| `Y-M4X1` | sin precio | 18 | 5.2.2, 5.2.4, 5.2.5, 5.3.2, 5.3.4, 5.3.5… (18) |
+| `Y-MD200X70` | sin precio | 18 | 5.2.2, 5.2.4, 5.2.5, 5.3.2, 5.3.4, 5.3.5… (18) |
+
 ## Ítems sin receta en el Maestro
 
 Agrupados por tarea (la misma tarea se repite en varios pisos).

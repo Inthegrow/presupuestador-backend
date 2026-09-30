@@ -12,8 +12,11 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from datetime import datetime
 
+from datetime import date, datetime
+
+from app.budget_prices import find_entry, pick_price
+from app.catalog_prices import normalize_codigo
 from app.formulas import FormulaError
 from app.recipes import expand_resource, merge_params, param_defaults
 from app.tree import normalize_date_code, normalize_item_code
@@ -346,6 +349,46 @@ def item_notes(item: dict) -> str:
     return " ".join(parts)
 
 
+def price_problems(plan: dict, entries: list[dict], fecha: date) -> list[dict]:
+    """Resources without a valid price at ``fecha`` in the Maestro catalogs.
+
+    Same rule as the SQL and as Fase 4 (find_entry + pick_price). Only the
+    current price of each entry is known here (no history): the SQL, which
+    reads the real catalog and its history, has the last word.
+    Returns [{codigo, motivo, recursos, items: [codigos]}], sorted by code.
+    """
+    by_id = {str(i): {**e, "id": str(i)} for i, e in enumerate(entries)}
+    by_codigo: dict[str, list[dict]] = {}
+    for e in by_id.values():
+        if normalize_codigo(e.get("codigo")):
+            by_codigo.setdefault(normalize_codigo(e.get("codigo")), []).append(e)
+
+    found: dict[str, dict] = {}
+    for item in plan["items"]:
+        for r in item.get("recursos") or []:
+            if r.get("lo_compra_cliente"):
+                continue
+            entry, problem = find_entry({"codigo": r["codigo"], "tipo": r["tipo"]}, by_id, by_codigo)
+            if entry is not None:
+                price = pick_price(entry, [], fecha)
+                if price is None or price[0] <= 0:
+                    problem = "sin precio"
+            elif problem is None:
+                problem = "sin código"
+            if problem is None:
+                continue
+            if problem == "sin_precio":
+                problem = "no está en el catálogo"
+            elif problem == "duplicado":
+                problem = "código duplicado en el catálogo"
+            key = normalize_codigo(r["codigo"]) or "(sin código)"
+            row = found.setdefault(key, {"codigo": r["codigo"], "motivo": problem, "recursos": 0, "items": []})
+            row["recursos"] += 1
+            if item["codigo"] not in row["items"]:
+                row["items"].append(item["codigo"])
+    return [found[k] for k in sorted(found)]
+
+
 # ── Informe ──────────────────────────────────────────────────────────────────
 
 
@@ -353,7 +396,7 @@ def _money(value: float) -> str:
     return f"${value:,.0f}".replace(",", ".")
 
 
-def report_markdown(parsed: dict, plan: dict, source_file: str) -> str:
+def report_markdown(parsed: dict, plan: dict, source_file: str, precios: list[dict] | None = None) -> str:
     filas = parsed["filas"]
     rubros = [f for f in filas if f["nivel"] == "rubro"]
     items = [i for i in plan["items"] if i["nivel"] == "item"]
@@ -397,6 +440,17 @@ def report_markdown(parsed: dict, plan: dict, source_file: str) -> str:
 
     if plan["plantillas_faltantes"]:
         out += ["", "**Faltan en el Maestro las plantillas:** " + ", ".join(plan["plantillas_faltantes"])]
+
+    if precios:
+        n_items = len({c for p in precios for c in p["items"]})
+        out += ["", "## Recursos sin precio válido (la carga se frena)", "",
+                f"Según los catálogos del Maestro: **{len(precios)} códigos**, en **{n_items} ítems** con receta. "
+                "El SQL se frena y lista estos códigos. Si se fuerza (`v_permitir_sin_precio := true`), "
+                "esos recursos quedan en $0 y esos ítems salen **más baratos que en la realidad**.", "",
+                "| Código | Motivo | Recursos | Ítems |", "|---|---|---:|---|"]
+        for p in precios:
+            its = ", ".join(p["items"][:6]) + ("…" if len(p["items"]) > 6 else "")
+            out.append(f"| `{p['codigo']}` | {p['motivo']} | {p['recursos']} | {its} ({len(p['items'])}) |")
 
     out += ["", "## Ítems sin receta en el Maestro", "",
             "Agrupados por tarea (la misma tarea se repite en varios pisos).", "",
