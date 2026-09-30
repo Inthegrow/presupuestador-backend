@@ -93,7 +93,7 @@ def sql_script(plan: dict, budget_name: str, source_file: str = "") -> str:
     for i in items:
         for r in i.get("recursos") or []:
             res_rows.append(
-                f"    ({i['orden']}, {_lit(r['plantilla'])}, {_lit(r['tipo'])}, {_lit(r['codigo'])}, "
+                f"    ({len(res_rows)}, {i['orden']}, {_lit(r['plantilla'])}, {_lit(r['tipo'])}, {_lit(r['codigo'])}, "
                 f"{_lit(r['descripcion'])}, {_lit(r['unidad'])}, {_lit(r.get('cantidad', 0))}::numeric, "
                 f"{_lit(r.get('trabajadores', 0))}::numeric, {_lit(r.get('dias', 0))}::numeric, "
                 f"{_lit(r['cargas_sociales_pct'])}::numeric, {_lit(r['desperdicio_pct'])}::numeric, "
@@ -104,7 +104,7 @@ def sql_script(plan: dict, budget_name: str, source_file: str = "") -> str:
     n_items = sum(1 for i in items if i["nivel"] == "item")
     n_sin = len(plan["sin_receta"])
     items_values = ",\n".join(item_rows)
-    res_values = ",\n".join(res_rows) or "    (NULL::int, NULL, NULL, NULL, NULL, NULL, 0, 0, 0, 25, NULL, NULL, NULL, false, false, 1)"
+    res_values = ",\n".join(res_rows) or "    (0, NULL::int, NULL, NULL, NULL, NULL, NULL, 0, 0, 0, 25, NULL, NULL, NULL, false, false, 1)"
     indirect_pairs = ", ".join(
         f"'{k}', coalesce((x.c->>'{k}')::numeric, {v})" for k, v in INDIRECT_DEFAULTS.items()
     )
@@ -115,7 +115,7 @@ def sql_script(plan: dict, budget_name: str, source_file: str = "") -> str:
 -- Pegar todo en el SQL Editor de Supabase (proyecto DATA) y apretar Run.
 -- Antes: catalogos (Fase 1), plantillas del Maestro (Fase 3) y migrations/008 (Fase 4).
 -- Una sola transaccion: si algo falla, no se escribe nada. Se frena si el presupuesto ya existe
--- o si hay recursos sin precio en el catalogo.
+-- o si algun recurso no tiene precio valido a la fecha del presupuesto (misma regla que la Fase 4).
 -- DESPUES DE CARGAR: abrir el presupuesto > Cadena de Markups > "Recalcular obra".
 -- Recien ahi se aplican el redondeo de compra, los indirectos y el beneficio. Comparar contra
 -- el Excel despues de ese paso, no antes.
@@ -126,6 +126,7 @@ DECLARE
   v_budget  uuid;
   v_waste   numeric;
   v_ind     jsonb;
+  v_fecha   date := (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date;  -- precios al (hoy)
   v_permitir_sin_precio boolean := false;  -- true = cargar igual los recursos sin precio (quedan en $0)
   n_orgs    int;
   faltan    text;
@@ -164,8 +165,7 @@ BEGIN
   INSERT INTO budgets (org_id, name, description, source_file, status, indirectos, precios_al)
   VALUES (v_org, {_lit(budget_name)},
           'Fase 5: cantidades del Excel de la obra, precios con las recetas del Maestro',
-          {_lit(source_file)}, 'draft', v_ind,
-          (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date)
+          {_lit(source_file)}, 'draft', v_ind, v_fecha)
   RETURNING id INTO v_budget;
 
   -- 2. Rubros, pisos e items (sort_order = orden del Excel)
@@ -198,23 +198,61 @@ BEGIN
   JOIN budget_items p ON p.budget_id = v_budget AND p.sort_order = o.parent
   WHERE c.budget_id = v_budget AND c.sort_order = o.orden;
 
-  -- 3. Recursos de los items con receta. Precio: catalogo del Maestro por codigo
-  --    (sin distinguir mayusculas: gana la fecha mas reciente). Desperdicio: recurso > plantilla > organizacion.
+  -- 3. Recursos de los items con receta. Desperdicio: recurso > plantilla > organizacion.
   CREATE TEMP TABLE obra_recursos ON COMMIT DROP AS
   SELECT * FROM (VALUES
 {res_values}
-  ) AS t(orden, plantilla, tipo, codigo, descripcion, unidad, cantidad, trabajadores, dias,
+  ) AS t(n, orden, plantilla, tipo, codigo, descripcion, unidad, cantidad, trabajadores, dias,
          cargas, desperdicio, formula, rendimiento, lo_compra_cliente, redondear, unidad_compra)
   WHERE orden IS NOT NULL;
 
-  -- Control: recursos con un codigo que no esta en el catalogo o no tiene precio
-  SELECT string_agg(DISTINCT r.codigo, ', ' ORDER BY r.codigo) INTO faltan
+  -- Precio de cada recurso con la misma regla que "Actualizar precios" (Fase 4,
+  -- app/budget_prices.py: find_entry + pick_price), a la fecha del presupuesto:
+  --   * entrada del catalogo por codigo (sin distinguir mayusculas ni espacios); si hay varias,
+  --     la unica del mismo tipo; si no hay una sola, es un codigo duplicado.
+  --   * precio: historial + precio actual de esa entrada, sin fechas posteriores a v_fecha;
+  --     gana la fecha mas reciente (con fecha antes que sin fecha; a igual fecha, el actual).
+  CREATE TEMP TABLE obra_precios ON COMMIT DROP AS
+  SELECT r.n, sel.entry_id, p.precio, p.fecha,
+         CASE WHEN sel.n_all = 0 THEN 'no esta en el catalogo'
+              WHEN sel.entry_id IS NULL THEN 'codigo duplicado en el catalogo'
+              WHEN p.precio IS NULL OR p.precio <= 0 THEN 'sin precio al ' || to_char(v_fecha, 'DD/MM/YYYY')
+         END AS problema
   FROM obra_recursos r
-  WHERE NOT r.lo_compra_cliente AND NOT EXISTS (
-    SELECT 1 FROM catalog_entries e
-    WHERE e.org_id = v_org AND upper(e.codigo) = upper(r.codigo) AND coalesce(e.precio_sin_iva, 0) > 0);
+  CROSS JOIN LATERAL (
+    SELECT c.n_all,
+           CASE WHEN c.n_same = 1 THEN c.id_same
+                WHEN c.n_all = 1 AND c.n_same = 0 THEN c.id_any END AS entry_id
+    FROM (
+      SELECT count(*) AS n_all,
+             count(*) FILTER (WHERE e.tipo = r.tipo) AS n_same,
+             (array_agg(e.id) FILTER (WHERE e.tipo = r.tipo))[1] AS id_same,
+             (array_agg(e.id))[1] AS id_any
+      FROM catalog_entries e
+      WHERE e.org_id = v_org
+        AND upper(btrim(regexp_replace(e.codigo, '[[:space:]]+', ' ', 'g')))
+          = upper(btrim(regexp_replace(r.codigo, '[[:space:]]+', ' ', 'g')))
+    ) c
+  ) sel
+  LEFT JOIN LATERAL (
+    SELECT x.precio, x.fecha FROM (
+      SELECT h.precio_sin_iva AS precio, h.fecha_precio AS fecha, 0 AS es_actual, h.created_at
+      FROM catalog_price_history h WHERE h.entry_id = sel.entry_id AND h.org_id = v_org
+      UNION ALL
+      SELECT e.precio_sin_iva, e.fecha_precio, 1, NULL FROM catalog_entries e WHERE e.id = sel.entry_id
+    ) x
+    WHERE x.precio IS NOT NULL AND (x.fecha IS NULL OR x.fecha <= v_fecha)
+    ORDER BY coalesce(x.fecha, '-infinity'::date) DESC, x.es_actual DESC, x.created_at DESC NULLS LAST
+    LIMIT 1
+  ) p ON true;
+
+  -- Control: se frena si un recurso no tiene precio valido (> 0) a la fecha del presupuesto.
+  -- El control y la carga usan la misma tabla obra_precios.
+  SELECT string_agg(DISTINCT r.codigo || ' (' || op.problema || ')', ', ') INTO faltan
+  FROM obra_recursos r JOIN obra_precios op ON op.n = r.n
+  WHERE NOT r.lo_compra_cliente AND op.problema IS NOT NULL;
   IF faltan IS NOT NULL AND NOT v_permitir_sin_precio THEN
-    RAISE EXCEPTION 'Recursos sin precio en el catalogo: %. Cargar esos precios (o poner v_permitir_sin_precio := true para cargarlos en $0)', faltan;
+    RAISE EXCEPTION 'Recursos sin precio valido: %. Cargar esos precios (o poner v_permitir_sin_precio := true para cargarlos en $0)', faltan;
   END IF;
 
   INSERT INTO item_resources (item_id, org_id, tipo, codigo, descripcion, unidad, cantidad,
@@ -224,21 +262,15 @@ BEGIN
                               redondear, unidad_compra, cantidad_redondeo, precio_fecha)
   SELECT bi.id, v_org, r.tipo, r.codigo, r.descripcion, r.unidad, r.cantidad,
          r.trabajadores, r.dias, r.cargas, w.pct, w.origen,
-         q.efectiva, coalesce(ce.precio_sin_iva, 0),
+         q.efectiva, coalesce(op.precio, 0),
          CASE WHEN r.lo_compra_cliente THEN 0
-              ELSE round(q.efectiva * coalesce(ce.precio_sin_iva, 0), 2) END,
-         ce.id, r.formula, r.rendimiento, r.lo_compra_cliente, r.redondear, r.unidad_compra, 0,
-         ce.fecha_precio
+              ELSE round(q.efectiva * coalesce(op.precio, 0), 2) END,
+         op.entry_id, r.formula, r.rendimiento, r.lo_compra_cliente, r.redondear, r.unidad_compra, 0,
+         op.fecha
   FROM obra_recursos r
+  JOIN obra_precios op ON op.n = r.n
   JOIN budget_items bi ON bi.budget_id = v_budget AND bi.sort_order = r.orden
   JOIN item_templates t ON t.org_id = v_org AND t.codigo = r.plantilla
-  LEFT JOIN LATERAL (
-    SELECT e.id, e.precio_sin_iva, e.fecha_precio FROM catalog_entries e
-    JOIN price_catalogs pc ON pc.id = e.catalog_id
-    WHERE e.org_id = v_org AND upper(e.codigo) = upper(r.codigo)
-    ORDER BY e.fecha_precio DESC NULLS LAST, pc.created_at DESC, (e.codigo = r.codigo) DESC, e.id
-    LIMIT 1
-  ) ce ON true
   CROSS JOIN LATERAL (
     SELECT CASE WHEN r.tipo = 'mano_obra' THEN 0
                 ELSE coalesce(r.desperdicio, t.desperdicio_pct, v_waste, 0) END AS pct,

@@ -188,17 +188,18 @@ def test_sql_script(plan: dict) -> None:
     assert "RAISE EXCEPTION 'Faltan plantillas del Maestro" in sql
     assert "ya existe" in sql
     assert "ARRAY['4.1.7', '5.1.4', '5.2.3', '7.1.1', '8.3']::text[]" in sql
-    assert "upper(e.codigo) = upper(r.codigo)" in sql
     # Fase 4: indirectos de la obra, fecha de precios y fecha del precio de cada recurso
     assert "Falta correr migrations/008" in sql
     assert "status, indirectos, precios_al)" in sql
     assert "'estructura_pct', coalesce((x.c->>'estructura_pct')::numeric, 15)" in sql
     assert "cantidad_redondeo, precio_fecha)" in sql
-    # Auditoría: gana el precio más reciente aunque cambien las mayúsculas
-    assert "ORDER BY e.fecha_precio DESC NULLS LAST, pc.created_at DESC, (e.codigo = r.codigo) DESC" in sql
-    # Auditoría: sin precio se frena, salvo que se fuerce
+    # Auditoría: precio vigente a la fecha del presupuesto (regla de la Fase 4), el mismo
+    # para el control y para la carga; sin precio válido se frena, salvo que se fuerce.
+    # El comportamiento se prueba contra Postgres en tests/test_obra_import_pg.py.
+    assert "x.fecha IS NULL OR x.fecha <= v_fecha" in sql
+    assert "JOIN obra_precios op ON op.n = r.n" in sql
     assert "v_permitir_sin_precio boolean := false" in sql
-    assert "RAISE EXCEPTION 'Recursos sin precio en el catalogo" in sql
+    assert "RAISE EXCEPTION 'Recursos sin precio valido" in sql
     assert "Recalcular obra" in sql
     assert sql.count("$obra$") == 2
     pglast = pytest.importorskip("pglast")
