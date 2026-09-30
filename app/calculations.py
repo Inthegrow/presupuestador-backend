@@ -18,6 +18,27 @@ def _sf(value: object) -> float:
     return result if result is not None else 0.0
 
 
+def pct_or_default(source: dict, key: str, default: float) -> float:
+    """Read a percentage, falling back to default only when it is missing.
+
+    Unlike ``value or default``, an explicit 0 is respected (e.g. 0% beneficio).
+    """
+    value = source.get(key)
+    if value is None or value == "":
+        return float(default)
+    return float(value)
+
+
+def fraction_to_pct(value: object) -> float:
+    """Normalize a waste/cargas value to percent (10 = 10%).
+
+    TERRAC's Excel files store 10% as 0.1 while the DB stores 10, so values in
+    (0, 1] are treated as fractions. Larger values are assumed to be percents.
+    """
+    number = _sf(value)
+    return number * 100 if 0 < number <= 1 else number
+
+
 def calc_item_totals(item: dict) -> dict:
     """Derive calculated cost fields from an item dict.
 
@@ -101,7 +122,7 @@ def calc_resource_subtotal(resource: dict) -> dict:
     if tipo == "mano_obra":
         trabajadores = float(resource.get("trabajadores") or 0)
         dias = float(resource.get("dias") or 0)
-        cargas = float(resource.get("cargas_sociales_pct") or 25)
+        cargas = pct_or_default(resource, "cargas_sociales_pct", 25)
         precio = float(resource.get("precio_unitario") or 0)
 
         cantidad_efectiva = round(trabajadores * dias * (1 + cargas / 100), 2)
@@ -175,29 +196,29 @@ def calc_cascade_indirects(item: dict, config: dict) -> dict:
     directo = float(item.get("directo_total") or 0)
 
     # Step 1: Indirect costs (all over directo)
-    imprevistos = float(config.get("imprevistos_pct") or 3)
-    estructura = float(config.get("estructura_pct") or 15)
-    jefatura = float(config.get("jefatura_pct") or 8)
-    logistica = float(config.get("logistica_pct") or 5)
-    herramientas = float(config.get("herramientas_pct") or 3)
+    imprevistos = pct_or_default(config, "imprevistos_pct", 3)
+    estructura = pct_or_default(config, "estructura_pct", 15)
+    jefatura = pct_or_default(config, "jefatura_pct", 8)
+    logistica = pct_or_default(config, "logistica_pct", 5)
+    herramientas = pct_or_default(config, "herramientas_pct", 3)
 
     pct_indirecto = (imprevistos + estructura + jefatura + logistica + herramientas) / 100
     indirecto = round(directo * pct_indirecto, 2)
     subtotal_02 = directo + indirecto
 
     # Step 2: Beneficio over Subtotal 02 (NOT over directo)
-    beneficio_pct = float(config.get("beneficio_pct") or 10)
+    beneficio_pct = pct_or_default(config, "beneficio_pct", 10)
     beneficio = round(subtotal_02 * beneficio_pct / 100, 2)
     subtotal_03 = subtotal_02 + beneficio
 
     # Step 3: Taxes over Subtotal 03
-    iibb = float(config.get("ingresos_brutos_pct") or 7)
-    cheque = float(config.get("imp_cheque_pct") or 1.2)
+    iibb = pct_or_default(config, "ingresos_brutos_pct", 7)
+    cheque = pct_or_default(config, "imp_cheque_pct", 1.2)
     impuestos = round(subtotal_03 * (iibb + cheque) / 100, 2)
     neto = subtotal_03 + impuestos
 
     # Step 4: IVA over Neto
-    iva_pct = float(config.get("iva_pct") or 21)
+    iva_pct = pct_or_default(config, "iva_pct", 21)
     iva = round(neto * iva_pct / 100, 2)
     total_final = neto + iva
 

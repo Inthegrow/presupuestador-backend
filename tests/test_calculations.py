@@ -1,6 +1,14 @@
 """Tests for app.calculations — pure cost calculation functions."""
 
-from app.calculations import calc_budget_summary, calc_item_totals, recalc_all_items
+from app.calculations import (
+    calc_budget_summary,
+    calc_cascade_indirects,
+    calc_item_totals,
+    calc_resource_subtotal,
+    fraction_to_pct,
+    pct_or_default,
+    recalc_all_items,
+)
 
 
 class TestCalcItemTotals:
@@ -190,3 +198,74 @@ class TestRecalcAllItems:
         ]
         recalc_all_items(items)
         assert items[0]["mat_total"] == 0  # original unchanged
+
+
+class TestPctOrDefault:
+    def test_missing_uses_default(self):
+        assert pct_or_default({}, "beneficio_pct", 10) == 10
+
+    def test_none_and_empty_use_default(self):
+        assert pct_or_default({"beneficio_pct": None}, "beneficio_pct", 10) == 10
+        assert pct_or_default({"beneficio_pct": ""}, "beneficio_pct", 10) == 10
+
+    def test_explicit_zero_is_respected(self):
+        assert pct_or_default({"beneficio_pct": 0}, "beneficio_pct", 10) == 0
+
+
+ZERO_CONFIG = {
+    "imprevistos_pct": 0, "estructura_pct": 0, "jefatura_pct": 0,
+    "logistica_pct": 0, "herramientas_pct": 0, "beneficio_pct": 0,
+    "ingresos_brutos_pct": 0, "imp_cheque_pct": 0, "iva_pct": 0,
+}
+
+
+class TestCascadeZeroPercentages:
+
+    def test_all_zero_leaves_directo_untouched(self):
+        item = calc_cascade_indirects({"directo_total": 1000}, dict(ZERO_CONFIG))
+        assert item["indirecto_total"] == 0
+        assert item["beneficio_total"] == 0
+        assert item["impuestos_total"] == 0
+        assert item["iva_total"] == 0
+        assert item["total_final"] == 1000
+
+    def test_zero_beneficio_only(self):
+        config = {**ZERO_CONFIG, "estructura_pct": 10}
+        item = calc_cascade_indirects({"directo_total": 1000}, config)
+        assert item["indirecto_total"] == 100
+        assert item["beneficio_total"] == 0
+
+    def test_missing_config_uses_defaults(self):
+        item = calc_cascade_indirects({"directo_total": 1000}, {})
+        # 3 + 15 + 8 + 5 + 3 = 34% indirectos
+        assert item["indirecto_total"] == 340
+
+
+class TestResourceZeroCargas:
+    def test_zero_cargas_sociales_is_respected(self):
+        r = calc_resource_subtotal({
+            "tipo": "mano_obra", "trabajadores": 2, "dias": 5,
+            "cargas_sociales_pct": 0, "precio_unitario": 100,
+        })
+        assert r["cantidad_efectiva"] == 10
+        assert r["subtotal"] == 1000
+
+    def test_missing_cargas_defaults_to_25(self):
+        r = calc_resource_subtotal({
+            "tipo": "mano_obra", "trabajadores": 2, "dias": 5, "precio_unitario": 100,
+        })
+        assert r["cantidad_efectiva"] == 12.5
+
+
+class TestFractionToPct:
+    def test_fraction_becomes_percent(self):
+        assert fraction_to_pct(0.1) == 10
+        assert fraction_to_pct(0.25) == 25
+        assert fraction_to_pct(1) == 100
+
+    def test_percent_is_kept(self):
+        assert fraction_to_pct(15) == 15
+
+    def test_empty_values(self):
+        assert fraction_to_pct(None) == 0
+        assert fraction_to_pct(0) == 0

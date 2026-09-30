@@ -14,6 +14,7 @@ import sys
 import random
 
 from supabase import create_client
+from app.calculations import fraction_to_pct
 
 # --- Config ---
 URL = os.environ.get("DATA_SUPABASE_URL") or os.environ.get("SUPABASE_URL")
@@ -210,7 +211,7 @@ def seed_project(name, description, status, seed_dir, source_file, modify_prices
                 "descripcion": r.get("descripcion"),
                 "unidad": r.get("unidad"),
                 "cantidad": r.get("cantidad"),
-                "desperdicio_pct": r.get("desperdicio_pct") or 0,
+                "desperdicio_pct": fraction_to_pct(r.get("desperdicio_pct")),
                 "cantidad_efectiva": r.get("cantidad_efectiva"),
                 "precio_unitario": precio,
                 "subtotal": r.get("subtotal") or 0,

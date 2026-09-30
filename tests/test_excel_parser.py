@@ -104,3 +104,55 @@ class TestDateCodeEdgeCases:
         assert normalize_item_code(pd.Timestamp("2024-01-02")) == "2.1"
         assert normalize_item_code(pd.Timestamp("2024-02-02")) == "2.2"
         assert normalize_item_code(pd.Timestamp("2024-03-02")) == "2.3"
+
+
+class TestDetailSheetSections:
+    """Section headers of TERRAC detail sheets map to the 5 resource tipos."""
+
+    @pytest.mark.parametrize("header,tipo", [
+        ("MATERIALES", "material"),
+        ("MANO DE OBRA - PERSONAS", "mano_obra"),
+        ("MANO DE OBRA - EQUIPOS", "equipo"),
+        ("MANO DE OBRA - MATERIALES", "mo_material"),
+        ("MANO DE OBRA - SUBCONTRATOS", "subcontrato"),
+        ("EQUIPOS", "equipo"),
+        ("SUBCONTRATOS", "subcontrato"),
+    ])
+    def test_section_tipo(self, header, tipo):
+        from app.routers.excel import _section_tipo
+        assert _section_tipo(header) == tipo
+
+    def test_non_section_row(self):
+        from app.routers.excel import _section_tipo
+        assert _section_tipo("H30") is None
+
+    def test_parse_detail_sheet(self):
+        from app.routers.excel import _parse_detail_sheets
+        rows = [[None] * 9 for _ in range(4)] + [
+            ["MATERIALES"] + [None] * 8,
+            ["Código", "Descripción", "Unidad", "Cantidad", None, "Desperdicio", None, None, None],
+            ["H30", "Hormigon H30", "m3", 38.8, None, 0.1, 43, 169000, 7267000],
+            ["TOTAL MATERIALES"] + [None] * 8,
+            ["MANO DE OBRA - PERSONAS"] + [None] * 8,
+            ["MO-OF", "Oficial", "u", 3, 20, 0.25, 75, 90000, 6750000],
+            ["TOTAL"] + [None] * 8,
+            ["MANO DE OBRA - EQUIPOS"] + [None] * 8,
+            ["E-MC", "Mini Cargadora", "u", 1, 2, 0, 2, 420000, 840000],
+            ["TOTAL"] + [None] * 8,
+            ["MANO DE OBRA - MATERIALES"] + [None] * 8,
+            ["DIS", "Disco corte", "u", 10, None, 0.1, 11, 48855, 537405],
+            ["TOTAL"] + [None] * 8,
+        ]
+        df = pd.DataFrame(rows)
+        result = _parse_detail_sheets({"4.1.1": df}, ["4.1.1"], "org")
+        resources = result["4.1.1"]
+        by_code = {r["codigo"]: r for r in resources}
+
+        assert by_code["H30"]["tipo"] == "material"
+        assert by_code["H30"]["desperdicio_pct"] == 10
+        assert by_code["MO-OF"]["tipo"] == "mano_obra"
+        assert by_code["MO-OF"]["trabajadores"] == 3
+        assert by_code["MO-OF"]["dias"] == 20
+        assert by_code["MO-OF"]["cargas_sociales_pct"] == 25
+        assert by_code["E-MC"]["tipo"] == "equipo"
+        assert by_code["DIS"]["tipo"] == "mo_material"

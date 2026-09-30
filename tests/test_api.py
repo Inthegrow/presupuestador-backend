@@ -186,8 +186,9 @@ class TestAnalysisEndpoints:
         r = client.get("/budgets/00000000-0000-0000-0000-000000000001/indirects")
         assert r.status_code == 200
         data = r.json()
-        assert data["estructura_pct"] == 0.15
-        assert data["jefatura_pct"] == 0.08
+        # Percentages are stored as whole numbers (15 = 15%)
+        assert data["estructura_pct"] == 15
+        assert data["jefatura_pct"] == 8
 
     @patch("app.routers.analysis.get_data_db")
     def test_update_indirects(self, mock_db, client):
