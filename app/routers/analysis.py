@@ -471,10 +471,18 @@ async def update_prices(
         raise HTTPException(404, "Presupuesto sin items")
 
     anterior = budget.get("precios_al")
-    # Photo of the current state: saved as a version only if the update works,
-    # and used to undo the update if any write fails.
+    # Save the current state as a version BEFORE changing anything: if this
+    # fails, nothing was touched. It is also used to undo a failed update.
     before = _snapshot(db, org_id, budget, items)
     notas_antes = f"Antes de actualizar precios (precios al {anterior or 'sin fecha'})"
+    try:
+        version_anterior = _insert_version(db, org_id, user["user_id"], before, notas_antes)
+    except Exception as exc:
+        logger.exception("Could not save the version before updating budget %s", bid)
+        raise HTTPException(
+            500,
+            "No se pudo guardar la versión actual. No se cambió nada; probá de nuevo.",
+        ) from exc
 
     price_for, problemas = load_price_lookup(db, org_id, fecha)
     try:
@@ -485,30 +493,33 @@ async def update_prices(
         }).eq("id", bid).eq("org_id", org_id).execute()
         if not written.data:
             raise RuntimeError("No se guardó la fecha de precios")
+        budget = _get_budget(db, bid, org_id)
+        version_nueva = _save_version(
+            db, org_id, user["user_id"], budget, _get_items(bid, org_id),
+            f"Precios al {fecha.isoformat()}",
+        )
     except Exception as exc:
         logger.exception("Price update failed for budget %s", bid)
         try:
             _restore(db, org_id, before)
         except Exception:
             logger.exception("Could not restore budget %s", bid)
-            # Keep the old numbers somewhere Carlos can get them back from
-            saved = _insert_version(db, org_id, user["user_id"], before, notas_antes + " — la actualización falló")
             raise HTTPException(
                 500,
                 "La actualización de precios falló y el presupuesto quedó a medias. "
-                f"Los valores anteriores están guardados en la versión v{saved['version']}.",
+                f"Los valores anteriores están guardados en la versión v{version_anterior['version']}.",
             ) from exc
+        # Back as it was: the "antes" version would only repeat the current state
+        try:
+            db.table("budget_versions").delete().eq("id", version_anterior["version_id"]).eq(
+                "org_id", org_id
+            ).execute()
+        except Exception:
+            logger.warning("Could not delete version %s", version_anterior["version_id"], exc_info=True)
         raise HTTPException(
             500,
             "No se pudieron guardar los precios nuevos. El presupuesto quedó como estaba; probá de nuevo.",
         ) from exc
-
-    version_anterior = _insert_version(db, org_id, user["user_id"], before, notas_antes)
-    budget = _get_budget(db, bid, org_id)
-    version_nueva = _save_version(
-        db, org_id, user["user_id"], budget, _get_items(bid, org_id),
-        f"Precios al {fecha.isoformat()}",
-    )
 
     return {
         **result,

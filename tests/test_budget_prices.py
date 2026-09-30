@@ -20,6 +20,10 @@ from app.main import create_app
 from tests.test_recipes_api import BUDGET, ITEM, MOCK_USER, ORG, FakeDB, Resp
 
 TODAY = date(2026, 9, 30)
+ITEM_TOTALS = (
+    "mat_unitario", "mo_unitario", "mat_total", "mo_total", "directo_total", "indirecto_total",
+    "beneficio_total", "neto_total", "impuestos_total", "iva_total", "total_final",
+)
 
 
 def resource(**over):
@@ -42,7 +46,8 @@ def tables(**over):
         }],
         "budget_items": [
             {"id": ITEM, "budget_id": BUDGET, "org_id": ORG, "code": "4.1", "cantidad": 10,
-             "notas": None, "template_id": None, "parametros": {}},
+             "notas": None, "template_id": None, "parametros": {},
+             **dict.fromkeys(ITEM_TOTALS, 0)},
         ],
         "item_resources": [
             resource(id="r1", codigo="H30", catalog_entry_id="c1", precio_unitario=1000, subtotal=1000),
@@ -314,8 +319,14 @@ class TestUpdatePrices:
 class FailingDB(FakeDB):
     """FakeDB whose writes fail for the chosen (table, id) pairs."""
 
-    def __init__(self, tables, fail_update=(), fail_restore=False, empty_update=(), **kw):
+    def __init__(self, tables, fail_update=(), fail_restore=False, empty_update=(),
+                 fail_version_insert=(), fail_updates_after_version=None, **kw):
         super().__init__(tables, **kw)
+        # Which budget_versions inserts fail: 1 = the first one, 2 = the second...
+        self.fail_version_insert = set(fail_version_insert)
+        self.version_inserts = 0
+        # Every update fails once this many version inserts were tried (breaks the restore)
+        self.fail_updates_after_version = fail_updates_after_version
         self.fail_update = set(fail_update)
         self.empty_update = set(empty_update)
         self.fail_restore = fail_restore
@@ -326,6 +337,16 @@ class FailingDB(FakeDB):
         execute = query.execute
 
         def guarded():
+            if query.action == "insert" and name == "budget_versions":
+                self.version_inserts += 1
+                if self.version_inserts in self.fail_version_insert:
+                    raise RuntimeError("insert failed")
+            if (
+                query.action == "update"
+                and self.fail_updates_after_version is not None
+                and self.version_inserts >= self.fail_updates_after_version
+            ):
+                raise RuntimeError("write failed")
             if query.action == "update":
                 ids = {v for c, v in query.filters if c == "id"}
                 if any((name, i) in self.fail_update for i in ids):
@@ -386,6 +407,35 @@ class TestPriceUpdateFailure:
         assert fake.tables["budgets"][0]["precios_al"] == "2026-03-01"
         assert res(fake, "r1")["precio_unitario"] == 1000
         assert fake.tables["budget_versions"] == []
+
+
+    def test_failed_before_version_changes_nothing(self, client):
+        fake = FailingDB(tables(), fail_version_insert={1})
+        before = copy.deepcopy(fake.tables)
+        r = self._run(client, fake)
+        assert r.status_code == 500
+        assert fake.tables == before
+
+    def test_failed_new_version_restores_budget(self, client):
+        fake = FailingDB(tables(), fail_version_insert={2})
+        before = copy.deepcopy(fake.tables)
+        r = self._run(client, fake)
+        assert r.status_code == 500
+        assert "quedó como estaba" in r.json()["detail"]
+        assert res(fake, "r1")["precio_unitario"] == 1000
+        assert fake.tables["item_resources"] == before["item_resources"]
+        assert fake.tables["budget_items"] == before["budget_items"]
+        assert fake.tables["budgets"][0]["precios_al"] == "2026-03-01"
+        assert fake.tables["budget_versions"] == []
+
+    def test_failed_new_version_and_restore_keeps_before_version(self, client):
+        fake = FailingDB(tables(), fail_version_insert={2}, fail_updates_after_version=2)
+        r = self._run(client, fake)
+        assert r.status_code == 500
+        assert "v1" in r.json()["detail"]
+        [version] = fake.tables["budget_versions"]
+        old = {x["id"]: x["precio_unitario"] for x in json.loads(version["data"])["resources"]}
+        assert old["r1"] == 1000
 
 
 class TestPagination:
