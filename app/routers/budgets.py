@@ -7,6 +7,7 @@ from uuid import UUID
 from fastapi import APIRouter, Body, Depends, HTTPException
 
 from app.auth import get_current_user
+from app.budget_prices import initial_indirects, today
 from app.calculations import (
     calc_budget_summary,
     calc_item_totals,
@@ -43,7 +44,7 @@ _ITEM_RECIPE_FIELDS = ("template_id", "parametros")
 _RESOURCE_COPY_FIELDS = (
     "trabajadores", "dias", "cargas_sociales_pct", "catalog_entry_id",
     "formula", "rendimiento", "desperdicio_origen", "lo_compra_cliente",
-    "redondear", "unidad_compra", "cantidad_redondeo",
+    "redondear", "unidad_compra", "cantidad_redondeo", "precio_fecha",
 )
 
 
@@ -71,6 +72,9 @@ async def create_budget(budget: BudgetCreate, user: dict = Depends(get_current_u
         "name": budget.name,
         "description": budget.description,
         "status": "draft",
+        # Fase 4: the budget starts with the general indirect % and today's prices
+        "indirectos": initial_indirects(db, user["org_id"]),
+        "precios_al": today().isoformat(),
     }).execute()
     return result.data[0]
 
@@ -81,12 +85,17 @@ async def create_full_budget(payload: CreateFullBudget, user: dict = Depends(get
     db = get_data_db()
     org_id = user["org_id"]
 
-    # 1. Create the budget record
+    # 1. Create the budget record (indirect % start with the general ones)
+    indirectos = initial_indirects(db, org_id)
+    if payload.indirectos:
+        indirectos.update(payload.indirectos.model_dump())
     budget_data: dict = {
         "org_id": org_id,
         "name": payload.name,
         "description": payload.description,
         "status": "draft",
+        "indirectos": indirectos,
+        "precios_al": today().isoformat(),
     }
     budget_result = db.table("budgets").insert(budget_data).execute()
     if not budget_result.data:
@@ -137,18 +146,7 @@ async def create_full_budget(payload: CreateFullBudget, user: dict = Depends(get
             items_created += 1
             sort_order += 1
 
-    # 3. Set indirect config if provided
-    if payload.indirectos:
-        db.table("indirect_configs").insert({
-            "budget_id": budget_id,
-            "org_id": org_id,
-            "estructura_pct": payload.indirectos.estructura_pct,
-            "jefatura_pct": payload.indirectos.jefatura_pct,
-            "logistica_pct": payload.indirectos.logistica_pct,
-            "herramientas_pct": payload.indirectos.herramientas_pct,
-        }).execute()
-
-    # 4. Build summary
+    # 3. Build summary
     all_items = _get_items(budget_id, org_id)
     summary = calc_budget_summary(all_items)
 
@@ -1145,8 +1143,12 @@ async def copy_budget(
         "description": original.data.get("description"),
         "source_file": original.data.get("source_file"),
         "status": "draft",
-        # Fase 2 columns: copied only when present (DB may be pre-migration)
-        **{k: original.data[k] for k in ("desperdicio_pct",) if k in original.data},
+        # Fase 2/4 columns: copied only when present (DB may be pre-migration)
+        **{
+            k: original.data[k]
+            for k in ("desperdicio_pct", "indirectos", "precios_al")
+            if k in original.data
+        },
     }).execute()
     new_budget_id = new_budget.data[0]["id"]
 

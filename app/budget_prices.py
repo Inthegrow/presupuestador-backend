@@ -1,0 +1,208 @@
+"""Fase 4: cada obra con sus números.
+
+- Indirectos por presupuesto: ``budgets.indirectos`` guarda los % de la obra.
+  Arrancan con los valores generales (``indirect_config``) y se pueden cambiar
+  en esa obra sin tocar las demás. ``{}`` = la obra usa los generales.
+- Precios con fecha: elegir el último precio de un recurso a una fecha dada.
+"""
+
+from __future__ import annotations
+
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
+
+from app.catalog_prices import normalize_codigo, parse_fecha
+
+# Cascade percentages (whole numbers: 15 = 15%). Same defaults as calc_cascade_indirects.
+INDIRECT_DEFAULTS: dict[str, float] = {
+    "imprevistos_pct": 3,
+    "estructura_pct": 15,
+    "jefatura_pct": 8,
+    "logistica_pct": 5,
+    "herramientas_pct": 3,
+    "beneficio_pct": 10,
+    "ingresos_brutos_pct": 7,
+    "imp_cheque_pct": 1.2,
+    "iva_pct": 21,
+}
+INDIRECT_KEYS = tuple(INDIRECT_DEFAULTS)
+
+_TZ = ZoneInfo("America/Argentina/Buenos_Aires")
+
+
+def today() -> date:
+    """Today in Argentina (the server runs in UTC)."""
+    return datetime.now(_TZ).date()
+
+
+# ── Indirectos ──────────────────────────────────────────────────────────────
+
+
+def general_indirects(org_config: dict | None) -> dict[str, float]:
+    """The organization's values, with defaults for the missing ones."""
+    org_config = org_config or {}
+    return {
+        k: (org_config[k] if org_config.get(k) is not None else default)
+        for k, default in INDIRECT_DEFAULTS.items()
+    }
+
+
+def budget_overrides(budget: dict | None) -> dict[str, float]:
+    """The budget's own values (only known keys that have a value)."""
+    raw = (budget or {}).get("indirectos") or {}
+    if not isinstance(raw, dict):
+        return {}
+    return {k: raw[k] for k in INDIRECT_KEYS if raw.get(k) is not None}
+
+
+def effective_indirects(org_config: dict | None, budget: dict | None) -> dict[str, float]:
+    """Values used for this budget: defaults < generales < obra."""
+    return {**general_indirects(org_config), **budget_overrides(budget)}
+
+
+def load_org_config(db, org_id: str) -> dict:
+    """Raw indirect_config row of the organization ({} when there is none)."""
+    rows = (
+        db.table("indirect_config")
+        .select("*")
+        .eq("org_id", org_id)
+        .limit(1)
+        .execute()
+        .data or []
+    )
+    return rows[0] if rows else {}
+
+
+def save_org_config(db, org_id: str, data: dict) -> dict:
+    """Upsert the organization's indirect_config row and return it."""
+    existing = load_org_config(db, org_id)
+    if existing:
+        result = db.table("indirect_config").update(data).eq("org_id", org_id).execute()
+    else:
+        result = db.table("indirect_config").insert({"org_id": org_id, **data}).execute()
+    return result.data[0] if result.data else {**existing, **data}
+
+
+def initial_indirects(db, org_id: str) -> dict[str, float]:
+    """Values a new budget starts with: a copy of the general ones."""
+    return general_indirects(load_org_config(db, org_id))
+
+
+def budget_config(db, org_id: str, budget: dict | None) -> dict:
+    """Full config for the cascade of one budget (org row + the obra's %)."""
+    org_config = load_org_config(db, org_id)
+    return {**org_config, **effective_indirects(org_config, budget)}
+
+
+# ── Precios a una fecha ─────────────────────────────────────────────────────
+
+
+def pick_price(entry: dict, history: list[dict], fecha: date) -> tuple[float, str | None] | None:
+    """Last price of a catalog entry on or before ``fecha``.
+
+    Candidates are the history rows and the entry's current price. A dated
+    price wins over an undated one; with the same date, the newest wins.
+    Returns (precio, 'YYYY-MM-DD' or None) or None when there is no price.
+    """
+    candidates: list[tuple[date, str, float, date | None]] = []
+
+    def add(precio: object, fecha_precio: object, orden: str) -> None:
+        if precio is None or precio == "":
+            return
+        try:
+            f = parse_fecha(fecha_precio)
+        except ValueError:
+            f = None
+        if f is not None and f > fecha:
+            return
+        candidates.append((f or date.min, orden, float(precio), f))
+
+    for h in history:
+        add(h.get("precio_sin_iva"), h.get("fecha_precio"), str(h.get("created_at") or ""))
+    # The entry holds the current value: among equal dates it is the newest
+    add(entry.get("precio_sin_iva"), entry.get("fecha_precio"), "~")
+
+    if not candidates:
+        return None
+    _, _, precio, f = max(candidates, key=lambda c: (c[0], c[1]))
+    return precio, (f.isoformat() if f else None)
+
+
+def find_entry(
+    resource: dict,
+    by_id: dict[str, dict],
+    by_codigo: dict[str, list[dict]],
+) -> tuple[dict | None, str | None]:
+    """Catalog entry of a resource: by catalog_entry_id, else by code.
+
+    Returns (entry, problem). problem is None, 'sin_precio' or 'duplicado'.
+    """
+    entry_id = resource.get("catalog_entry_id")
+    if entry_id and str(entry_id) in by_id:
+        return by_id[str(entry_id)], None
+    codigo = normalize_codigo(resource.get("codigo"))
+    if not codigo:
+        return None, None
+    matches = by_codigo.get(codigo, [])
+    same_tipo = [e for e in matches if e.get("tipo") == resource.get("tipo")]
+    if len(same_tipo) == 1:
+        return same_tipo[0], None
+    if len(matches) == 1 and not same_tipo:
+        return matches[0], None
+    if matches:
+        return None, "duplicado"
+    return None, "sin_precio"
+
+
+def load_price_lookup(db, org_id: str, fecha: date):
+    """Build ``price_for(resource)`` for the org's catalogs at ``fecha``.
+
+    price_for returns (precio, fecha_precio, entry_id) or None, and records
+    resources without a price in ``problemas`` (list of dicts).
+    """
+    entries = (
+        db.table("catalog_entries")
+        .select("*")
+        .eq("org_id", org_id)
+        .execute()
+        .data or []
+    )
+    by_id = {str(e["id"]): e for e in entries}
+    by_codigo: dict[str, list[dict]] = {}
+    for e in entries:
+        codigo = normalize_codigo(e.get("codigo"))
+        if codigo:
+            by_codigo.setdefault(codigo, []).append(e)
+
+    history: dict[str, list[dict]] = {}
+    ids = list(by_id)
+    for start in range(0, len(ids), 200):
+        rows = (
+            db.table("catalog_price_history")
+            .select("*")
+            .eq("org_id", org_id)
+            .in_("entry_id", ids[start:start + 200])
+            .execute()
+            .data or []
+        )
+        for h in rows:
+            history.setdefault(str(h["entry_id"]), []).append(h)
+
+    problemas: list[dict] = []
+
+    def price_for(resource: dict) -> tuple[float, str | None, str] | None:
+        entry, problem = find_entry(resource, by_id, by_codigo)
+        found = pick_price(entry, history.get(str(entry["id"]), []), fecha) if entry else None
+        if found is None:
+            if entry is not None:
+                problem = "sin_precio"
+            if problem:
+                problemas.append({
+                    "codigo": resource.get("codigo"),
+                    "descripcion": resource.get("descripcion"),
+                    "motivo": problem,
+                })
+            return None
+        return found[0], found[1], str(entry["id"])
+
+    return price_for, problemas

@@ -12,6 +12,7 @@ import type {
   AIAnalysisResult,
   AIItemToInsert,
   CascadeResult,
+  PriceUpdateResult,
   TemplateParam,
   TemplatePreviewResponse,
   TemplateResource,
@@ -151,6 +152,10 @@ export const budgetApi = {
   getIndirects: (id: string) => get<IndirectConfig>(`/budgets/${id}/indirects`),
   updateIndirects: (id: string, data: Partial<IndirectConfig>) =>
     patch<IndirectConfig>(`/budgets/${id}/indirects`, data),
+  // Valores generales (con los que arranca cada obra nueva)
+  getGeneralIndirects: () => get<IndirectConfig>('/indirects/general'),
+  updateGeneralIndirects: (data: Partial<IndirectConfig>) =>
+    patch<IndirectConfig>('/indirects/general', data),
   applyIndirects: (id: string) =>
     post<{ items_updated: number; total_neto: number }>(`/budgets/${id}/indirects`),
 
@@ -168,6 +173,9 @@ export const budgetApi = {
   // Versions
   getVersions: (id: string) => get<BudgetVersion[]>(`/budgets/${id}/versions`),
   createVersion: (id: string) => post<BudgetVersion>(`/budgets/${id}/versions`),
+  // Toma el último precio de cada recurso, recalcula y guarda una versión nueva
+  updatePrices: (id: string, fecha?: string) =>
+    post<PriceUpdateResult>(`/budgets/${id}/actualizar-precios`, fecha ? { fecha } : {}),
   getVersion: (id: string, vid: string) => get<BudgetVersion>(`/budgets/${id}/versions/${vid}`),
 }
 
