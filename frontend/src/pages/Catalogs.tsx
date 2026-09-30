@@ -4,7 +4,7 @@ import {
   Search, Trash2, Upload, X, Zap,
 } from 'lucide-react'
 import { budgetApi, catalogApi } from '../lib/api'
-import { fmtCurrency } from '../lib/format'
+import { fmtCurrency, fmtDate, todayIso } from '../lib/format'
 import type { Budget, CatalogEntry, PriceCatalog } from '../types'
 
 // ─── Inline CSV upload form ────────────────────────────────────────────────────
@@ -213,6 +213,7 @@ function AddEntryRow({
   const [descripcion, setDescripcion] = useState('')
   const [unidad, setUnidad] = useState('')
   const [precio, setPrecio] = useState('')
+  const [fecha, setFecha] = useState(todayIso())
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -225,7 +226,8 @@ function AddEntryRow({
         codigo: codigo.trim(),
         descripcion: descripcion.trim(),
         unidad: unidad.trim() || undefined,
-        precio_unitario: parseFloat(precio) || 0,
+        precio_sin_iva: parseFloat(precio) || 0,
+        fecha_precio: fecha || undefined,
       })
       onSaved(entry)
     } catch (err) {
@@ -276,6 +278,15 @@ function AddEntryRow({
           />
         </td>
         <td className="px-3 py-1.5">
+          <input
+            type="date"
+            value={fecha}
+            onChange={(e) => setFecha(e.target.value)}
+            title="Fecha del precio"
+            className="w-full text-[11px] border rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-[#2D8D68]"
+          />
+        </td>
+        <td className="px-3 py-1.5">
           <div className="flex items-center gap-1">
             <button
               onClick={handleSave}
@@ -295,7 +306,7 @@ function AddEntryRow({
       </tr>
       {error && (
         <tr>
-          <td colSpan={6} className="px-3 pb-1 text-[10px] text-red-600">{error}</td>
+          <td colSpan={7} className="px-3 pb-1 text-[10px] text-red-600">{error}</td>
         </tr>
       )}
     </>
@@ -319,6 +330,7 @@ function EditEntryRow({
   const [descripcion, setDescripcion] = useState(entry.descripcion ?? '')
   const [unidad, setUnidad] = useState(entry.unidad ?? '')
   const [precio, setPrecio] = useState(String(entry.precio_sin_iva ?? ''))
+  const [fecha, setFecha] = useState(entry.fecha_precio?.slice(0, 10) ?? '')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -326,11 +338,17 @@ function EditEntryRow({
     setSaving(true)
     setError(null)
     try {
+      const nuevoPrecio = parseFloat(precio) || 0
+      const cambioPrecio = nuevoPrecio !== (entry.precio_sin_iva ?? 0)
       const updated = await catalogApi.updateEntry(catalogId, entry.id, {
         codigo: codigo.trim(),
         descripcion: descripcion.trim(),
         unidad: unidad.trim() || null,
-        precio_unitario: parseFloat(precio) || 0,
+        precio_sin_iva: nuevoPrecio,
+        // If the price changed and the date was left as is, the backend dates it today
+        ...(cambioPrecio && fecha === (entry.fecha_precio?.slice(0, 10) ?? '')
+          ? {}
+          : { fecha_precio: fecha || null }),
       })
       onSaved(updated)
     } catch (err) {
@@ -378,6 +396,15 @@ function EditEntryRow({
           />
         </td>
         <td className="px-3 py-1.5">
+          <input
+            type="date"
+            value={fecha}
+            onChange={(e) => setFecha(e.target.value)}
+            title="Fecha del precio"
+            className="w-full text-[11px] border rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-[#2D8D68]"
+          />
+        </td>
+        <td className="px-3 py-1.5">
           <div className="flex items-center gap-1">
             <button
               onClick={handleSave}
@@ -397,7 +424,7 @@ function EditEntryRow({
       </tr>
       {error && (
         <tr>
-          <td colSpan={6} className="px-3 pb-1 text-[10px] text-red-600">{error}</td>
+          <td colSpan={7} className="px-3 pb-1 text-[10px] text-red-600">{error}</td>
         </tr>
       )}
     </>
@@ -614,6 +641,7 @@ function CatalogRow({
                         <th className="px-3 py-1.5 text-left font-medium w-16">Unidad</th>
                         <th className="px-3 py-1.5 text-right font-medium w-28">P. con IVA</th>
                         <th className="px-3 py-1.5 text-right font-medium w-28">P. sin IVA</th>
+                        <th className="px-3 py-1.5 text-left font-medium w-28">Fecha</th>
                         <th className="px-3 py-1.5 w-16"></th>
                       </tr>
                     </thead>
@@ -637,6 +665,12 @@ function CatalogRow({
                             <td className="px-3 py-1.5 text-gray-500">{e.unidad}</td>
                             <td className="px-3 py-1.5 text-right">{e.precio_con_iva ? fmtCurrency(e.precio_con_iva) : '—'}</td>
                             <td className="px-3 py-1.5 text-right font-medium">{e.precio_sin_iva ? fmtCurrency(e.precio_sin_iva) : '—'}</td>
+                            <td
+                              className={`px-3 py-1.5 ${e.fecha_precio ? 'text-gray-500' : 'text-amber-600'}`}
+                              title={e.fecha_precio ? (e.proveedor ? `Proveedor: ${e.proveedor}` : undefined) : 'Precio sin fecha'}
+                            >
+                              {fmtDate(e.fecha_precio)}
+                            </td>
                             <td className="px-3 py-1.5">
                               <div className="flex items-center gap-1 justify-end">
                                 <button

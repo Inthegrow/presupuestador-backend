@@ -79,6 +79,8 @@ export interface CatalogEntry {
   unidad?: string
   precio_con_iva?: number
   precio_sin_iva?: number
+  fecha_precio?: string | null
+  proveedor?: string | null
 }
 
 export interface AnalysisResponse {

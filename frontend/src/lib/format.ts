@@ -38,3 +38,21 @@ export function fmtPercent(value: number | null | undefined): string {
   const pct = value > 1 ? value : value * 100
   return `${pct.toLocaleString('es-AR', { maximumFractionDigits: 1 })}%`
 }
+
+/**
+ * Format an ISO date (YYYY-MM-DD) as dd/mm/yyyy. Empty → "—".
+ * Parsed by hand to avoid timezone shifts from new Date('2026-03-01').
+ */
+export function fmtDate(value: string | null | undefined): string {
+  if (!value) return '—'
+  const [y, m, d] = value.slice(0, 10).split('-')
+  return d && m && y ? `${d}/${m}/${y}` : value
+}
+
+/** Today as YYYY-MM-DD in local time (value for <input type="date">). */
+export function todayIso(): string {
+  const now = new Date()
+  const mm = String(now.getMonth() + 1).padStart(2, '0')
+  const dd = String(now.getDate()).padStart(2, '0')
+  return `${now.getFullYear()}-${mm}-${dd}`
+}
