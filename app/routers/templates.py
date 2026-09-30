@@ -128,19 +128,23 @@ async def update_template(
     if not updates:
         raise HTTPException(400, "No hay campos para actualizar")
 
+    current = (
+        db.table("item_templates")
+        .select("*")
+        .eq("id", template_id)
+        .eq("org_id", org_id)
+        .execute()
+    )
+    if not current.data:
+        raise HTTPException(404, "Template no encontrado")
     if "recursos" in updates or "parametros" in updates:
-        current = (
-            db.table("item_templates")
-            .select("*")
-            .eq("id", template_id)
-            .eq("org_id", org_id)
-            .execute()
-        )
-        if not current.data:
-            raise HTTPException(404, "Template no encontrado")
         recursos = updates.get("recursos", _json_list(current.data[0].get("recursos")))
         parametros = updates.get("parametros", _json_list(current.data[0].get("parametros")))
         _check_template(recursos, parametros)
+    # Edited by hand: importing the Maestro again must not overwrite it.
+    # Only when the column exists (migration 007).
+    if "editado" in current.data[0]:
+        updates["editado"] = True
 
     result = (
         db.table("item_templates")

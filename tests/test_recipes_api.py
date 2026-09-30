@@ -198,6 +198,15 @@ class TestTemplateSave:
         r = client.patch(f"/templates/{TEMPLATE}", json={"recursos": [{"tipo": "material", "formula": "Q * espesor * 2"}]})
         assert r.status_code == 200
 
+    def test_update_marks_template_as_edited(self, client, db):
+        db.tables["item_templates"][0]["editado"] = False  # column from migration 007
+        assert client.patch(f"/templates/{TEMPLATE}", json={"nombre": "Platea 2"}).status_code == 200
+        assert db.tables["item_templates"][0]["editado"] is True
+
+    def test_update_without_edit_column(self, client, db):
+        assert client.patch(f"/templates/{TEMPLATE}", json={"nombre": "Platea 2"}).status_code == 200
+        assert "editado" not in db.tables["item_templates"][0]
+
     def test_update_removing_used_param_fails(self, client, db):
         r = client.patch(f"/templates/{TEMPLATE}", json={"parametros": []})
         assert r.status_code == 422

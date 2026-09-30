@@ -357,6 +357,51 @@ class TestApply:
         assert len(db.tables["standard_tree_nodes"]) == len(parsed["arbol"])
 
 
+class TestApplyProtections:
+    def test_edited_or_foreign_templates_are_kept(self, parsed):
+        db = FakeDB({})
+        apply_to_db(db, ORG, parsed)
+        rows = {t["codigo"]: t for t in db.tables["item_templates"]}
+        rows["4.1.1"].update({"editado": True, "recursos": [{"tipo": "material", "formula": "Q"}]})
+        rows["5.1.2"].update({"origen": None, "nombre": "Mía"})
+        out = apply_to_db(db, ORG, parsed)
+        rows = {t["codigo"]: t for t in db.tables["item_templates"]}
+        assert rows["4.1.1"]["recursos"] == [{"tipo": "material", "formula": "Q"}]
+        assert rows["5.1.2"]["nombre"] == "Mía"
+        assert {k["codigo"] for k in out["plantillas_conservadas"]} == {"4.1.1", "5.1.2"}
+        assert out["plantillas_actualizadas"] == len(parsed["plantillas"]) - 2
+
+    def test_failed_tree_load_keeps_the_old_tree(self, parsed):
+        db = FakeDB({})
+        apply_to_db(db, ORG, parsed)
+        old_tree = db.tables["standard_trees"][0]["id"]
+        old_nodes = len(db.tables["standard_tree_nodes"])
+
+        real_table = db.table
+        calls = {"n": 0}
+
+        def flaky(name):
+            query = real_table(name)
+            if name == "standard_tree_nodes":
+                original = query.insert
+
+                def insert(data, **k):
+                    calls["n"] += 1
+                    if calls["n"] == 5:
+                        raise RuntimeError("se cortó la conexión")
+                    return original(data, **k)
+                query.insert = insert
+            return query
+
+        db.table = flaky
+        with pytest.raises(RuntimeError):
+            apply_to_db(db, ORG, parsed)
+        assert [t["id"] for t in db.tables["standard_trees"]] == [old_tree]
+        assert db.tables["standard_trees"][0]["nombre"] == TREE_NAME
+        assert len(db.tables["standard_tree_nodes"]) == old_nodes
+        assert all(n["tree_id"] == old_tree for n in db.tables["standard_tree_nodes"])
+
+
 class TestStandardTreeAPI:
     @pytest.fixture
     def client_db(self, parsed):
@@ -408,6 +453,10 @@ class TestMigration006:
             assert f"REVOKE ALL ON {table} FROM anon, authenticated" in sql
         assert not re.search(r"CREATE POLICY|USING\s*\(\s*true\s*\)", sql, re.IGNORECASE)
 
+    def test_007_marks_edits(self):
+        sql = (self.SQL.parent / "007_template_edits.sql").read_text(encoding="utf-8")
+        assert "ALTER TABLE item_templates ADD COLUMN IF NOT EXISTS editado boolean NOT NULL DEFAULT false" in sql
+
     def test_columns_used_by_the_script(self):
         sql = self._sql()
         for col in ("codigo", "origen"):
@@ -422,7 +471,9 @@ class TestSqlScript:
         from import_recetas import sql_script
 
         sql = sql_script(parsed, "maestro.xlsx")
-        assert sql.splitlines()[7].strip().startswith("v_org  uuid := NULL;")  # "linea 8"
+        assert "v_org  uuid := NULL;" in sql
+        assert "ADD COLUMN IF NOT EXISTS editado" in sql.split("DO $maestro$")[0]
+        assert "WHERE item_templates.origen = 'maestro_terrac' AND NOT item_templates.editado" in sql
         assert "ON CONFLICT (org_id, codigo) WHERE codigo IS NOT NULL DO UPDATE" in sql
         assert "DELETE FROM standard_tree_nodes WHERE tree_id = v_tree" in sql
         assert sql.count("$maestro$") == 2

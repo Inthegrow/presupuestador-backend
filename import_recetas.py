@@ -40,6 +40,7 @@ from app.maestro_import import parse_workbook
 from app.maestro_recipes import parse_maestro, report_markdown, template_payload
 
 TREE_NAME = "TERRAC - Maestro"
+ORIGEN = "maestro_terrac"
 
 
 def load_workbooks(path: str):  # type: ignore[no-untyped-def]
@@ -54,54 +55,76 @@ def parse_file(path: str) -> dict:
     return parse_maestro(wb_f, wb_v, entries_by_tipo)
 
 
+def _delete_tree(db, org_id: str, tree_id: str) -> None:  # type: ignore[no-untyped-def]
+    # The FK cascades too; deleting the nodes first keeps it explicit
+    db.table("standard_tree_nodes").delete().eq("tree_id", tree_id).eq("org_id", org_id).execute()
+    db.table("standard_trees").delete().eq("id", tree_id).eq("org_id", org_id).execute()
+
+
 def apply_to_db(db, org_id: str, parsed: dict, source_file: str = "") -> dict:  # type: ignore[no-untyped-def]
-    """Upsert templates by (org_id, codigo) and replace the standard tree."""
+    """Upsert Maestro templates by (org_id, codigo) and replace the standard tree.
+
+    A template is only overwritten if it came from the Maestro and nobody edited
+    it after the import (``editado``). The others are kept and listed.
+    The new tree is built next to the old one and swapped in only when complete.
+    """
     template_ids: dict[str, str] = {}
     created = updated = 0
+    kept: list[dict] = []
     for tmpl in parsed["plantillas"]:
-        payload = {**template_payload(tmpl), "org_id": org_id}
+        payload = {**template_payload(tmpl), "org_id": org_id, "editado": False}
         found = (
-            db.table("item_templates").select("id")
+            db.table("item_templates").select("id,origen,editado")
             .eq("org_id", org_id).eq("codigo", payload["codigo"]).limit(1).execute()
         )
         if found.data:
-            tid = found.data[0]["id"]
-            db.table("item_templates").update(payload).eq("id", tid).eq("org_id", org_id).execute()
-            updated += 1
+            current = found.data[0]
+            tid = current["id"]
+            if current.get("origen") != ORIGEN:
+                kept.append({"codigo": payload["codigo"], "motivo": "no viene del Maestro"})
+            elif current.get("editado"):
+                kept.append({"codigo": payload["codigo"], "motivo": "editada después de importar"})
+            else:
+                db.table("item_templates").update(payload).eq("id", tid).eq("org_id", org_id).execute()
+                updated += 1
         else:
-            res = db.table("item_templates").insert(payload).execute()
-            tid = res.data[0]["id"]
+            tid = db.table("item_templates").insert(payload).execute().data[0]["id"]
             created += 1
         template_ids[tmpl["codigo"]] = tid
 
-    tree = db.table("standard_trees").select("id").eq("org_id", org_id).eq("nombre", TREE_NAME).limit(1).execute()
-    if tree.data:
-        tree_id = tree.data[0]["id"]
-        db.table("standard_tree_nodes").delete().eq("tree_id", tree_id).eq("org_id", org_id).execute()
-        db.table("standard_trees").update({"source_file": source_file}).eq("id", tree_id).execute()
-    else:
-        tree_id = db.table("standard_trees").insert({
-            "org_id": org_id, "nombre": TREE_NAME, "source_file": source_file,
-        }).execute().data[0]["id"]
+    # Build the new tree apart; the old one stays until the new one is complete
+    new_tree_id = db.table("standard_trees").insert({
+        "org_id": org_id, "nombre": f"{TREE_NAME} (cargando)", "source_file": source_file,
+    }).execute().data[0]["id"]
+    try:
+        node_ids: dict[str, str] = {}
+        for node in parsed["arbol"]:  # ordered: parents come first
+            row = {
+                "tree_id": new_tree_id,
+                "org_id": org_id,
+                "parent_id": node_ids.get(node["parent"]) if node["parent"] else None,
+                "codigo": node["codigo"],
+                "nombre": node["nombre"],
+                "unidad": node["unidad"] or None,
+                "nivel": node["nivel"],
+                "orden": node["orden"],
+                "template_id": template_ids.get(node.get("plantilla") or ""),
+                "libre": bool(node.get("libre")),
+            }
+            node_ids[node["codigo"]] = db.table("standard_tree_nodes").insert(row).execute().data[0]["id"]
+        if len(node_ids) != len(parsed["arbol"]):
+            raise RuntimeError("El árbol nuevo quedó incompleto")
+    except Exception:
+        _delete_tree(db, org_id, new_tree_id)
+        raise
 
-    node_ids: dict[str, str] = {}
-    for node in parsed["arbol"]:  # ordered: parents come first
-        row = {
-            "tree_id": tree_id,
-            "org_id": org_id,
-            "parent_id": node_ids.get(node["parent"]) if node["parent"] else None,
-            "codigo": node["codigo"],
-            "nombre": node["nombre"],
-            "unidad": node["unidad"] or None,
-            "nivel": node["nivel"],
-            "orden": node["orden"],
-            "template_id": template_ids.get(node.get("plantilla") or ""),
-            "libre": bool(node.get("libre")),
-        }
-        node_ids[node["codigo"]] = db.table("standard_tree_nodes").insert(row).execute().data[0]["id"]
+    old = db.table("standard_trees").select("id").eq("org_id", org_id).eq("nombre", TREE_NAME).execute()
+    for tree in old.data or []:
+        _delete_tree(db, org_id, tree["id"])
+    db.table("standard_trees").update({"nombre": TREE_NAME}).eq("id", new_tree_id).execute()
 
     return {"plantillas_creadas": created, "plantillas_actualizadas": updated,
-            "arbol_id": tree_id, "nodos": len(node_ids)}
+            "plantillas_conservadas": kept, "arbol_id": new_tree_id, "nodos": len(node_ids)}
 
 
 def _lit(value: object) -> str:
@@ -145,6 +168,12 @@ def sql_script(parsed: dict, source_file: str = "") -> str:
 -- Pegar todo en el SQL Editor de Supabase (proyecto DATA) y apretar Run.
 -- Antes: migrations/006_maestro_recipes.sql. Se puede correr de nuevo sin duplicar.
 
+-- El bloque DO es una sola transaccion: si algo falla (o el texto se pego incompleto),
+-- no se escribe nada.
+
+-- Marca de "editada despues de importar" (igual que migrations/007_template_edits.sql)
+ALTER TABLE item_templates ADD COLUMN IF NOT EXISTS editado boolean NOT NULL DEFAULT false;
+
 DO $maestro$
 DECLARE
   v_org  uuid := NULL;  -- si hay mas de una organizacion, pegar aca el org_id de TERRAC entre comillas
@@ -156,7 +185,7 @@ BEGIN
       SELECT org_id FROM budgets UNION SELECT org_id FROM catalog_entries
       UNION SELECT org_id FROM item_templates) o;
     IF n_orgs <> 1 THEN
-      RAISE EXCEPTION 'Hay % organizaciones: pegar el org_id de TERRAC en v_org (linea 8)', n_orgs;
+      RAISE EXCEPTION 'Hay % organizaciones: pegar el org_id de TERRAC en v_org, al principio del script', n_orgs;
     END IF;
     SELECT org_id INTO v_org FROM (
       SELECT org_id FROM budgets UNION SELECT org_id FROM catalog_entries
@@ -172,7 +201,9 @@ BEGIN
   ON CONFLICT (org_id, codigo) WHERE codigo IS NOT NULL DO UPDATE SET
     nombre = EXCLUDED.nombre, descripcion = EXCLUDED.descripcion, unidad = EXCLUDED.unidad,
     categoria = EXCLUDED.categoria, parametros = EXCLUDED.parametros,
-    recursos = EXCLUDED.recursos, origen = EXCLUDED.origen, updated_at = now();
+    recursos = EXCLUDED.recursos, updated_at = now()
+  -- No pisa plantillas de otro origen ni las editadas despues de importar
+  WHERE item_templates.origen = 'maestro_terrac' AND NOT item_templates.editado;
 
   -- 2. Arbol estandar (se reemplaza entero)
   INSERT INTO standard_trees (org_id, nombre, source_file)
@@ -201,8 +232,10 @@ END
 $maestro$;
 
 -- Verificacion: tiene que dar plantillas = {len(tpl_rows)} y filas_arbol = {len(node_rows)}
+-- (editadas_conservadas: plantillas editadas a mano que no se pisaron)
 SELECT
   (SELECT count(*) FROM item_templates WHERE origen = 'maestro_terrac') AS plantillas,
+  (SELECT count(*) FROM item_templates WHERE origen = 'maestro_terrac' AND editado) AS editadas_conservadas,
   (SELECT count(*) FROM standard_tree_nodes n JOIN standard_trees t ON t.id = n.tree_id
     WHERE t.nombre = {_lit(TREE_NAME)}) AS filas_arbol;
 """

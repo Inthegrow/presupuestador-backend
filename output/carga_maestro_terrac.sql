@@ -3,6 +3,12 @@
 -- Pegar todo en el SQL Editor de Supabase (proyecto DATA) y apretar Run.
 -- Antes: migrations/006_maestro_recipes.sql. Se puede correr de nuevo sin duplicar.
 
+-- El bloque DO es una sola transaccion: si algo falla (o el texto se pego incompleto),
+-- no se escribe nada.
+
+-- Marca de "editada despues de importar" (igual que migrations/007_template_edits.sql)
+ALTER TABLE item_templates ADD COLUMN IF NOT EXISTS editado boolean NOT NULL DEFAULT false;
+
 DO $maestro$
 DECLARE
   v_org  uuid := NULL;  -- si hay mas de una organizacion, pegar aca el org_id de TERRAC entre comillas
@@ -14,7 +20,7 @@ BEGIN
       SELECT org_id FROM budgets UNION SELECT org_id FROM catalog_entries
       UNION SELECT org_id FROM item_templates) o;
     IF n_orgs <> 1 THEN
-      RAISE EXCEPTION 'Hay % organizaciones: pegar el org_id de TERRAC en v_org (linea 8)', n_orgs;
+      RAISE EXCEPTION 'Hay % organizaciones: pegar el org_id de TERRAC en v_org, al principio del script', n_orgs;
     END IF;
     SELECT org_id INTO v_org FROM (
       SELECT org_id FROM budgets UNION SELECT org_id FROM catalog_entries
@@ -90,7 +96,9 @@ BEGIN
   ON CONFLICT (org_id, codigo) WHERE codigo IS NOT NULL DO UPDATE SET
     nombre = EXCLUDED.nombre, descripcion = EXCLUDED.descripcion, unidad = EXCLUDED.unidad,
     categoria = EXCLUDED.categoria, parametros = EXCLUDED.parametros,
-    recursos = EXCLUDED.recursos, origen = EXCLUDED.origen, updated_at = now();
+    recursos = EXCLUDED.recursos, updated_at = now()
+  -- No pisa plantillas de otro origen ni las editadas despues de importar
+  WHERE item_templates.origen = 'maestro_terrac' AND NOT item_templates.editado;
 
   -- 2. Arbol estandar (se reemplaza entero)
   INSERT INTO standard_trees (org_id, nombre, source_file)
@@ -327,7 +335,9 @@ END
 $maestro$;
 
 -- Verificacion: tiene que dar plantillas = 61 y filas_arbol = 105
+-- (editadas_conservadas: plantillas editadas a mano que no se pisaron)
 SELECT
   (SELECT count(*) FROM item_templates WHERE origen = 'maestro_terrac') AS plantillas,
+  (SELECT count(*) FROM item_templates WHERE origen = 'maestro_terrac' AND editado) AS editadas_conservadas,
   (SELECT count(*) FROM standard_tree_nodes n JOIN standard_trees t ON t.id = n.tree_id
     WHERE t.nombre = 'TERRAC - Maestro') AS filas_arbol;
