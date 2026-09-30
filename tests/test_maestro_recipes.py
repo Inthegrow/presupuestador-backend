@@ -415,3 +415,23 @@ class TestMigration006:
         for col in ("tree_id", "parent_id", "codigo", "nombre", "unidad", "nivel", "orden",
                     "template_id", "libre"):
             assert re.search(rf"^\s+{col}\s", sql, re.MULTILINE), col
+
+
+class TestSqlScript:
+    def test_script_for_the_sql_editor(self, parsed):
+        from import_recetas import sql_script
+
+        sql = sql_script(parsed, "maestro.xlsx")
+        assert sql.splitlines()[7].strip().startswith("v_org  uuid := NULL;")  # "linea 8"
+        assert "ON CONFLICT (org_id, codigo) WHERE codigo IS NOT NULL DO UPDATE" in sql
+        assert "DELETE FROM standard_tree_nodes WHERE tree_id = v_tree" in sql
+        assert sql.count("$maestro$") == 2
+        assert f"plantillas = {len(parsed['plantillas'])}" in sql
+        for t in parsed["plantillas"]:
+            assert f"('{t['codigo']}', " in sql
+
+    def test_quotes_escaped(self):
+        from import_recetas import _lit
+
+        assert _lit("d'agua") == "'d''agua'"
+        assert _lit(None) == "NULL" and _lit(True) == "true" and _lit(2.5) == "2.5"
