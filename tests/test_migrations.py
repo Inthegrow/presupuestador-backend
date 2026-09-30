@@ -32,3 +32,45 @@ class TestPriceHistorySecurity:
 
     def test_client_roles_revoked(self):
         assert re.search(r"REVOKE ALL ON catalog_price_history FROM anon, authenticated", _sql())
+
+
+MIGRATION_005 = MIGRATION_004.parent / "005_template_recipes.sql"
+
+
+class TestRecipesMigration:
+    """005 only adds columns: safe to run twice, never drops data."""
+
+    def _sql(self) -> str:
+        text = MIGRATION_005.read_text(encoding="utf-8")
+        return "\n".join(line.split("--", 1)[0] for line in text.splitlines())
+
+    def test_only_idempotent_adds(self):
+        sql = self._sql()
+        for line in re.findall(r"ADD COLUMN[^\n]*", sql):
+            assert "IF NOT EXISTS" in line
+        assert not re.search(r"DROP\s+(TABLE|COLUMN)", sql, re.IGNORECASE)
+        assert not re.search(r"DELETE\s+FROM|TRUNCATE|UPDATE\s+\w+\s+SET", sql, re.IGNORECASE)
+
+    def test_columns_used_by_the_code(self):
+        sql = self._sql()
+        for table, column in [
+            ("indirect_config", "desperdicio_pct"),
+            ("item_templates", "parametros"),
+            ("item_templates", "desperdicio_pct"),
+            ("budgets", "desperdicio_pct"),
+            ("budget_items", "template_id"),
+            ("budget_items", "parametros"),
+            ("item_resources", "formula"),
+            ("item_resources", "rendimiento"),
+            ("item_resources", "desperdicio_origen"),
+            ("item_resources", "lo_compra_cliente"),
+            ("item_resources", "redondear"),
+            ("item_resources", "unidad_compra"),
+            ("item_resources", "cantidad_redondeo"),
+        ]:
+            assert re.search(
+                rf"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column}\b", sql
+            ), f"{table}.{column}"
+
+    def test_no_open_policies(self):
+        assert not re.search(r"USING\s*\(\s*true\s*\)", self._sql(), re.IGNORECASE)

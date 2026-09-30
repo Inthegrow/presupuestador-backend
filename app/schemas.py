@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 # ── Budgets ──────────────────────────────────────────────────────────────────
@@ -113,6 +113,8 @@ class BudgetUpdate(BaseModel):
     name: str | None = None
     description: str | None = None
     status: str | None = None
+    # Waste % for this budget. null = inherit (plantilla / organización)
+    desperdicio_pct: float | None = Field(default=None, ge=0, le=100)
 
 
 # ── Indirect config update ──────────────────────────────────────────────────
@@ -127,6 +129,8 @@ class IndirectConfigUpdate(BaseModel):
     ingresos_brutos_pct: float | None = None
     imp_cheque_pct: float | None = None
     iva_pct: float | None = None
+    # Default waste % for the whole organization
+    desperdicio_pct: float | None = Field(default=None, ge=0, le=100)
 
 
 # ── Budget copy ─────────────────────────────────────────────────────────────
@@ -213,6 +217,10 @@ class ResourceCreate(BaseModel):
     dias: Optional[float] = 0
     cargas_sociales_pct: Optional[float] = 25
     catalog_entry_id: Optional[str] = None
+    # Recetas (Fase 2)
+    lo_compra_cliente: Optional[bool] = None
+    redondear: Optional[bool] = None
+    unidad_compra: Optional[float] = Field(default=None, gt=0)
 
 
 class ResourceUpdate(BaseModel):
@@ -227,6 +235,9 @@ class ResourceUpdate(BaseModel):
     dias: Optional[float] = None
     cargas_sociales_pct: Optional[float] = None
     catalog_entry_id: Optional[str] = None
+    lo_compra_cliente: Optional[bool] = None
+    redondear: Optional[bool] = None
+    unidad_compra: Optional[float] = Field(default=None, gt=0)
 
 
 class BulkResourceCreate(BaseModel):
@@ -235,12 +246,22 @@ class BulkResourceCreate(BaseModel):
 
 # ── Item templates ───────────────────────────────────────────────────────────
 
+class TemplateParam(BaseModel):
+    clave: str
+    valor: float
+    unidad: Optional[str] = None
+    descripcion: Optional[str] = None
+
+
 class TemplateCreate(BaseModel):
     nombre: str
     descripcion: Optional[str] = None
     unidad: Optional[str] = None
     categoria: Optional[str] = None
     recursos: list[dict] = []
+    parametros: list[TemplateParam] = []
+    # null = use the organization default
+    desperdicio_pct: Optional[float] = Field(default=None, ge=0, le=100)
 
 
 class TemplateUpdate(BaseModel):
@@ -249,3 +270,22 @@ class TemplateUpdate(BaseModel):
     unidad: Optional[str] = None
     categoria: Optional[str] = None
     recursos: Optional[list[dict]] = None
+    parametros: Optional[list[TemplateParam]] = None
+    desperdicio_pct: Optional[float] = Field(default=None, ge=0, le=100)
+
+
+class TemplatePreview(BaseModel):
+    """Try a template (saved or not) with a quantity, without touching budgets."""
+    cantidad: float = 1
+    recursos: list[dict] = []
+    parametros: list[TemplateParam] = []
+    valores: dict[str, float] = {}  # parameter values to try
+    desperdicio_pct: Optional[float] = None
+
+
+class TemplateApply(BaseModel):
+    parametros: dict[str, float] = {}  # budget values that replace the defaults
+
+
+class ItemParamsUpdate(BaseModel):
+    parametros: dict[str, float]

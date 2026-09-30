@@ -7,6 +7,7 @@ export interface Budget {
   status: string
   created_at: string
   updated_at: string
+  desperdicio_pct?: number | null // null = hereda (plantilla / organización)
 }
 
 export interface BudgetItem {
@@ -39,6 +40,9 @@ export interface BudgetItem {
   notas_calculo?: string
   sort_order: number
   children?: BudgetItem[]
+  // Recetas (Fase 2)
+  template_id?: string | null
+  parametros?: Record<string, number>
 }
 
 export interface ItemResource {
@@ -60,6 +64,14 @@ export interface ItemResource {
   cargas_sociales_pct: number
   // Catalog link
   catalog_entry_id: string | null
+  // Recetas (Fase 2)
+  formula?: string | null
+  rendimiento?: string | null
+  desperdicio_origen?: 'recurso' | 'presupuesto' | 'plantilla' | 'organizacion' | null
+  lo_compra_cliente?: boolean
+  redondear?: boolean
+  unidad_compra?: number
+  cantidad_redondeo?: number
 }
 
 export interface PriceCatalog {
@@ -120,6 +132,7 @@ export interface IndirectConfig {
   ingresos_brutos_pct?: number
   imp_cheque_pct?: number
   iva_pct?: number
+  desperdicio_pct?: number | null // desperdicio general de la organización
 }
 
 export interface BudgetVersion {
@@ -209,4 +222,91 @@ export interface AIItemToInsert {
     mo_materiales?: any[]
     subcontratos?: any[]
   }
+}
+
+// ─── Item templates (recetas) ─────────────────────────────────────────────────
+
+export interface TemplateParam {
+  clave: string
+  valor: number | string // string while editing
+  unidad?: string
+  descripcion?: string
+}
+
+/** Resource inside a template. Number fields may be strings while editing. */
+export interface TemplateResource {
+  tipo: 'material' | 'mano_obra' | 'equipo' | 'subcontrato' | 'mo_material'
+  codigo?: string
+  descripcion?: string
+  unidad?: string
+  formula?: string // Q = cantidad del ítem
+  desperdicio_pct?: number | string | null // vacío = hereda
+  lo_compra_cliente?: boolean
+  redondear?: boolean
+  unidad_compra?: number | string
+  // Mano de obra: días = Q / rendimiento
+  trabajadores?: number | string
+  rendimiento?: number | string
+  cargas_sociales_pct?: number | string
+  // Formato anterior
+  cantidad_por_unidad?: number
+  trabajadores_por_unidad?: number
+  dias_por_unidad?: number
+}
+
+export interface Template {
+  id: string
+  org_id: string
+  nombre: string
+  descripcion?: string
+  unidad?: string
+  categoria?: string
+  desperdicio_pct?: number | null
+  parametros?: TemplateParam[] | string
+  recursos: TemplateResource[] | string
+}
+
+export interface TemplatePreviewRow {
+  tipo: string
+  codigo?: string
+  descripcion?: string
+  unidad?: string
+  cantidad: number
+  trabajadores: number
+  dias: number
+  desperdicio_pct: number
+  desperdicio_origen?: string | null
+  cantidad_efectiva: number
+  lo_compra_cliente: boolean
+  redondear: boolean
+  unidad_compra: number
+}
+
+export interface TemplatePreviewResponse {
+  ok: boolean
+  errores: string[]
+  recursos: TemplatePreviewRow[]
+  parametros?: Record<string, number>
+  desperdicio_organizacion?: number | null
+}
+
+export interface RoundingLine {
+  codigo?: string
+  descripcion?: string
+  unidad?: string
+  unidad_compra: number
+  cantidad_necesaria: number
+  cantidad_compra: number
+  envases: number
+  extra: number
+  costo_extra: number
+  items: number
+}
+
+export interface CascadeResult {
+  items_total: number
+  items_updated: number
+  resources_updated: number
+  redondeos: RoundingLine[]
+  errores: string[]
 }

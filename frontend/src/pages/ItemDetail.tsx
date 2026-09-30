@@ -62,6 +62,12 @@ const fmtARS = (v: number | null | undefined) => fmt.format(v ?? 0)
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+const ORIGEN_LABEL: Record<string, string> = {
+  presupuesto: 'presupuesto',
+  plantilla: 'plantilla',
+  organizacion: 'general',
+}
+
 function timeAgo(dateStr: string): string {
   const now = new Date()
   const date = new Date(dateStr)
@@ -211,7 +217,16 @@ function ResourceRow({ resource, tipo, onSave, onDelete, startEditing, onEditDon
         <td className="px-2 py-1.5">
           <input className={numCls} type="number" step="0.1" min="0" value={draft.desperdicio_pct ?? 0} onChange={(e) => set('desperdicio_pct', parseFloat(e.target.value) || 0)} />
         </td>
-        <td className="px-2 py-1.5 text-right text-xs text-gray-400">—</td>
+        <td className="px-2 py-1.5 text-center">
+          <label className="inline-flex items-center gap-1 text-[10px] text-gray-500" title="Lo compra el cliente: se ve pero no suma al costo">
+            <input
+              type="checkbox"
+              checked={!!draft.lo_compra_cliente}
+              onChange={(e) => setDraft((prev) => ({ ...prev, lo_compra_cliente: e.target.checked }))}
+            />
+            cliente
+          </label>
+        </td>
         <td className="px-2 py-1.5">
           <input className={numCls} type="number" step="1" min="0" value={draft.precio_unitario ?? 0} onChange={(e) => set('precio_unitario', parseFloat(e.target.value) || 0)} />
         </td>
@@ -237,7 +252,10 @@ function ResourceRow({ resource, tipo, onSave, onDelete, startEditing, onEditDon
         <td className="px-3 py-1.5 font-mono text-[10px] text-gray-400">{resource.codigo ?? '—'}</td>
         <td className="px-3 py-1.5 text-gray-800">{resource.descripcion ?? '—'}</td>
         <td className="px-3 py-1.5 text-right text-gray-700">{fmtNumber(resource.trabajadores, 0)}</td>
-        <td className="px-3 py-1.5 text-right text-gray-700">{fmtNumber(resource.dias, 0)}</td>
+        <td className="px-3 py-1.5 text-right text-gray-700">
+          {fmtNumber(resource.dias, 2)}
+          {resource.rendimiento && <div className="text-[9px] text-gray-400 font-mono">Q / {resource.rendimiento}</div>}
+        </td>
         <td className="px-3 py-1.5 text-right text-orange-500">{fmtPercent(resource.cargas_sociales_pct)}</td>
         <td className="px-3 py-1.5 text-right font-medium text-gray-700">{fmtNumber(resource.cantidad_efectiva, 2)}</td>
         <td className="px-3 py-1.5 text-right text-gray-700">{fmtARS(resource.precio_unitario)}</td>
@@ -259,10 +277,31 @@ function ResourceRow({ resource, tipo, onSave, onDelete, startEditing, onEditDon
   return (
     <tr className="border-b border-gray-100 hover:bg-[#E8F5EE]/20 transition-colors">
       <td className="px-3 py-1.5 font-mono text-[10px] text-gray-400">{resource.codigo ?? '—'}</td>
-      <td className="px-3 py-1.5 text-gray-800">{resource.descripcion ?? '—'}</td>
+      <td className="px-3 py-1.5 text-gray-800">
+        {resource.descripcion ?? '—'}
+        {resource.formula && (
+          <span className="ml-1.5 font-mono text-[10px] text-gray-400" title="Fórmula (Q = cantidad del ítem)">= {resource.formula}</span>
+        )}
+        {resource.rendimiento && (
+          <span className="ml-1.5 font-mono text-[10px] text-gray-400" title="Días = Q / rendimiento">días = Q / {resource.rendimiento}</span>
+        )}
+        {resource.lo_compra_cliente && (
+          <span className="ml-1.5 text-[10px] bg-amber-100 text-amber-700 rounded px-1.5" title="No suma al costo">lo compra el cliente</span>
+        )}
+        {resource.redondear && (
+          <span className="ml-1.5 text-[10px] bg-blue-100 text-blue-700 rounded px-1.5" title="Se redondea sobre el total de la obra">
+            redondeo{resource.cantidad_redondeo ? ` +${fmtNumber(resource.cantidad_redondeo, 2)}` : ''}
+          </span>
+        )}
+      </td>
       <td className="px-3 py-1.5 text-gray-500 text-[10px] uppercase">{resource.unidad ?? '—'}</td>
       <td className="px-3 py-1.5 text-right text-gray-700">{fmtNumber(resource.cantidad, 2)}</td>
-      <td className="px-3 py-1.5 text-right text-orange-500">{fmtPercent(resource.desperdicio_pct)}</td>
+      <td className="px-3 py-1.5 text-right text-orange-500">
+        {fmtPercent(resource.desperdicio_pct)}
+        {resource.desperdicio_origen && resource.desperdicio_origen !== 'recurso' && (
+          <div className="text-[9px] text-gray-400">hereda {ORIGEN_LABEL[resource.desperdicio_origen]}</div>
+        )}
+      </td>
       <td className="px-3 py-1.5 text-right font-medium text-gray-700">{fmtNumber(resource.cantidad_efectiva, 2)}</td>
       <td className="px-3 py-1.5 text-right text-gray-700">{fmtARS(resource.precio_unitario)}</td>
       <td className="px-3 py-1.5 text-right font-bold text-gray-900">{fmtARS(resource.subtotal)}</td>
@@ -586,6 +625,81 @@ function GrandTotal({ item, indirects, recursos }: GrandTotalProps) {
           </>
         )}
       </div>
+    </div>
+  )
+}
+
+// ─── ItemParams ───────────────────────────────────────────────────────────────
+
+/** Recipe parameters of this item (ej. espesor). Changing them recalculates the resources. */
+function ItemParams({
+  budgetId,
+  item,
+  onSaved,
+}: {
+  budgetId: string
+  item: BudgetItem
+  onSaved: () => void
+}) {
+  const [draft, setDraft] = useState<Record<string, string>>({})
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const params = item.parametros ?? {}
+
+  useEffect(() => {
+    setDraft(Object.fromEntries(Object.entries(item.parametros ?? {}).map(([k, v]) => [k, String(v)])))
+  }, [item.parametros])
+
+  const changed = Object.entries(draft).some(([k, v]) => String(params[k]) !== v)
+
+  async function handleSave() {
+    const values: Record<string, number> = {}
+    for (const [k, v] of Object.entries(draft)) {
+      const n = Number(v.trim().replace(',', '.'))
+      if (v.trim() === '' || !Number.isFinite(n)) {
+        setError(`"${k}" tiene que ser un número`)
+        return
+      }
+      values[k] = n
+    }
+    setSaving(true)
+    setError(null)
+    try {
+      await budgetApi.updateItemParams(budgetId, item.id, values)
+      onSaved()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error al guardar')
+    }
+    setSaving(false)
+  }
+
+  if (Object.keys(params).length === 0) return null
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-100 shadow-sm px-4 py-3 mb-4">
+      <div className="flex items-center gap-3 flex-wrap">
+        <span className="text-[11px] font-bold text-[#2D8D68] tracking-wider">PARÁMETROS</span>
+        {Object.keys(draft).map((k) => (
+          <label key={k} className="flex items-center gap-1 text-xs text-gray-600">
+            <span className="font-mono">{k}</span>
+            <input
+              value={draft[k]}
+              onChange={(e) => setDraft({ ...draft, [k]: e.target.value })}
+              className="w-20 text-right px-2 py-1 text-xs border border-gray-200 rounded-md focus:outline-none focus:border-[#2D8D68]"
+            />
+          </label>
+        ))}
+        {changed && (
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="text-xs bg-[#2D8D68] hover:bg-[#1B5E4B] disabled:opacity-60 text-white px-3 py-1 rounded-lg font-medium"
+          >
+            {saving ? 'Recalculando...' : 'Guardar y recalcular'}
+          </button>
+        )}
+      </div>
+      {error && <p className="text-xs text-red-600 mt-1">{error}</p>}
     </div>
   )
 }
@@ -953,6 +1067,8 @@ export default function ItemDetail() {
           ))}
         </div>
       </div>
+
+      {item && id && <ItemParams budgetId={id} item={item} onSaved={reloadResources} />}
 
       {/* 5 Resource sections */}
       <div className="space-y-4 mb-6">

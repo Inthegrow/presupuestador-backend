@@ -116,6 +116,8 @@ def calc_resource_subtotal(resource: dict) -> dict:
     For mano_obra:
       cantidad_efectiva = trabajadores × dias × (1 + cargas_sociales_pct/100)
       subtotal = cantidad_efectiva × precio_unitario (jornal diario)
+
+    Resources marked ``lo_compra_cliente`` keep their quantity but cost 0.
     """
     tipo = resource.get("tipo", "")
 
@@ -135,6 +137,9 @@ def calc_resource_subtotal(resource: dict) -> dict:
         cantidad_efectiva = round(cantidad * (1 + desperdicio / 100), 2)
         subtotal = round(cantidad_efectiva * precio, 2)
 
+    if resource.get("lo_compra_cliente"):
+        subtotal = 0.0
+
     resource["cantidad_efectiva"] = cantidad_efectiva
     resource["subtotal"] = subtotal
     return resource
@@ -148,7 +153,10 @@ def calc_item_from_resources(item: dict, resources: list[dict]) -> dict:
       - mano_obra + equipo + mo_material + subcontrato → mo_unitario
 
     Then: unitario × cantidad = total
+
+    Resources bought by the client (``lo_compra_cliente``) are not added.
     """
+    resources = [r for r in resources if not r.get("lo_compra_cliente")]
     mat_sum = sum(float(r.get("subtotal") or 0) for r in resources if r.get("tipo") == "material")
     mo_sum = sum(float(r.get("subtotal") or 0) for r in resources if r.get("tipo") == "mano_obra")
     eq_sum = sum(float(r.get("subtotal") or 0) for r in resources if r.get("tipo") == "equipo")
