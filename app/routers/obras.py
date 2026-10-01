@@ -28,7 +28,7 @@ from app.budget_prices import fetch_all, find_entry, initial_indirects, load_org
 from app.calculations import calc_resource_subtotal
 from app.catalog_prices import normalize_codigo
 from app.db import get_data_db
-from app.obra_import import SHEET, build_plan, item_notes, parse_obra, plain
+from app.obra_import import SHEET, build_plan, item_notes, parse_obra, task_key
 from app.recipes import ORIGEN_RECURSO, resolve_waste
 
 logger = logging.getLogger(__name__)
@@ -158,7 +158,7 @@ def analyze(parsed: dict, templates: dict[str, dict], book: PriceBook, asignacio
 
     tareas: dict[str, dict] = {}
     for item in items:
-        key = plain(item["descripcion"])
+        key = task_key(item["descripcion"], item["unidad"])
         t = tareas.setdefault(key, {
             "clave": key, "descripcion": item["descripcion"], "unidad": item["unidad"],
             "veces": 0, "codigos": [], "total_excel": 0.0,

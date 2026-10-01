@@ -40,15 +40,15 @@ COL_NETO_TOTAL = 26  # Z: total neto
 #   cliente:    códigos de recursos que no se cobran ("no incluye el porcelanato").
 #   nota:       lo que hay que revisar con Emilia y Sol.
 MAPEO: list[dict] = [
-    {"patron": r"^BASES AISLADAS", "plantillas": [("4.1.3", 1.0)],
+    {"patron": r"^BASES AISLADAS", "plantillas": [("4.1.3", 1.0)], "obra": "u",
      "nota": "1 m³ por base: en la solapa 3.1-1 de la obra son 35 m³ para 35 bases, llenadas junto con los troncos."},
-    {"patron": r"^TRONCOS", "plantillas": [("4.1.4", 0.32)],
+    {"patron": r"^TRONCOS", "plantillas": [("4.1.4", 0.32)], "obra": "u",
      "nota": "0,80 × 0,40 × 1 m = 0,32 m³ por tronco. En la obra el hormigón de los troncos va con las bases: revisar que no se cuente dos veces."},
-    {"patron": r"^TENSORES", "plantillas": [("4.1.7", 0.08)],
+    {"patron": r"^TENSORES", "plantillas": [("4.1.7", 0.08)], "obra": "m",
      "nota": "0,20 × 0,40 = 0,08 m³ por ml."},
-    {"patron": r"TABIQUE DE HORMIGON ARMADO EN PLANTA BAJA", "plantillas": [("4.2.4", 2.816)],
+    {"patron": r"TABIQUE DE HORMIGON ARMADO EN PLANTA BAJA", "plantillas": [("4.2.4", 2.816)], "obra": "tramo",
      "nota": "17,6 m² × 0,16 m = 2,816 m³ por tramo."},
-    {"patron": r"TABIQUE DE HORMIGON ARMADO EN NUCLEO", "plantillas": [("4.2.4", 6.72)],
+    {"patron": r"TABIQUE DE HORMIGON ARMADO EN NUCLEO", "plantillas": [("4.2.4", 6.72)], "obra": "tramo",
      "nota": "42 m² × 0,16 m = 6,72 m³ por tramo."},
     {"patron": r"MURO DE CARGA.*LADRILLO HUECO DEL 18", "plantillas": [("5.1.4", 1.0)],
      "nota": "Muro de carga: ¿es hueco del 18 (5.1.4) o portante del 18 (5.1.1)?"},
@@ -63,13 +63,13 @@ MAPEO: list[dict] = [
      "nota": "La receta de grueso interior no lleva hidrófugo."},
     {"patron": r"^REVOQUE INTERIOR$", "plantillas": [("5.5.4", 1.0)],
      "nota": "¿Lleva también fino interior (5.5.2)?"},
-    {"patron": r"^TELGOPOR 50 ?MM \+ CONTRAPISO.*E ?[:=] ?4 ?CM", "plantillas": [("8.3", 1.0), ("5.2.3", 0.04)],
+    {"patron": r"^TELGOPOR 50 ?MM \+ CONTRAPISO.*E ?[:=] ?4 ?CM", "plantillas": [("8.3", 1.0), ("5.2.3", 0.04)], "obra": "m2",
      "nota": "Compuesto: placas EPS (8.3) + contrapiso de cascote (5.2.3) de 4 cm."},
-    {"patron": r"^TELGOPOR 50 ?MM \+ CONTRAPISO", "plantillas": [("8.3", 1.0), ("5.2.3", 0.08)],
+    {"patron": r"^TELGOPOR 50 ?MM \+ CONTRAPISO", "plantillas": [("8.3", 1.0), ("5.2.3", 0.08)], "obra": "m2",
      "nota": "Compuesto: placas EPS (8.3) + contrapiso de cascote (5.2.3) de 8 cm."},
     {"patron": r"^CONTRAPISO/ ?CARPETA EN BALCONES", "plantillas": [("5.4.1", 1.0)],
      "nota": "En el Excel de la obra lleva el precio de la carpeta. ¿Va con hidrófugo (5.4.2)?"},
-    {"patron": r"^CONTRAPISO", "plantillas": [("5.2.3", 0.10)],
+    {"patron": r"^CONTRAPISO", "plantillas": [("5.2.3", 0.10)], "obra": "m2",
      "nota": "Contrapiso de cascote de 10 cm: 0,10 m³ por m²."},
     {"patron": r"^CARPETA", "plantillas": [("5.4.1", 1.0)],
      "nota": "La receta no tiene espesor: es la misma para 3 y 4 cm."},
@@ -115,6 +115,23 @@ def plain(text: object) -> str:
     s = unicodedata.normalize("NFKD", str(text or ""))
     s = "".join(c for c in s if not unicodedata.combining(c))
     return " ".join(s.upper().split())
+
+
+_UNITS = {
+    "M2": "m2", "M²": "m2", "M3": "m3", "M³": "m3", "M": "m", "ML": "m", "MTS": "m",
+    "U": "u", "UN": "u", "UNID": "u", "UNIDAD": "u", "UNIDADES": "u", "GL": "gl", "GLOBAL": "gl",
+}
+
+
+def unit_key(unidad: object) -> str:
+    """Comparable unit: 'm²' = 'M2' = 'm2', 'ml' = 'm', 'unid' = 'u'."""
+    u = plain(unidad).replace(".", "").replace(" ", "")
+    return _UNITS.get(u, u.lower())
+
+
+def task_key(descripcion: str, unidad: object) -> str:
+    """One task = same description AND same unit (the same text in m and m3 are two tasks)."""
+    return f"{plain(descripcion)} | {unit_key(unidad)}"
 
 
 def match_recipe(descripcion: str) -> dict | None:
@@ -281,8 +298,13 @@ def expand_item(fila: dict, rule: dict, templates: dict[str, dict]) -> tuple[lis
     notas: list[str] = []
     cliente = set(rule.get("cliente") or [])
 
+    primary = templates[rule["plantillas"][0][0]]
     for codigo, factor in rule["plantillas"]:
         tmpl = templates[codigo]
+        # The item keeps only the first recipe (template_id). A resource of another recipe
+        # that inherits a different waste % is fixed at load ("recurso"), so the cascade
+        # does not re-resolve it with the first recipe's %.
+        congelar = codigo != rule["plantillas"][0][0] and tmpl.get("desperdicio_pct") != primary.get("desperdicio_pct")
         tparams = param_defaults(tmpl.get("parametros"))
         altura = altura_from(fila["descripcion"])
         if "altura_m" in tparams and altura:
@@ -301,43 +323,86 @@ def expand_item(fila: dict, rule: dict, templates: dict[str, dict]) -> tuple[lis
             # Own waste only if the recipe has it; if not, it is inherited in SQL
             row["desperdicio_pct"] = None if row["tipo"] == "mano_obra" else res.get("desperdicio_pct")
             row["plantilla"] = codigo
+            row["congelar_desperdicio"] = bool(congelar and row["tipo"] != "mano_obra"
+                                               and row["desperdicio_pct"] is None)
             rows.append(row)
             if res.get("revisar"):
                 notas.append(f"{codigo} {res.get('codigo')}: {res.get('nota') or 'revisar'}")
     return rows, params, notas
 
 
-def rule_for(descripcion: str, asignaciones: dict | None = None) -> dict | None:
+def rule_for(fila: dict, templates: dict[str, dict], asignaciones: dict | None = None) -> dict | None:
     """Recipe rule of an item: the one chosen by hand (asignaciones) or the automatic one.
 
-    asignaciones = {plain(descripcion): {"plantillas": [[codigo, factor], ...]}};
-    an empty list means "sin receta" (use the Excel price).
+    asignaciones = {task_key(descripcion, unidad): {"plantillas": [[codigo, factor], ...]}};
+    an empty list means "sin receta" (use the Excel price). A factor may be null: it is 1
+    when the recipe and the item have the same unit, otherwise it is missing.
+
+    When the units differ, the conversion must be explicit: a hand-chosen factor, or the
+    one of an automatic rule written for that item unit ("obra"). If it is missing, the
+    rule comes back with "falta_factor" (the item cannot be loaded until it is given).
     """
-    auto = match_recipe(descripcion)
-    elegida = (asignaciones or {}).get(plain(descripcion))
+    auto = match_recipe(fila["descripcion"])
+    elegida = (asignaciones or {}).get(task_key(fila["descripcion"], fila.get("unidad")))
+    obra = unit_key(fila.get("unidad"))
+
     if elegida is None:
-        return auto
-    plantillas = [(str(c), float(f or 1)) for c, f in elegida.get("plantillas") or []]
-    if not plantillas:
-        return None
-    if auto and [c for c, _ in auto["plantillas"]] == [c for c, _ in plantillas]:
-        return {**auto, "plantillas": plantillas}  # same recipe: keep its notes and client materials
-    return {"patron": None, "plantillas": plantillas, "nota": "Receta elegida a mano al cargar la obra."}
+        if auto is None:
+            return None
+        rule = dict(auto)
+        pares = [(c, f, True) for c, f in auto["plantillas"]]
+    else:
+        pares = []
+        for par in elegida.get("plantillas") or []:
+            codigo, factor = str(par[0]), par[1] if len(par) > 1 else None
+            try:
+                factor = float(factor) if factor not in (None, "") else None
+            except (TypeError, ValueError):
+                factor = None
+            pares.append((codigo, factor if factor and factor > 0 else None, False))
+        if not pares:
+            return None
+        same = auto and [c for c, _ in auto["plantillas"]] == [c for c, _, _ in pares]
+        rule = dict(auto) if same else {"patron": None, "nota": "Receta elegida a mano al cargar la obra."}
+
+    plantillas, falta = [], []
+    for codigo, factor, automatica in pares:
+        receta = unit_key((templates.get(codigo) or {}).get("unidad"))
+        if automatica:
+            # A rule with "obra" was written for that item unit (its factors convert from it);
+            # without it, the rule assumes the item already comes in the recipe's unit
+            esperada = unit_key(auto.get("obra")) if auto.get("obra") else receta
+            if esperada and obra and esperada != obra:
+                factor = None
+        elif factor is None and (not receta or not obra or receta == obra):
+            factor = 1.0
+        if factor is None:
+            falta.append(codigo)
+        plantillas.append((codigo, factor))
+    rule["plantillas"] = plantillas
+    rule["falta_factor"] = falta
+    return rule
 
 
 def build_plan(parsed: dict, templates: dict[str, dict], asignaciones: dict | None = None) -> dict:
     """Items to load, each with its recipe resources or with the Excel price."""
     items: list[dict] = []
     sin_receta: list[dict] = []
+    sin_factor: list[dict] = []
     faltan: set[str] = set()
 
     for fila in parsed["filas"]:
         item = dict(fila, plantilla=None, parametros={}, recursos=[], revisar=[])
         if fila["nivel"] == "item":
-            rule = rule_for(fila["descripcion"], asignaciones)
+            rule = rule_for(fila, templates, asignaciones)
             missing = [c for c, _ in (rule or {}).get("plantillas", []) if c not in templates]
             faltan.update(missing)
-            if rule and not missing:
+            if rule and not missing and rule["falta_factor"]:
+                # Units differ and nobody said how to convert: not loadable yet
+                item.update(falta_factor=rule["falta_factor"], plantillas=[c for c, _ in rule["plantillas"]],
+                            factores=[f for _, f in rule["plantillas"]], nota_cruce=rule.get("nota"))
+                sin_factor.append(item)
+            elif rule and not missing:
                 rows, params, revisar = expand_item(fila, rule, templates)
                 item.update(plantilla=rule["plantillas"][0][0], parametros=params, recursos=rows,
                             plantillas=[c for c, _ in rule["plantillas"]],
@@ -348,7 +413,8 @@ def build_plan(parsed: dict, templates: dict[str, dict], asignaciones: dict | No
                 sin_receta.append(item)
         items.append(item)
 
-    return {"items": items, "sin_receta": sin_receta, "plantillas_faltantes": sorted(faltan)}
+    return {"items": items, "sin_receta": sin_receta, "sin_factor": sin_factor,
+            "plantillas_faltantes": sorted(faltan)}
 
 
 def item_notes(item: dict) -> str:
