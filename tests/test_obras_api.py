@@ -226,9 +226,16 @@ class TestAnalizar:
         assert res.status_code == 400
 
     def test_duplicated_code(self, client, db):
+        # LH18 exists dated (2026-01-01) in the fixture; a second one, undated, must not block
         db.tables["catalog_entries"].append(
             {"id": "e-dup", "catalog_id": "cat1", "org_id": ORG, "codigo": "lh18", "tipo": "material",
-             "precio_sin_iva": 9, "fecha_precio": "2026-02-01"})
+             "precio_sin_iva": 9, "fecha_precio": None})
+        precios = {p["codigo"]: p for p in analizar(client).json()["precios"]}
+        assert "LH18" not in precios
+        # Two undated copies of the same code: nobody can tell which one is right
+        for e in db.tables["catalog_entries"]:
+            if e["codigo"] in ("LH18", "lh18"):
+                e["fecha_precio"] = None
         precios = {p["codigo"]: p for p in analizar(client).json()["precios"]}
         assert precios["LH18"]["problema"] == "duplicado"
         assert len(precios["LH18"]["entradas"]) == 2

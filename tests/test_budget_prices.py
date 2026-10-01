@@ -145,9 +145,37 @@ class TestFindEntry:
         assert find_entry({"codigo": " h30 ", "tipo": "material"}, by_id, by_codigo) == (e1, None)
 
     def test_duplicate_code_is_reported(self):
+        # Several catalogs with the same code and no dates: nobody can tell which is right
         a = {"id": "a", "codigo": "H30", "tipo": "material"}
         b = {"id": "b", "codigo": "H30", "tipo": "material"}
         assert find_entry({"codigo": "H30", "tipo": "material"}, {}, {"H30": [a, b]}) == (None, "duplicado")
+
+    def test_dated_price_wins_over_undated(self):
+        # The Maestro keeps dated prices; the catalogs imported with old obras do not
+        viejo = {"id": "a", "codigo": "CEM", "tipo": "material", "precio_sin_iva": 5050}
+        maestro = {"id": "b", "codigo": "CEM", "tipo": "material", "precio_sin_iva": 6669,
+                   "fecha_precio": "2026-06-03"}
+        otro = {"id": "c", "codigo": "CEM", "tipo": "material", "precio_sin_iva": 7000}
+        assert find_entry({"codigo": "CEM", "tipo": "material"}, {}, {"CEM": [viejo, maestro, otro]}) == (maestro, None)
+
+    def test_newest_date_wins_and_equal_dates_are_a_tie(self):
+        a = {"id": "a", "codigo": "AR", "tipo": "material", "fecha_precio": "2026-01-01"}
+        b = {"id": "b", "codigo": "AR", "tipo": "material", "fecha_precio": "2026-06-03"}
+        assert find_entry({"codigo": "AR", "tipo": "material"}, {}, {"AR": [a, b]}) == (b, None)
+        c = {"id": "c", "codigo": "AR", "tipo": "material", "fecha_precio": "2026-06-03"}
+        assert find_entry({"codigo": "AR", "tipo": "material"}, {}, {"AR": [b, c]}) == (None, "duplicado")
+
+    def test_newest_catalog_breaks_undated_ties(self):
+        # CAL has no date anywhere; the Maestro (loaded last) still wins over old obra imports
+        obra = {"id": "a", "codigo": "CAL", "tipo": "material", "_catalogo_creado": "2026-04-01T10:00:00"}
+        maestro = {"id": "b", "codigo": "CAL", "tipo": "material", "_catalogo_creado": "2026-09-30T12:00:00"}
+        assert find_entry({"codigo": "CAL", "tipo": "material"}, {}, {"CAL": [obra, maestro]}) == (maestro, None)
+
+    def test_mo_material_looks_up_material_entries(self):
+        # Clavos in a recipe are 'mo_material'; the catalog stores them as 'material'
+        a = {"id": "a", "codigo": "CL2", "tipo": "material", "_catalogo_creado": "2026-04-01"}
+        b = {"id": "b", "codigo": "CL2", "tipo": "material", "fecha_precio": "2026-07-10"}
+        assert find_entry({"codigo": "CL2", "tipo": "mo_material"}, {}, {"CL2": [a, b]}) == (b, None)
 
     def test_same_type_breaks_the_tie(self):
         a = {"id": "a", "codigo": "X", "tipo": "material"}
