@@ -104,3 +104,33 @@ class TestBudgetPricesMigration:
             assert re.search(
                 rf"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column}\b", sql
             ), f"{table}.{column}"
+
+
+MIGRATION_009 = MIGRATION_004.parent / "009_obra_recetas_memoria.sql"
+
+
+class TestObraMemoryMigration:
+    """009 creates the recipe memory of "Cargar obra": idempotent and closed to clients."""
+
+    def _sql(self) -> str:
+        text = MIGRATION_009.read_text(encoding="utf-8")
+        return "\n".join(line.split("--", 1)[0] for line in text.splitlines())
+
+    def test_idempotent_and_no_data_loss(self):
+        sql = self._sql()
+        assert re.search(r"CREATE TABLE IF NOT EXISTS obra_recetas_memoria", sql)
+        for line in re.findall(r"CREATE (?:UNIQUE )?INDEX[^\n]*", sql):
+            assert "IF NOT EXISTS" in line
+        assert not re.search(r"DROP\s+|DELETE\s+FROM|TRUNCATE|UPDATE\s+\w+\s+SET", sql, re.IGNORECASE)
+
+    def test_columns_used_by_the_code(self):
+        sql = self._sql()
+        for column in ("org_id", "clave", "descripcion", "unidad", "plantillas", "veces", "updated_at"):
+            assert re.search(rf"^\s*{column}\s", sql, re.MULTILINE), column
+        assert re.search(r"UNIQUE \(org_id, clave\)", sql)
+
+    def test_rls_and_revoke(self):
+        sql = self._sql()
+        assert re.search(r"ALTER TABLE obra_recetas_memoria ENABLE ROW LEVEL SECURITY", sql)
+        assert re.search(r"REVOKE ALL ON obra_recetas_memoria FROM anon, authenticated", sql)
+        assert not re.search(r"CREATE POLICY", sql, re.IGNORECASE)
