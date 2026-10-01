@@ -203,6 +203,125 @@ export const templateApi = {
   }) => post<TemplatePreviewResponse>('/templates/preview', data),
 }
 
+// ─── Cargar obra (Excel de la obra + recetas del Maestro) ──────────────────────
+
+export interface ObraPrecio {
+  codigo: string
+  descripcion?: string
+  unidad?: string
+  tipo: string
+  problema: 'sin_precio' | 'duplicado' | 'no_esta'
+  motivo: string
+  recursos: number
+  items: string[]
+  entradas: {
+    id: string
+    catalog_id: string
+    catalogo?: string
+    codigo: string
+    descripcion?: string
+    unidad?: string
+    tipo?: string
+    precio_sin_iva?: number | null
+    fecha_precio?: string | null
+  }[]
+}
+
+export interface ObraReceta {
+  codigo: string
+  nombre: string
+  unidad?: string
+  partes: { codigo: string; nombre: string; unidad?: string; factor: number }[]
+  origen: 'memoria' | 'regla' | 'sugerida' | 'manual'
+  porque?: string
+}
+
+export interface ObraPregunta {
+  tipo: 'cantidad_por_unidad'
+  texto: string
+  receta: string
+  unidad_receta: string
+  unidad_obra: string
+  valor: number | null
+}
+
+export interface ObraTarea {
+  clave: string
+  descripcion: string
+  unidad?: string
+  veces: number
+  cantidad_total: number
+  total_excel: number
+  codigos: string[]
+  estado: 'verde' | 'amarillo' | 'rojo'
+  receta: ObraReceta | null
+  sugerencias: { codigo: string; nombre: string; unidad?: string; porque?: string }[]
+  pregunta: ObraPregunta | null
+  avisos: string[]
+  precios_faltantes: string[]
+}
+
+export interface ObraRecetaCatalogo {
+  codigo: string
+  nombre: string
+  unidad?: string
+  categoria?: string
+}
+
+export interface ObraAnalisis {
+  archivo: string
+  titulo: string
+  fecha_precios: string
+  resumen: {
+    rubros: number
+    pisos: number
+    trabajos: number
+    grupos: number
+    verdes: number
+    amarillos: number
+    rojos: number
+    total_excel: number
+  }
+  tareas: ObraTarea[]
+  precios: ObraPrecio[]
+  recetas: ObraRecetaCatalogo[]
+  correcciones_excel: string[]
+  listo: boolean
+}
+
+export interface ObraCarga {
+  budget_id: string
+  nombre: string
+  items: number
+  con_receta: number
+  recursos: number
+  precios_en_cero: number
+  total_excel: number
+  resumen?: { directo_total: number; neto_total: number }
+  memoria_guardada?: number
+}
+
+// Lo que Sol decidió por trabajo: { clave: { plantillas: [[codigo, factor], ...], confirmada? } } ([] = sin receta)
+export type ObraAsignaciones = Record<string, { plantillas: [string, number][]; confirmada?: boolean }>
+
+function obraForm(file: File, asignaciones: ObraAsignaciones, extra: Record<string, string> = {}) {
+  const formData = new FormData()
+  formData.append('file', file)
+  formData.append('asignaciones', JSON.stringify(asignaciones))
+  for (const [k, v] of Object.entries(extra)) formData.append(k, v)
+  return formData
+}
+
+export const obraApi = {
+  analizar: (file: File, asignaciones: ObraAsignaciones) =>
+    postFile<ObraAnalisis>('/obras/analizar', obraForm(file, asignaciones)),
+  cargar: (file: File, asignaciones: ObraAsignaciones, nombre: string, permitirSinPrecio: boolean) =>
+    postFile<ObraCarga>(
+      '/obras/cargar',
+      obraForm(file, asignaciones, { nombre, permitir_sin_precio: String(permitirSinPrecio) }),
+    ),
+}
+
 // ─── Catalog API ───────────────────────────────────────────────────────────────
 
 export const catalogApi = {

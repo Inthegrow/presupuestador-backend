@@ -13,6 +13,7 @@ import ImportExcel from './pages/ImportExcel'
 import NewProject from './pages/NewProject'
 import Export from './pages/Export'
 import MarkupChain from './pages/MarkupChain'
+import CargarObra from './pages/CargarObra'
 import Catalogs from './pages/Catalogs'
 import Versions from './pages/Versions'
 import Templates from './pages/Templates'
@@ -40,6 +41,7 @@ export default function App() {
             <Route path="budgets/:id/versions" element={<Versions />} />
             <Route path="new-project" element={<NewProject />} />
             <Route path="import" element={<ImportExcel />} />
+            <Route path="cargar-obra" element={<CargarObra />} />
             <Route path="settings/markups" element={<MarkupChain />} />
             <Route path="catalogs" element={<Catalogs />} />
             <Route path="templates" element={<Templates />} />

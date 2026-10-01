@@ -40,15 +40,15 @@ COL_NETO_TOTAL = 26  # Z: total neto
 #   cliente:    códigos de recursos que no se cobran ("no incluye el porcelanato").
 #   nota:       lo que hay que revisar con Emilia y Sol.
 MAPEO: list[dict] = [
-    {"patron": r"^BASES AISLADAS", "plantillas": [("4.1.3", 1.0)],
+    {"patron": r"^BASES AISLADAS", "plantillas": [("4.1.3", 1.0)], "obra": "u",
      "nota": "1 m³ por base: en la solapa 3.1-1 de la obra son 35 m³ para 35 bases, llenadas junto con los troncos."},
-    {"patron": r"^TRONCOS", "plantillas": [("4.1.4", 0.32)],
+    {"patron": r"^TRONCOS", "plantillas": [("4.1.4", 0.32)], "obra": "u",
      "nota": "0,80 × 0,40 × 1 m = 0,32 m³ por tronco. En la obra el hormigón de los troncos va con las bases: revisar que no se cuente dos veces."},
-    {"patron": r"^TENSORES", "plantillas": [("4.1.7", 0.08)],
+    {"patron": r"^TENSORES", "plantillas": [("4.1.7", 0.08)], "obra": "m",
      "nota": "0,20 × 0,40 = 0,08 m³ por ml."},
-    {"patron": r"TABIQUE DE HORMIGON ARMADO EN PLANTA BAJA", "plantillas": [("4.2.4", 2.816)],
+    {"patron": r"TABIQUE DE HORMIGON ARMADO EN PLANTA BAJA", "plantillas": [("4.2.4", 2.816)], "obra": "tramo",
      "nota": "17,6 m² × 0,16 m = 2,816 m³ por tramo."},
-    {"patron": r"TABIQUE DE HORMIGON ARMADO EN NUCLEO", "plantillas": [("4.2.4", 6.72)],
+    {"patron": r"TABIQUE DE HORMIGON ARMADO EN NUCLEO", "plantillas": [("4.2.4", 6.72)], "obra": "tramo",
      "nota": "42 m² × 0,16 m = 6,72 m³ por tramo."},
     {"patron": r"MURO DE CARGA.*LADRILLO HUECO DEL 18", "plantillas": [("5.1.4", 1.0)],
      "nota": "Muro de carga: ¿es hueco del 18 (5.1.4) o portante del 18 (5.1.1)?"},
@@ -63,13 +63,13 @@ MAPEO: list[dict] = [
      "nota": "La receta de grueso interior no lleva hidrófugo."},
     {"patron": r"^REVOQUE INTERIOR$", "plantillas": [("5.5.4", 1.0)],
      "nota": "¿Lleva también fino interior (5.5.2)?"},
-    {"patron": r"^TELGOPOR 50 ?MM \+ CONTRAPISO.*E ?[:=] ?4 ?CM", "plantillas": [("8.3", 1.0), ("5.2.3", 0.04)],
+    {"patron": r"^TELGOPOR 50 ?MM \+ CONTRAPISO.*E ?[:=] ?4 ?CM", "plantillas": [("8.3", 1.0), ("5.2.3", 0.04)], "obra": "m2",
      "nota": "Compuesto: placas EPS (8.3) + contrapiso de cascote (5.2.3) de 4 cm."},
-    {"patron": r"^TELGOPOR 50 ?MM \+ CONTRAPISO", "plantillas": [("8.3", 1.0), ("5.2.3", 0.08)],
+    {"patron": r"^TELGOPOR 50 ?MM \+ CONTRAPISO", "plantillas": [("8.3", 1.0), ("5.2.3", 0.08)], "obra": "m2",
      "nota": "Compuesto: placas EPS (8.3) + contrapiso de cascote (5.2.3) de 8 cm."},
     {"patron": r"^CONTRAPISO/ ?CARPETA EN BALCONES", "plantillas": [("5.4.1", 1.0)],
      "nota": "En el Excel de la obra lleva el precio de la carpeta. ¿Va con hidrófugo (5.4.2)?"},
-    {"patron": r"^CONTRAPISO", "plantillas": [("5.2.3", 0.10)],
+    {"patron": r"^CONTRAPISO", "plantillas": [("5.2.3", 0.10)], "obra": "m2",
      "nota": "Contrapiso de cascote de 10 cm: 0,10 m³ por m²."},
     {"patron": r"^CARPETA", "plantillas": [("5.4.1", 1.0)],
      "nota": "La receta no tiene espesor: es la misma para 3 y 4 cm."},
@@ -117,6 +117,23 @@ def plain(text: object) -> str:
     return " ".join(s.upper().split())
 
 
+_UNITS = {
+    "M2": "m2", "M²": "m2", "M3": "m3", "M³": "m3", "M": "m", "ML": "m", "MTS": "m",
+    "U": "u", "UN": "u", "UNID": "u", "UNIDAD": "u", "UNIDADES": "u", "GL": "gl", "GLOBAL": "gl",
+}
+
+
+def unit_key(unidad: object) -> str:
+    """Comparable unit: 'm²' = 'M2' = 'm2', 'ml' = 'm', 'unid' = 'u'."""
+    u = plain(unidad).replace(".", "").replace(" ", "")
+    return _UNITS.get(u, u.lower())
+
+
+def task_key(descripcion: str, unidad: object) -> str:
+    """One task = same description AND same unit (the same text in m and m3 are two tasks)."""
+    return f"{plain(descripcion)} | {unit_key(unidad)}"
+
+
 def match_recipe(descripcion: str) -> dict | None:
     key = plain(descripcion)
     for rule in MAPEO:
@@ -131,6 +148,62 @@ def candidate(descripcion: str) -> str:
         if re.search(patron, key):
             return texto
     return "no hay receta parecida en el Maestro"
+
+
+# ── Sugerencias (sin receta en MAPEO): parecido de palabras ─────────────────
+
+_STOPWORDS = {
+    "CON", "DEL", "LAS", "LOS", "POR", "SIN", "PARA", "SOBRE", "ENTRE", "HASTA", "INCLUYE",
+    "ESP", "TIPO", "CADA", "TODO", "TODA", "OBRA", "EJECUCION", "COLOCACION",
+}
+_BOILERPLATE = "Importado del Maestro"  # description written by the Maestro import
+
+
+def _tokens(text: object) -> dict[str, str]:
+    """Comparable words → the word as written: no accents, no short stopwords, no plural."""
+    out: dict[str, str] = {}
+    for tok in re.findall(r"[A-Z]+|\d+", plain(text)):
+        if tok.isdigit():
+            out.setdefault(tok, tok)
+            continue
+        if len(tok) <= 2 or tok in _STOPWORDS:
+            continue
+        key = re.sub(r"(.)\1", r"\1", tok)  # CIELORRASO = CIELORASO
+        if len(key) > 4 and key.endswith("S"):
+            key = key[:-1]
+        out.setdefault(key, tok.lower())
+    return out
+
+
+def suggest_recipes(descripcion: str, templates: dict[str, dict], top: int = 3) -> list[tuple[str, float, str]]:
+    """Recipes whose name looks like the description: [(codigo, score, porque)], best first.
+
+    score = shared words / words of the recipe, plus a bonus for equal numbers ("18", "12").
+    A number alone is not enough, and one shared word scores at most 0.5 (too generic
+    to propose the recipe by itself: "ESMALTE EN ESCALERA" is not the concrete stair).
+    """
+    desc = _tokens(descripcion)
+    found = []
+    for codigo, tmpl in templates.items():
+        text = str(tmpl.get("nombre") or "")
+        extra = str(tmpl.get("descripcion") or "")
+        if extra and not extra.startswith(_BOILERPLATE):
+            text += " " + extra
+        words = _tokens(text)
+        if not words:
+            continue
+        common = [k for k in words if k in desc]
+        nums = [k for k in common if k.isdigit()]
+        palabras = [k for k in common if not k.isdigit()]
+        if not palabras:
+            continue
+        score = min(1.0, len(common) / len(words) + 0.2 * len(nums))
+        if len(palabras) == 1:
+            score = min(score, 0.5)
+        porque = "Se parece por " + ", ".join(f"'{desc[k]}'" for k in (palabras + nums)[:4])
+        found.append((codigo, round(score, 3), porque))
+    found.sort(key=lambda s: (-s[1], s[0]))
+    return found[:top]
 
 
 def altura_from(descripcion: str) -> float | None:
@@ -307,29 +380,92 @@ def expand_item(fila: dict, rule: dict, templates: dict[str, dict]) -> tuple[lis
     return rows, params, notas
 
 
-def build_plan(parsed: dict, templates: dict[str, dict]) -> dict:
+def rule_for(fila: dict, templates: dict[str, dict], asignaciones: dict | None = None) -> dict | None:
+    """Recipe rule of an item: the one chosen by hand (asignaciones) or the automatic one.
+
+    asignaciones = {task_key(descripcion, unidad): {"plantillas": [[codigo, factor], ...]}};
+    an empty list means "sin receta" (use the Excel price). A factor may be null: it is 1
+    when the recipe and the item have the same unit, otherwise it is missing.
+
+    When the units differ, the conversion must be explicit: a hand-chosen factor, or the
+    one of an automatic rule written for that item unit ("obra"). If it is missing, the
+    rule comes back with "falta_factor" (the item cannot be loaded until it is given).
+    """
+    auto = match_recipe(fila["descripcion"])
+    elegida = (asignaciones or {}).get(task_key(fila["descripcion"], fila.get("unidad")))
+    obra = unit_key(fila.get("unidad"))
+
+    if elegida is None:
+        if auto is None:
+            return None
+        rule = dict(auto)
+        pares = [(c, f, True) for c, f in auto["plantillas"]]
+    else:
+        pares = []
+        for par in elegida.get("plantillas") or []:
+            codigo, factor = str(par[0]), par[1] if len(par) > 1 else None
+            try:
+                factor = float(factor) if factor not in (None, "") else None
+            except (TypeError, ValueError):
+                factor = None
+            pares.append((codigo, factor if factor and factor > 0 else None, False))
+        if not pares:
+            return None
+        same = auto and [c for c, _ in auto["plantillas"]] == [c for c, _, _ in pares]
+        rule = dict(auto) if same else {"patron": None, "nota": "Receta elegida a mano al cargar la obra."}
+
+    plantillas, falta = [], []
+    for codigo, factor, automatica in pares:
+        receta = unit_key((templates.get(codigo) or {}).get("unidad"))
+        if automatica:
+            # A rule with "obra" was written for that item unit (its factors convert from it);
+            # without it, the rule assumes the item already comes in the recipe's unit
+            esperada = unit_key(auto.get("obra")) if auto.get("obra") else receta
+            if esperada and obra and esperada != obra:
+                factor = None
+        elif factor is None and (not receta or not obra or receta == obra):
+            factor = 1.0
+        if factor is None:
+            falta.append(codigo)
+        plantillas.append((codigo, factor))
+    rule["plantillas"] = plantillas
+    rule["falta_factor"] = falta
+    return rule
+
+
+def build_plan(parsed: dict, templates: dict[str, dict], asignaciones: dict | None = None) -> dict:
     """Items to load, each with its recipe resources or with the Excel price."""
     items: list[dict] = []
     sin_receta: list[dict] = []
+    sin_factor: list[dict] = []
     faltan: set[str] = set()
 
     for fila in parsed["filas"]:
         item = dict(fila, plantilla=None, parametros={}, recursos=[], revisar=[])
         if fila["nivel"] == "item":
-            rule = match_recipe(fila["descripcion"])
+            rule = rule_for(fila, templates, asignaciones)
             missing = [c for c, _ in (rule or {}).get("plantillas", []) if c not in templates]
             faltan.update(missing)
-            if rule and not missing:
+            if rule and not missing and rule["falta_factor"]:
+                # Units differ and nobody said how to convert: not loadable yet
+                item.update(falta_factor=rule["falta_factor"], plantillas=[c for c, _ in rule["plantillas"]],
+                            factores=[f for _, f in rule["plantillas"]], nota_cruce=rule.get("nota"))
+                sin_factor.append(item)
+            elif rule and not missing:
                 rows, params, revisar = expand_item(fila, rule, templates)
                 item.update(plantilla=rule["plantillas"][0][0], parametros=params, recursos=rows,
-                            plantillas=[c for c, _ in rule["plantillas"]], revisar=revisar,
+                            plantillas=[c for c, _ in rule["plantillas"]],
+                            factores=[f for _, f in rule["plantillas"]], revisar=revisar,
                             nota_cruce=rule.get("nota"))
             else:
                 item["candidato"] = candidate(fila["descripcion"])
+                if missing:
+                    item.update(faltan_plantillas=missing, nota_cruce=rule.get("nota"))
                 sin_receta.append(item)
         items.append(item)
 
-    return {"items": items, "sin_receta": sin_receta, "plantillas_faltantes": sorted(faltan)}
+    return {"items": items, "sin_receta": sin_receta, "sin_factor": sin_factor,
+            "plantillas_faltantes": sorted(faltan)}
 
 
 def item_notes(item: dict) -> str:

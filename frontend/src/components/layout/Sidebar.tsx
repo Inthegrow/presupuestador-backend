@@ -2,7 +2,7 @@ import { NavLink, useNavigate, useLocation } from 'react-router-dom'
 import {
   LayoutGrid, Edit3, BarChart2, Layers,
   Download, Upload, Settings, BookOpen, RefreshCw, LogOut, Plus,
-  ArrowLeft, Library,
+  ArrowLeft, Library, ClipboardCheck,
 } from 'lucide-react'
 import { useAuth } from '../../contexts/AuthContext'
 import { useEffect, useState } from 'react'
@@ -106,6 +106,7 @@ export default function Sidebar() {
       <nav className="px-2 space-y-0.5 text-[13px]">
         <NavItem to="/app/dashboard" end icon={<LayoutGrid size={15} />} label="Mis Presupuestos" />
         <NavItem to="/app/new-project" icon={<Plus size={15} />} label="+ Nuevo Presupuesto" />
+        <NavItem to="/app/cargar-obra" icon={<ClipboardCheck size={15} />} label="Cargar obra (con recetas)" />
         <NavItem to="/app/import" icon={<Upload size={15} />} label="Importar Excel" />
       </nav>
 
