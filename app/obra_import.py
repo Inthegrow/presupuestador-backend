@@ -150,6 +150,62 @@ def candidate(descripcion: str) -> str:
     return "no hay receta parecida en el Maestro"
 
 
+# ── Sugerencias (sin receta en MAPEO): parecido de palabras ─────────────────
+
+_STOPWORDS = {
+    "CON", "DEL", "LAS", "LOS", "POR", "SIN", "PARA", "SOBRE", "ENTRE", "HASTA", "INCLUYE",
+    "ESP", "TIPO", "CADA", "TODO", "TODA", "OBRA", "EJECUCION", "COLOCACION",
+}
+_BOILERPLATE = "Importado del Maestro"  # description written by the Maestro import
+
+
+def _tokens(text: object) -> dict[str, str]:
+    """Comparable words → the word as written: no accents, no short stopwords, no plural."""
+    out: dict[str, str] = {}
+    for tok in re.findall(r"[A-Z]+|\d+", plain(text)):
+        if tok.isdigit():
+            out.setdefault(tok, tok)
+            continue
+        if len(tok) <= 2 or tok in _STOPWORDS:
+            continue
+        key = re.sub(r"(.)\1", r"\1", tok)  # CIELORRASO = CIELORASO
+        if len(key) > 4 and key.endswith("S"):
+            key = key[:-1]
+        out.setdefault(key, tok.lower())
+    return out
+
+
+def suggest_recipes(descripcion: str, templates: dict[str, dict], top: int = 3) -> list[tuple[str, float, str]]:
+    """Recipes whose name looks like the description: [(codigo, score, porque)], best first.
+
+    score = shared words / words of the recipe, plus a bonus for equal numbers ("18", "12").
+    A number alone is not enough, and one shared word scores at most 0.5 (too generic
+    to propose the recipe by itself: "ESMALTE EN ESCALERA" is not the concrete stair).
+    """
+    desc = _tokens(descripcion)
+    found = []
+    for codigo, tmpl in templates.items():
+        text = str(tmpl.get("nombre") or "")
+        extra = str(tmpl.get("descripcion") or "")
+        if extra and not extra.startswith(_BOILERPLATE):
+            text += " " + extra
+        words = _tokens(text)
+        if not words:
+            continue
+        common = [k for k in words if k in desc]
+        nums = [k for k in common if k.isdigit()]
+        palabras = [k for k in common if not k.isdigit()]
+        if not palabras:
+            continue
+        score = min(1.0, len(common) / len(words) + 0.2 * len(nums))
+        if len(palabras) == 1:
+            score = min(score, 0.5)
+        porque = "Se parece por " + ", ".join(f"'{desc[k]}'" for k in (palabras + nums)[:4])
+        found.append((codigo, round(score, 3), porque))
+    found.sort(key=lambda s: (-s[1], s[0]))
+    return found[:top]
+
+
 def altura_from(descripcion: str) -> float | None:
     """Wall height from the description: 'h 3m' → 3, 'h 4,4m' → 4.4 ('h 0.2m/1.8m' → None)."""
     m = re.search(r"\bH\s*(\d+(?:[.,]\d+)?)\s*M\b(?!\s*/)", plain(descripcion))
@@ -410,6 +466,8 @@ def build_plan(parsed: dict, templates: dict[str, dict], asignaciones: dict | No
                             nota_cruce=rule.get("nota"))
             else:
                 item["candidato"] = candidate(fila["descripcion"])
+                if missing:
+                    item.update(faltan_plantillas=missing, nota_cruce=rule.get("nota"))
                 sin_receta.append(item)
         items.append(item)
 
