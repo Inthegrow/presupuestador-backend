@@ -227,16 +227,45 @@ export interface ObraPrecio {
   }[]
 }
 
+export interface ObraReceta {
+  codigo: string
+  nombre: string
+  unidad?: string
+  partes: { codigo: string; nombre: string; unidad?: string; factor: number }[]
+  origen: 'memoria' | 'regla' | 'sugerida' | 'manual'
+  porque?: string
+}
+
+export interface ObraPregunta {
+  tipo: 'cantidad_por_unidad'
+  texto: string
+  receta: string
+  unidad_receta: string
+  unidad_obra: string
+  valor: number | null
+}
+
 export interface ObraTarea {
   clave: string
   descripcion: string
   unidad?: string
   veces: number
-  codigos: string[]
+  cantidad_total: number
   total_excel: number
-  plantillas: { codigo: string; factor: number }[]
-  nota?: string
-  elegida_a_mano: boolean
+  codigos: string[]
+  estado: 'verde' | 'amarillo' | 'rojo'
+  receta: ObraReceta | null
+  sugerencias: { codigo: string; nombre: string; unidad?: string; porque?: string }[]
+  pregunta: ObraPregunta | null
+  avisos: string[]
+  precios_faltantes: string[]
+}
+
+export interface ObraRecetaCatalogo {
+  codigo: string
+  nombre: string
+  unidad?: string
+  categoria?: string
 }
 
 export interface ObraAnalisis {
@@ -245,17 +274,17 @@ export interface ObraAnalisis {
   fecha_precios: string
   resumen: {
     rubros: number
-    subrubros: number
-    items: number
-    con_receta: number
-    sin_receta: number
+    pisos: number
+    trabajos: number
+    grupos: number
+    verdes: number
+    amarillos: number
+    rojos: number
     total_excel: number
-    total_excel_sin_receta: number
   }
-  precios: ObraPrecio[]
   tareas: ObraTarea[]
-  plantillas: { codigo: string; nombre?: string; unidad?: string }[]
-  plantillas_faltantes: string[]
+  precios: ObraPrecio[]
+  recetas: ObraRecetaCatalogo[]
   correcciones_excel: string[]
   listo: boolean
 }
@@ -269,10 +298,11 @@ export interface ObraCarga {
   precios_en_cero: number
   total_excel: number
   resumen?: { directo_total: number; neto_total: number }
+  memoria_guardada?: number
 }
 
-// Elección de receta por tarea: { clave: { plantillas: [[codigo, factor], ...] } } ([] = sin receta)
-export type ObraAsignaciones = Record<string, { plantillas: [string, number][] }>
+// Lo que Sol decidió por trabajo: { clave: { plantillas: [[codigo, factor], ...], confirmada? } } ([] = sin receta)
+export type ObraAsignaciones = Record<string, { plantillas: [string, number][]; confirmada?: boolean }>
 
 function obraForm(file: File, asignaciones: ObraAsignaciones, extra: Record<string, string> = {}) {
   const formData = new FormData()
