@@ -15,6 +15,7 @@ from app.obra_import import (
     match_recipe,
     parse_obra,
     report_markdown,
+    suggest_recipes,
 )
 from import_obra import sql_script
 
@@ -228,3 +229,31 @@ def test_price_problems_in_report(parsed: dict, plan: dict) -> None:
     md = report_markdown(parsed, plan, "obra.xlsx", list(probs.values()))
     assert "## Recursos sin precio válido (la carga se frena)" in md
     assert "`HADN6`" in md
+
+
+SUGGEST = {
+    "5.1.4": {"nombre": "LADRILLO CERAMICO HUECO DEL 18", "unidad": "m2"},
+    "5.1.5": {"nombre": "LADRILLO CERAMICO HUECO DEL 12", "unidad": "m2"},
+    "5.1.7": {"nombre": "LADRILLO COMUN", "unidad": "m2"},
+    "4.2.6": {"nombre": "escaleras", "unidad": "gl",
+              "descripcion": "Importado del Maestro TERRAC (solapa 4.2.6). Cantidad de ejemplo del Excel: 18 gl."},
+    "6.1": {"nombre": "CIELORRASO", "unidad": "m2", "descripcion": "Aplicado de yeso"},
+}
+
+
+def test_suggest_recipes() -> None:
+    found = suggest_recipes("Muro de mampostería en ladrillo hueco del 18", SUGGEST)
+    assert [c for c, _, _ in found] == ["5.1.4", "5.1.5", "5.1.7"]
+    assert found[0][1] >= 0.6
+    assert found[0][2] == "Se parece por 'ladrillo', 'hueco', '18'"
+    assert found[1][1] < found[0][1]  # the number counts
+
+
+def test_suggest_recipes_needs_words() -> None:
+    assert suggest_recipes("Obrador", SUGGEST) == []
+    assert suggest_recipes("Bolsas de 18", SUGGEST) == []  # a number alone is not enough
+    # One shared word is too generic to propose the recipe by itself
+    [(codigo, score, _)] = suggest_recipes("ESMALTE EN ESCALERA COMPLETA", SUGGEST)
+    assert (codigo, score) == ("4.2.6", 0.5)
+    # Typos and plurals, and the recipe's own description (not the import boilerplate)
+    assert suggest_recipes("CIELORASOS APLICADOS EN YESO", SUGGEST)[0][:2] == ("6.1", 1.0)
