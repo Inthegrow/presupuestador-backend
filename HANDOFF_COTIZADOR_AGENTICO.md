@@ -83,6 +83,14 @@ Decisión de Carlos: usar **la misma estructura multiempresa de SOLÉ**, no inve
    programar. No suponerlos.
 
 ### Etapa A: cerrar la carga de una obra para que Sol la use ya
+0. **Lo que enseñó la primera carga real (01/10):** en producción conviven cuatro catálogos con los
+   mismos códigos (Maestro + Las Heras + Lugones + Belgrano) y Ginkgo salió con 55 rojos. Se arregló
+   la regla de desempate en `find_entry` (gana el precio con fecha, luego el catálogo más nuevo; PR de
+   la rama `claude/zealous-johnson-m3rodu`). Queda por hacer bien: **marcar un catálogo como oficial**
+   en la app y dejar los viejos solo para consulta. También: la pregunta de conversión aparece aunque
+   la app ya sepa la respuesta (0,1 m³ por m²); mostrarla como dato resuelto, no como pregunta abierta.
+   Y Render **no despliega solo** aunque Auto-Deploy esté en "On Commit": revisar la conexión con
+   GitHub; mientras tanto, "Manual Deploy → Deploy latest commit" después de cada merge.
 1. Correr en Supabase las migraciones **009** y **010** (SQL Editor, idempotentes). El PR #20 ya está mergeado.
 2. Cargar en la app las recetas (Fase 3) y los catálogos (Fase 1) del Maestro actual, si aún no están.
 3. Primera carga real de **Edificio Ginkgo** con Sol al lado. Anotar cada vez que duda: eso es un bug de UX.
