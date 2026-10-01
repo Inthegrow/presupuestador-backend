@@ -64,6 +64,24 @@ El PR #20 se mergeó el 2026-10-01. Falta correr en Supabase las migraciones 009
 
 ## 5. Qué falta (en el orden que conviene)
 
+### Antes de todo: clave y usuarios, con la estructura multiempresa de SOLÉ
+Hoy cualquiera con el link entra y ve todo. Esto va **antes** de cargar obras reales de TERRAC.
+Decisión de Carlos: usar **la misma estructura multiempresa de SOLÉ**, no inventar una nueva.
+
+1. **Login con usuario y clave** usando el Supabase de auth compartido con SOLÉ/EOS (`AUTH_SUPABASE_*`):
+   tablas `organizations` y `memberships`. Cada usuario pertenece a una o más empresas (`org_id`).
+2. **Cada empresa ve solo lo suyo.** Todas las tablas ya tienen `org_id` y `app/auth.py` ya lo resuelve
+   desde `memberships`. Revisar que **todas** las rutas usen `get_current_user` y filtren por `org_id`.
+3. **Usuario con varias empresas:** hoy `app/auth.py` toma la primera membresía (`limit(1)`). Hay que
+   dejar elegir la empresa (selector arriba, como en SOLÉ) y mandar la elegida en cada pedido.
+4. **No perder los datos actuales:** crear la empresa TERRAC en SOLÉ con el **mismo `org_id` que hoy
+   tiene `DEMO_ORG_ID`** en Render. Después crear los usuarios (Sol, Emilia, Carlos…) y sus membresías.
+5. **Encender:** `VITE_AUTH_ENABLED=true` en Vercel (y publicar el frontend) y **borrar `DEMO_ORG_ID`**
+   en Render. Probar que sin clave no se ve nada.
+6. La pantalla de login ya existe (`frontend/src/pages/Login.tsx`). Sumar "Olvidé mi clave".
+7. **Preguntarle a Carlos** los nombres exactos de tablas, columnas y roles que usa SOLÉ antes de
+   programar. No suponerlos.
+
 ### Etapa A: cerrar la carga de una obra para que Sol la use ya
 1. Correr en Supabase las migraciones **009** y **010** (SQL Editor, idempotentes). El PR #20 ya está mergeado.
 2. Cargar en la app las recetas (Fase 3) y los catálogos (Fase 1) del Maestro actual, si aún no están.
@@ -93,7 +111,7 @@ El PR #20 se mergeó el 2026-10-01. Falta correr en Supabase las migraciones 009
     en la obra. Pedido de Carlos.
 
 ### Etapa D: producto
-14. Login y usuarios (hoy desactivado).
+14. Login y usuarios: ver "Antes de todo" arriba. Va primero.
 15. Certificación de avance (fase posterior del diagnóstico original).
 
 ## 6. Cómo trabajar (lo que funcionó)
@@ -131,7 +149,8 @@ El PR #20 se mergeó el 2026-10-01. Falta correr en Supabase las migraciones 009
 
 ## 8. Primer mensaje sugerido para el próximo chat
 
-> Leé `HANDOFF_COTIZADOR_AGENTICO.md` y `DISENO_CARGAR_OBRA.md`. Arrancá por la Etapa A: el PR #20 ya está mergeado;
-> confirmá que corrieron las migraciones 009 y 010 y hacé el punto 4 ("Ver diferencias con el Excel") con un plan de
+> Leé `HANDOFF_COTIZADOR_AGENTICO.md` y `DISENO_CARGAR_OBRA.md`. Arrancá por "Antes de todo": clave y usuarios con la
+> estructura multiempresa de SOLÉ (preguntame los nombres de tablas y roles antes de programar). Después seguí con la
+> Etapa A: confirmá que corrieron las migraciones 009 y 010 y hacé el punto 4 ("Ver diferencias con el Excel") con un plan de
 > contrato, un subagente Opus para el servidor y uno Sonnet para la pantalla. Probá en el navegador con el
 > Excel de Ginkgo antes de abrir el PR. Escribime corto y sin jerga.
