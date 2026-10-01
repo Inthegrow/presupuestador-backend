@@ -134,3 +134,17 @@ class TestObraMemoryMigration:
         assert re.search(r"ALTER TABLE obra_recetas_memoria ENABLE ROW LEVEL SECURITY", sql)
         assert re.search(r"REVOKE ALL ON obra_recetas_memoria FROM anon, authenticated", sql)
         assert not re.search(r"CREATE POLICY", sql, re.IGNORECASE)
+
+
+MIGRATION_010 = MIGRATION_004.parent / "010_resource_template.sql"
+
+
+class TestResourceTemplateMigration:
+    """010 adds the recipe of each resource (combined items): idempotent, no data loss."""
+
+    def test_idempotent_and_no_data_loss(self):
+        text = MIGRATION_010.read_text(encoding="utf-8")
+        sql = "\n".join(line.split("--", 1)[0] for line in text.splitlines())
+        assert re.search(r"ALTER TABLE item_resources ADD COLUMN IF NOT EXISTS template_id\b", sql)
+        assert "ON DELETE SET NULL" in sql
+        assert not re.search(r"DROP\s+|DELETE\s+FROM|TRUNCATE|UPDATE\s+\w+\s+SET", sql, re.IGNORECASE)

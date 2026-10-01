@@ -491,15 +491,12 @@ def _resource_rows(item: dict, item_id: str, org_id: str, templates: dict[str, d
                    book: PriceBook, org_waste: object) -> list[dict]:
     rows = []
     for r in item["recursos"]:
-        row = {k: v for k, v in r.items() if k not in ("plantilla", "congelar_desperdicio")}
-        if r.get("congelar_desperdicio"):
-            # Resource of the 2nd+ recipe of a combined item: the item only keeps the first
-            # recipe, so its own % (plantilla > organización) is fixed here as "recurso" and
-            # the cascade does not re-resolve it with the first recipe's %.
-            row["desperdicio_pct"], _ = resolve_waste(None, None, templates[r["plantilla"]].get("desperdicio_pct"),
-                                                      org_waste)
-            row["desperdicio_origen"] = ORIGEN_RECURSO
-        elif row["tipo"] != "mano_obra" and row.get("desperdicio_pct") is None:
+        row = {k: v for k, v in r.items() if k != "plantilla"}
+        # Each resource remembers its own recipe: in a combined item (ej. EPS + contrapiso)
+        # the inherited waste is resolved with that recipe, now and when the cascade
+        # recalculates (presupuesto > receta del recurso > organización).
+        row["template_id"] = templates[r["plantilla"]]["id"]
+        if row["tipo"] != "mano_obra" and row.get("desperdicio_pct") is None:
             pct, origen = resolve_waste(None, None, templates[r["plantilla"]].get("desperdicio_pct"), org_waste)
             row["desperdicio_pct"], row["desperdicio_origen"] = pct, origen
         elif row["tipo"] != "mano_obra":

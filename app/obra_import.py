@@ -354,13 +354,8 @@ def expand_item(fila: dict, rule: dict, templates: dict[str, dict]) -> tuple[lis
     notas: list[str] = []
     cliente = set(rule.get("cliente") or [])
 
-    primary = templates[rule["plantillas"][0][0]]
     for codigo, factor in rule["plantillas"]:
         tmpl = templates[codigo]
-        # The item keeps only the first recipe (template_id). A resource of another recipe
-        # that inherits a different waste % is fixed at load ("recurso"), so the cascade
-        # does not re-resolve it with the first recipe's %.
-        congelar = codigo != rule["plantillas"][0][0] and tmpl.get("desperdicio_pct") != primary.get("desperdicio_pct")
         tparams = param_defaults(tmpl.get("parametros"))
         altura = altura_from(fila["descripcion"])
         if "altura_m" in tparams and altura:
@@ -379,8 +374,6 @@ def expand_item(fila: dict, rule: dict, templates: dict[str, dict]) -> tuple[lis
             # Own waste only if the recipe has it; if not, it is inherited in SQL
             row["desperdicio_pct"] = None if row["tipo"] == "mano_obra" else res.get("desperdicio_pct")
             row["plantilla"] = codigo
-            row["congelar_desperdicio"] = bool(congelar and row["tipo"] != "mano_obra"
-                                               and row["desperdicio_pct"] is None)
             rows.append(row)
             if res.get("revisar"):
                 notas.append(f"{codigo} {res.get('codigo')}: {res.get('nota') or 'revisar'}")

@@ -44,7 +44,7 @@ _ITEM_RECIPE_FIELDS = ("template_id", "parametros")
 _RESOURCE_COPY_FIELDS = (
     "trabajadores", "dias", "cargas_sociales_pct", "catalog_entry_id",
     "formula", "rendimiento", "desperdicio_origen", "lo_compra_cliente",
-    "redondear", "unidad_compra", "cantidad_redondeo", "precio_fecha",
+    "redondear", "unidad_compra", "cantidad_redondeo", "precio_fecha", "template_id",
 )
 
 

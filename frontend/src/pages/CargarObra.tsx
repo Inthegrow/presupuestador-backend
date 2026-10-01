@@ -396,6 +396,17 @@ export default function CargarObra() {
     revisar(file, next)
   }
 
+  // La conversión que escribió Sol vale solo para esa parte: las otras partes de una
+  // receta combinada (ej. placas EPS + contrapiso) se conservan como estaban
+  function responder(t: ObraTarea, codigo: string, valor: number) {
+    const pendiente = pendientes[t.clave]
+    const partes: [string, number][] = pendiente
+      ? [[pendiente.codigo, valor]]
+      : (t.receta?.partes ?? []).map((p) => [p.codigo, p.codigo === codigo ? valor : p.factor] as [string, number])
+    if (!partes.some(([c]) => c === codigo)) partes.push([codigo, valor])
+    asignar(t.clave, partes)
+  }
+
   function confirmar(t: ObraTarea) {
     if (!t.receta) return asignar(t.clave, [])
     asignar(t.clave, t.receta.partes.map((p) => [p.codigo, p.factor] as [string, number]))
@@ -570,7 +581,7 @@ export default function CargarObra() {
                   onConfirmar={() => confirmar(t)}
                   onElegir={(rec) => elegir(t, rec)}
                   onSinReceta={() => asignar(t.clave, [])}
-                  onValor={(codigo, v) => asignar(t.clave, [[codigo, v]])}
+                  onValor={(codigo, v) => responder(t, codigo, v)}
                   onCorregirPrecios={abrirPrecios}
                 />
               ))}

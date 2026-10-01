@@ -282,9 +282,10 @@ def _run_cascade(
     # Waste levels for inherited values
     org_waste = raw_config.get("desperdicio_pct")
     budget_waste = budget.get("desperdicio_pct")
-    template_ids = {i.get("template_id") for i in items if i.get("template_id")}
+    # All recipes of the org: a resource may come from a recipe other than its item's
+    # (combined items, Cargar obra), so the lookup cannot be limited to the items' recipes
     template_waste: dict[str, object] = {}
-    if template_ids:
+    if any(i.get("template_id") for i in items):
         templates = (
             db.table("item_templates")
             .select("*")
@@ -292,9 +293,7 @@ def _run_cascade(
             .execute()
             .data or []
         )
-        template_waste = {
-            t["id"]: t.get("desperdicio_pct") for t in templates if t.get("id") in template_ids
-        }
+        template_waste = {t["id"]: t.get("desperdicio_pct") for t in templates}
 
     items_updated = 0
     items_skipped = 0
@@ -344,7 +343,8 @@ def _run_cascade(
             origen = row.get("desperdicio_origen")
             if origen and origen != ORIGEN_RECURSO and row.get("tipo") != "mano_obra":
                 pct, new_origen = resolve_waste(
-                    None, budget_waste, template_waste.get(item.get("template_id")), org_waste
+                    None, budget_waste,
+                    template_waste.get(row.get("template_id") or item.get("template_id")), org_waste,
                 )
                 row["desperdicio_pct"] = pct
                 row["desperdicio_origen"] = new_origen

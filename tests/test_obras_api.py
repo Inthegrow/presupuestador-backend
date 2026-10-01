@@ -287,7 +287,8 @@ class TestCargar:
         assert (aristas["receta"]["origen"], aristas["estado"]) == ("memoria", "verde")
 
     def test_combined_recipes_keep_their_waste(self, client, db):
-        """Codex: the 2nd recipe's waste % must survive the cascade (it is not the item's recipe)."""
+        """Codex: in a combined item each resource inherits the waste of ITS recipe, also
+        after the cascade; and a waste set later on the budget wins for all of them."""
         _fix_eps(db)
         waste = {"tmpl-8.3": 10, "tmpl-5.2.3": 25}
         for t in db.tables["item_templates"]:
@@ -295,12 +296,25 @@ class TestCargar:
         assert cargar(client).status_code == 200
         item = next(i for i in db.tables["budget_items"] if i["code"] == "4.2.3")
         assert item["template_id"] == "tmpl-8.3"
-        res = {r["codigo"]: r for r in db.tables["item_resources"] if r["item_id"] == item["id"]}
-        assert (res["EPS-500"]["desperdicio_pct"], res["EPS-500"]["desperdicio_origen"]) == (10, "plantilla")
-        assert (res["ES"]["desperdicio_pct"], res["ES"]["desperdicio_origen"]) == (25, "recurso")
-        assert "congelar_desperdicio" not in res["ES"]
-        # cantidad_efectiva = cantidad × (1 + 25%)
-        assert res["ES"]["cantidad_efectiva"] == pytest.approx(res["ES"]["cantidad"] * 1.25, rel=1e-3)
+
+        def res():
+            return {r["codigo"]: r for r in db.tables["item_resources"] if r["item_id"] == item["id"]}
+
+        assert (res()["EPS-500"]["template_id"], res()["ES"]["template_id"]) == ("tmpl-8.3", "tmpl-5.2.3")
+        assert (res()["EPS-500"]["desperdicio_pct"], res()["EPS-500"]["desperdicio_origen"]) == (10, "plantilla")
+        assert (res()["ES"]["desperdicio_pct"], res()["ES"]["desperdicio_origen"]) == (25, "plantilla")
+        assert res()["ES"]["cantidad_efectiva"] == pytest.approx(res()["ES"]["cantidad"] * 1.25, rel=1e-3)
+
+        # "Recalcular obra" keeps each recipe's %
+        budget_id = db.tables["budgets"][0]["id"]
+        assert client.post(f"/budgets/{budget_id}/cascade-recalculate").status_code == 200
+        assert (res()["EPS-500"]["desperdicio_pct"], res()["ES"]["desperdicio_pct"]) == (10, 25)
+
+        # A waste set on the budget wins over both recipes (presupuesto > receta > organización)
+        db.tables["budgets"][0]["desperdicio_pct"] = 7
+        assert client.post(f"/budgets/{budget_id}/cascade-recalculate").status_code == 200
+        assert (res()["EPS-500"]["desperdicio_pct"], res()["EPS-500"]["desperdicio_origen"]) == (7, "presupuesto")
+        assert (res()["ES"]["desperdicio_pct"], res()["ES"]["desperdicio_origen"]) == (7, "presupuesto")
 
     def test_loads_after_fixing_prices(self, client, db):
         eps = next(e for e in db.tables["catalog_entries"] if e["codigo"] == "EPS-500")
