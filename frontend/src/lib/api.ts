@@ -203,6 +203,95 @@ export const templateApi = {
   }) => post<TemplatePreviewResponse>('/templates/preview', data),
 }
 
+// ─── Cargar obra (Excel de la obra + recetas del Maestro) ──────────────────────
+
+export interface ObraPrecio {
+  codigo: string
+  descripcion?: string
+  unidad?: string
+  tipo: string
+  problema: 'sin_precio' | 'duplicado' | 'no_esta'
+  motivo: string
+  recursos: number
+  items: string[]
+  entradas: {
+    id: string
+    catalog_id: string
+    catalogo?: string
+    codigo: string
+    descripcion?: string
+    unidad?: string
+    tipo?: string
+    precio_sin_iva?: number | null
+    fecha_precio?: string | null
+  }[]
+}
+
+export interface ObraTarea {
+  clave: string
+  descripcion: string
+  unidad?: string
+  veces: number
+  codigos: string[]
+  total_excel: number
+  plantillas: { codigo: string; factor: number }[]
+  nota?: string
+  elegida_a_mano: boolean
+}
+
+export interface ObraAnalisis {
+  archivo: string
+  titulo: string
+  fecha_precios: string
+  resumen: {
+    rubros: number
+    subrubros: number
+    items: number
+    con_receta: number
+    sin_receta: number
+    total_excel: number
+    total_excel_sin_receta: number
+  }
+  precios: ObraPrecio[]
+  tareas: ObraTarea[]
+  plantillas: { codigo: string; nombre?: string; unidad?: string }[]
+  plantillas_faltantes: string[]
+  correcciones_excel: string[]
+  listo: boolean
+}
+
+export interface ObraCarga {
+  budget_id: string
+  nombre: string
+  items: number
+  con_receta: number
+  recursos: number
+  precios_en_cero: number
+  total_excel: number
+  resumen?: { directo_total: number; neto_total: number }
+}
+
+// Elección de receta por tarea: { clave: { plantillas: [[codigo, factor], ...] } } ([] = sin receta)
+export type ObraAsignaciones = Record<string, { plantillas: [string, number][] }>
+
+function obraForm(file: File, asignaciones: ObraAsignaciones, extra: Record<string, string> = {}) {
+  const formData = new FormData()
+  formData.append('file', file)
+  formData.append('asignaciones', JSON.stringify(asignaciones))
+  for (const [k, v] of Object.entries(extra)) formData.append(k, v)
+  return formData
+}
+
+export const obraApi = {
+  analizar: (file: File, asignaciones: ObraAsignaciones) =>
+    postFile<ObraAnalisis>('/obras/analizar', obraForm(file, asignaciones)),
+  cargar: (file: File, asignaciones: ObraAsignaciones, nombre: string, permitirSinPrecio: boolean) =>
+    postFile<ObraCarga>(
+      '/obras/cargar',
+      obraForm(file, asignaciones, { nombre, permitir_sin_precio: String(permitirSinPrecio) }),
+    ),
+}
+
 // ─── Catalog API ───────────────────────────────────────────────────────────────
 
 export const catalogApi = {

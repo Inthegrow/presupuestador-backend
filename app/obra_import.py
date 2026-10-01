@@ -307,7 +307,25 @@ def expand_item(fila: dict, rule: dict, templates: dict[str, dict]) -> tuple[lis
     return rows, params, notas
 
 
-def build_plan(parsed: dict, templates: dict[str, dict]) -> dict:
+def rule_for(descripcion: str, asignaciones: dict | None = None) -> dict | None:
+    """Recipe rule of an item: the one chosen by hand (asignaciones) or the automatic one.
+
+    asignaciones = {plain(descripcion): {"plantillas": [[codigo, factor], ...]}};
+    an empty list means "sin receta" (use the Excel price).
+    """
+    auto = match_recipe(descripcion)
+    elegida = (asignaciones or {}).get(plain(descripcion))
+    if elegida is None:
+        return auto
+    plantillas = [(str(c), float(f or 1)) for c, f in elegida.get("plantillas") or []]
+    if not plantillas:
+        return None
+    if auto and [c for c, _ in auto["plantillas"]] == [c for c, _ in plantillas]:
+        return {**auto, "plantillas": plantillas}  # same recipe: keep its notes and client materials
+    return {"patron": None, "plantillas": plantillas, "nota": "Receta elegida a mano al cargar la obra."}
+
+
+def build_plan(parsed: dict, templates: dict[str, dict], asignaciones: dict | None = None) -> dict:
     """Items to load, each with its recipe resources or with the Excel price."""
     items: list[dict] = []
     sin_receta: list[dict] = []
@@ -316,13 +334,14 @@ def build_plan(parsed: dict, templates: dict[str, dict]) -> dict:
     for fila in parsed["filas"]:
         item = dict(fila, plantilla=None, parametros={}, recursos=[], revisar=[])
         if fila["nivel"] == "item":
-            rule = match_recipe(fila["descripcion"])
+            rule = rule_for(fila["descripcion"], asignaciones)
             missing = [c for c, _ in (rule or {}).get("plantillas", []) if c not in templates]
             faltan.update(missing)
             if rule and not missing:
                 rows, params, revisar = expand_item(fila, rule, templates)
                 item.update(plantilla=rule["plantillas"][0][0], parametros=params, recursos=rows,
-                            plantillas=[c for c, _ in rule["plantillas"]], revisar=revisar,
+                            plantillas=[c for c, _ in rule["plantillas"]],
+                            factores=[f for _, f in rule["plantillas"]], revisar=revisar,
                             nota_cruce=rule.get("nota"))
             else:
                 item["candidato"] = candidate(fila["descripcion"])
