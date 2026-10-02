@@ -147,9 +147,14 @@ class PriceBook:
         entries = fetch_all(
             lambda: db.table("catalog_entries").select("*").eq("org_id", org_id).order("id")
         )
-        catalogs = db.table("price_catalogs").select("id,name").eq("org_id", org_id).execute().data or []
+        catalogs = db.table("price_catalogs").select("id,name,created_at").eq("org_id", org_id).execute().data or []
         names = {c["id"]: c.get("name") for c in catalogs}
-        self.by_id = {str(e["id"]): {**e, "catalogo": names.get(e.get("catalog_id"))} for e in entries}
+        created = {c["id"]: str(c.get("created_at") or "") for c in catalogs}
+        self.by_id = {
+            str(e["id"]): {**e, "catalogo": names.get(e.get("catalog_id")),
+                           "_catalogo_creado": created.get(e.get("catalog_id"))}
+            for e in entries
+        }
         self.by_codigo: dict[str, list[dict]] = {}
         for e in self.by_id.values():
             if normalize_codigo(e.get("codigo")):
@@ -168,7 +173,7 @@ class PriceBook:
     def price(self, resource: dict) -> tuple[dict | None, float | None, str | None, str | None]:
         """(entry, precio, fecha, problema). problema: None, 'sin_precio', 'duplicado', 'no_esta'."""
         entry, problem = find_entry({"codigo": resource.get("codigo"), "tipo": resource.get("tipo")},
-                                    self.by_id, self.by_codigo)
+                                    self.by_id, self.by_codigo, fecha=self.fecha, history=self.history)
         if entry is None:
             return None, None, None, "duplicado" if problem == "duplicado" else "no_esta"
         found = pick_price(entry, self.history.get(str(entry["id"]), []), self.fecha)

@@ -147,12 +147,33 @@ def pick_price(entry: dict, history: list[dict], fecha: date) -> tuple[float, st
     return precio, (f.isoformat() if f else None)
 
 
+def _dated(entry: dict) -> date | None:
+    try:
+        return parse_fecha(entry.get("fecha_precio"))
+    except ValueError:
+        return None
+
+
 def find_entry(
     resource: dict,
     by_id: dict[str, dict],
     by_codigo: dict[str, list[dict]],
+    *,
+    fecha: date | None = None,
+    history: dict[str, list[dict]] | None = None,
 ) -> tuple[dict | None, str | None]:
     """Catalog entry of a resource: by catalog_entry_id, else by code.
+
+    The same code may live in several catalogs (the Maestro plus the catalogs
+    imported with each old obra). Among the candidates of the same tipo, the
+    tie is broken by what is in force at ``fecha`` (today when omitted):
+      1. an entry with a price in force at ``fecha`` (pick_price over its history)
+         beats one without; among them, the newest price date wins;
+      2. an entry whose price is *dated* but has no value yet (the Maestro keeps
+         it, the price is pending) still beats one that never had a date: the
+         app must ask for the price rather than use an unmaintained value;
+      3. then the most recently created catalog (``_catalogo_creado``);
+      4. an exact tie is reported as 'duplicado'.
 
     Returns (entry, problem). problem is None, 'sin_precio' or 'duplicado'.
     """
@@ -163,14 +184,45 @@ def find_entry(
     if not codigo:
         return None, None
     matches = by_codigo.get(codigo, [])
-    same_tipo = [e for e in matches if e.get("tipo") == resource.get("tipo")]
-    if len(same_tipo) == 1:
-        return same_tipo[0], None
-    if len(matches) == 1 and not same_tipo:
-        return matches[0], None
-    if matches:
+    if not matches:
+        return None, "sin_precio"
+    # Recipes also use 'mo_material' (nails, wire, discs); catalogs only know 'material'
+    tipo = "material" if resource.get("tipo") == "mo_material" else resource.get("tipo")
+    same_tipo = [e for e in matches if e.get("tipo") == tipo]
+    candidates = same_tipo or (matches if len(matches) == 1 else [])
+    if len(candidates) == 1:
+        return candidates[0], None
+    if not candidates:
         return None, "duplicado"
-    return None, "sin_precio"
+
+    at = fecha or today()
+    hist = history or {}
+
+    def rank(e: dict) -> tuple:
+        found = pick_price(e, hist.get(str(e.get("id")), []), at)
+        vigente = found is not None and found[0] > 0
+        fecha_vigente = parse_fecha(found[1]) if vigente and found[1] else None
+        # An undated value is "in force" but unmaintained: a maintained (dated) entry
+        # outranks it even when its price is still pending or not yet in force.
+        mantenida = _dated(e) is not None or fecha_vigente is not None
+        return (
+            mantenida,
+            vigente and fecha_vigente is not None,
+            fecha_vigente or date.min,
+            vigente,
+            str(e.get("_catalogo_creado") or ""),
+        )
+
+    ordered = sorted(candidates, key=rank, reverse=True)
+    if rank(ordered[0]) != rank(ordered[1]):
+        return ordered[0], None
+    return None, "duplicado"
+
+
+def catalog_created_at(db, org_id: str) -> dict[str, str]:
+    """{catalog_id: created_at} of the org's price catalogs (tie-break in find_entry)."""
+    rows = db.table("price_catalogs").select("id,created_at").eq("org_id", org_id).execute().data or []
+    return {c["id"]: str(c.get("created_at") or "") for c in rows}
 
 
 def load_price_lookup(db, org_id: str, fecha: date):
@@ -182,9 +234,10 @@ def load_price_lookup(db, org_id: str, fecha: date):
     entries = fetch_all(
         lambda: db.table("catalog_entries").select("*").eq("org_id", org_id).order("id")
     )
-    by_id = {str(e["id"]): e for e in entries}
+    created = catalog_created_at(db, org_id)
+    by_id = {str(e["id"]): {**e, "_catalogo_creado": created.get(e.get("catalog_id"))} for e in entries}
     by_codigo: dict[str, list[dict]] = {}
-    for e in entries:
+    for e in by_id.values():
         codigo = normalize_codigo(e.get("codigo"))
         if codigo:
             by_codigo.setdefault(codigo, []).append(e)
@@ -206,7 +259,7 @@ def load_price_lookup(db, org_id: str, fecha: date):
     problemas: list[dict] = []
 
     def price_for(resource: dict) -> tuple[float, str | None, str] | None:
-        entry, problem = find_entry(resource, by_id, by_codigo)
+        entry, problem = find_entry(resource, by_id, by_codigo, fecha=fecha, history=history)
         found = pick_price(entry, history.get(str(entry["id"]), []), fecha) if entry else None
         if found is None:
             if entry is not None:
