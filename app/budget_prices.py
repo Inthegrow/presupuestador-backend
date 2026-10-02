@@ -158,15 +158,21 @@ def find_entry(
     resource: dict,
     by_id: dict[str, dict],
     by_codigo: dict[str, list[dict]],
+    *,
+    fecha: date | None = None,
+    history: dict[str, list[dict]] | None = None,
 ) -> tuple[dict | None, str | None]:
     """Catalog entry of a resource: by catalog_entry_id, else by code.
 
     The same code may live in several catalogs (the Maestro plus the catalogs
-    imported with each old obra). Among the candidates of the same tipo:
-      1. a dated price beats an undated one (that catalog is being maintained);
-      2. then the newest price date;
-      3. then the most recently created catalog (``_catalogo_creado``, set by
-         the loaders), so the Maestro loaded last beats old obra imports;
+    imported with each old obra). Among the candidates of the same tipo, the
+    tie is broken by what is in force at ``fecha`` (today when omitted):
+      1. an entry with a price in force at ``fecha`` (pick_price over its history)
+         beats one without; among them, the newest price date wins;
+      2. an entry whose price is *dated* but has no value yet (the Maestro keeps
+         it, the price is pending) still beats one that never had a date: the
+         app must ask for the price rather than use an unmaintained value;
+      3. then the most recently created catalog (``_catalogo_creado``);
       4. an exact tie is reported as 'duplicado'.
 
     Returns (entry, problem). problem is None, 'sin_precio' or 'duplicado'.
@@ -189,9 +195,23 @@ def find_entry(
     if not candidates:
         return None, "duplicado"
 
+    at = fecha or today()
+    hist = history or {}
+
     def rank(e: dict) -> tuple:
-        d = _dated(e)
-        return (d is not None, d or date.min, str(e.get("_catalogo_creado") or ""))
+        found = pick_price(e, hist.get(str(e.get("id")), []), at)
+        vigente = found is not None and found[0] > 0
+        fecha_vigente = parse_fecha(found[1]) if vigente and found[1] else None
+        # An undated value is "in force" but unmaintained: a maintained (dated) entry
+        # outranks it even when its price is still pending or not yet in force.
+        mantenida = _dated(e) is not None or fecha_vigente is not None
+        return (
+            mantenida,
+            vigente and fecha_vigente is not None,
+            fecha_vigente or date.min,
+            vigente,
+            str(e.get("_catalogo_creado") or ""),
+        )
 
     ordered = sorted(candidates, key=rank, reverse=True)
     if rank(ordered[0]) != rank(ordered[1]):
@@ -239,7 +259,7 @@ def load_price_lookup(db, org_id: str, fecha: date):
     problemas: list[dict] = []
 
     def price_for(resource: dict) -> tuple[float, str | None, str] | None:
-        entry, problem = find_entry(resource, by_id, by_codigo)
+        entry, problem = find_entry(resource, by_id, by_codigo, fecha=fecha, history=history)
         found = pick_price(entry, history.get(str(entry["id"]), []), fecha) if entry else None
         if found is None:
             if entry is not None:

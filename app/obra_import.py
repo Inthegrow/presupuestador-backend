@@ -504,7 +504,7 @@ def price_problems(plan: dict, entries: list[dict], fecha: date) -> list[dict]:
         for r in item.get("recursos") or []:
             if r.get("lo_compra_cliente"):
                 continue
-            entry, problem = find_entry({"codigo": r["codigo"], "tipo": r["tipo"]}, by_id, by_codigo)
+            entry, problem = find_entry({"codigo": r["codigo"], "tipo": r["tipo"]}, by_id, by_codigo, fecha=fecha)
             if entry is not None:
                 price = pick_price(entry, [], fecha)
                 if price is None or price[0] <= 0:

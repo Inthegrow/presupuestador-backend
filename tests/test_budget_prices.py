@@ -126,56 +126,67 @@ class TestPickPrice:
         assert pick_price(entry, [], TODAY) == (50, None)
 
     def test_dated_price_wins_over_undated(self):
-        entry = {"precio_sin_iva": 50, "fecha_precio": None}
-        history = [{"precio_sin_iva": 80, "fecha_precio": "2026-06-01"}]
-        assert pick_price(entry, history, TODAY) == (80, "2026-06-01")
-
-    def test_same_date_entry_is_newest(self):
-        entry = {"precio_sin_iva": 90, "fecha_precio": "2026-06-01"}
-        history = [{"precio_sin_iva": 80, "fecha_precio": "2026-06-01", "created_at": "2026-06-01"}]
-        assert pick_price(entry, history, TODAY) == (90, "2026-06-01")
-
-
-class TestFindEntry:
-    def test_by_id_then_by_code(self):
-        e1 = {"id": "c1", "codigo": "H30", "tipo": "material"}
-        by_id = {"c1": e1}
-        by_codigo = {"H30": [e1]}
-        assert find_entry({"catalog_entry_id": "c1"}, by_id, by_codigo) == (e1, None)
-        assert find_entry({"codigo": " h30 ", "tipo": "material"}, by_id, by_codigo) == (e1, None)
-
-    def test_duplicate_code_is_reported(self):
-        # Several catalogs with the same code and no dates: nobody can tell which is right
-        a = {"id": "a", "codigo": "H30", "tipo": "material"}
-        b = {"id": "b", "codigo": "H30", "tipo": "material"}
-        assert find_entry({"codigo": "H30", "tipo": "material"}, {}, {"H30": [a, b]}) == (None, "duplicado")
-
-    def test_dated_price_wins_over_undated(self):
         # The Maestro keeps dated prices; the catalogs imported with old obras do not
         viejo = {"id": "a", "codigo": "CEM", "tipo": "material", "precio_sin_iva": 5050}
         maestro = {"id": "b", "codigo": "CEM", "tipo": "material", "precio_sin_iva": 6669,
                    "fecha_precio": "2026-06-03"}
         otro = {"id": "c", "codigo": "CEM", "tipo": "material", "precio_sin_iva": 7000}
-        assert find_entry({"codigo": "CEM", "tipo": "material"}, {}, {"CEM": [viejo, maestro, otro]}) == (maestro, None)
+        assert find_entry({"codigo": "CEM", "tipo": "material"}, {}, {"CEM": [viejo, maestro, otro]},
+                          fecha=TODAY) == (maestro, None)
 
     def test_newest_date_wins_and_equal_dates_are_a_tie(self):
-        a = {"id": "a", "codigo": "AR", "tipo": "material", "fecha_precio": "2026-01-01"}
-        b = {"id": "b", "codigo": "AR", "tipo": "material", "fecha_precio": "2026-06-03"}
-        assert find_entry({"codigo": "AR", "tipo": "material"}, {}, {"AR": [a, b]}) == (b, None)
-        c = {"id": "c", "codigo": "AR", "tipo": "material", "fecha_precio": "2026-06-03"}
-        assert find_entry({"codigo": "AR", "tipo": "material"}, {}, {"AR": [b, c]}) == (None, "duplicado")
+        a = {"id": "a", "codigo": "AR", "tipo": "material", "precio_sin_iva": 1, "fecha_precio": "2026-01-01"}
+        b = {"id": "b", "codigo": "AR", "tipo": "material", "precio_sin_iva": 2, "fecha_precio": "2026-06-03"}
+        assert find_entry({"codigo": "AR", "tipo": "material"}, {}, {"AR": [a, b]}, fecha=TODAY) == (b, None)
+        c = {"id": "c", "codigo": "AR", "tipo": "material", "precio_sin_iva": 3, "fecha_precio": "2026-06-03"}
+        assert find_entry({"codigo": "AR", "tipo": "material"}, {}, {"AR": [b, c]}, fecha=TODAY) == (None, "duplicado")
+
+    def test_future_price_does_not_beat_a_price_in_force(self):
+        # Codex: B is newer but not in force yet at the quote date; A has a valid price today
+        a = {"id": "a", "codigo": "H30", "tipo": "material", "precio_sin_iva": 100, "fecha_precio": "2026-09-01"}
+        b = {"id": "b", "codigo": "H30", "tipo": "material", "precio_sin_iva": 200, "fecha_precio": "2026-12-01"}
+        assert find_entry({"codigo": "H30", "tipo": "material"}, {}, {"H30": [a, b]},
+                          fecha=date(2026, 10, 2)) == (a, None)
+        # Once B's date arrives, B wins
+        assert find_entry({"codigo": "H30", "tipo": "material"}, {}, {"H30": [a, b]},
+                          fecha=date(2026, 12, 15)) == (b, None)
+
+    def test_history_counts_when_quoting_an_earlier_date(self):
+        # B's current price is from June, but its history has one in force in February;
+        # A only has a price from March. Quoting at 2026-02-15: B wins through its history.
+        a = {"id": "a", "codigo": "LH18", "tipo": "material", "precio_sin_iva": 800, "fecha_precio": "2026-03-01"}
+        b = {"id": "b", "codigo": "LH18", "tipo": "material", "precio_sin_iva": 837, "fecha_precio": "2026-06-01"}
+        history = {"b": [{"precio_sin_iva": 700, "fecha_precio": "2026-02-01", "created_at": "2026-02-01"}]}
+        assert find_entry({"codigo": "LH18", "tipo": "material"}, {}, {"LH18": [a, b]},
+                          fecha=date(2026, 2, 15), history=history) == (b, None)
+        # At 2026-03-15 only A is in force
+        assert find_entry({"codigo": "LH18", "tipo": "material"}, {}, {"LH18": [a, b]},
+                          fecha=date(2026, 3, 15), history=history) == (a, None)
+
+    def test_dated_without_value_still_beats_undated(self):
+        # Deliberate: the Maestro has the code with a date but no price yet; an old obra
+        # has an undated value. The app must ask for the price, not use the stale one.
+        maestro = {"id": "b", "codigo": "RE-CIN", "tipo": "material", "precio_sin_iva": None,
+                   "fecha_precio": "2026-03-25"}
+        obra = {"id": "a", "codigo": "RE-CIN", "tipo": "material", "precio_sin_iva": 10000}
+        assert find_entry({"codigo": "RE-CIN", "tipo": "material"}, {}, {"RE-CIN": [obra, maestro]},
+                          fecha=TODAY) == (maestro, None)
 
     def test_newest_catalog_breaks_undated_ties(self):
         # CAL has no date anywhere; the Maestro (loaded last) still wins over old obra imports
-        obra = {"id": "a", "codigo": "CAL", "tipo": "material", "_catalogo_creado": "2026-04-01T10:00:00"}
-        maestro = {"id": "b", "codigo": "CAL", "tipo": "material", "_catalogo_creado": "2026-09-30T12:00:00"}
-        assert find_entry({"codigo": "CAL", "tipo": "material"}, {}, {"CAL": [obra, maestro]}) == (maestro, None)
+        obra = {"id": "a", "codigo": "CAL", "tipo": "material", "precio_sin_iva": 5372,
+                "_catalogo_creado": "2026-04-01T10:00:00"}
+        maestro = {"id": "b", "codigo": "CAL", "tipo": "material", "precio_sin_iva": 5372,
+                   "_catalogo_creado": "2026-09-30T12:00:00"}
+        assert find_entry({"codigo": "CAL", "tipo": "material"}, {}, {"CAL": [obra, maestro]},
+                          fecha=TODAY) == (maestro, None)
 
     def test_mo_material_looks_up_material_entries(self):
         # Clavos in a recipe are 'mo_material'; the catalog stores them as 'material'
-        a = {"id": "a", "codigo": "CL2", "tipo": "material", "_catalogo_creado": "2026-04-01"}
-        b = {"id": "b", "codigo": "CL2", "tipo": "material", "fecha_precio": "2026-07-10"}
-        assert find_entry({"codigo": "CL2", "tipo": "mo_material"}, {}, {"CL2": [a, b]}) == (b, None)
+        a = {"id": "a", "codigo": "CL2", "tipo": "material", "precio_sin_iva": 4500,
+             "_catalogo_creado": "2026-04-01"}
+        b = {"id": "b", "codigo": "CL2", "tipo": "material", "precio_sin_iva": 6033, "fecha_precio": "2026-07-10"}
+        assert find_entry({"codigo": "CL2", "tipo": "mo_material"}, {}, {"CL2": [a, b]}, fecha=TODAY) == (b, None)
 
     def test_same_type_breaks_the_tie(self):
         a = {"id": "a", "codigo": "X", "tipo": "material"}
@@ -310,6 +321,35 @@ class TestUpdatePrices:
         client.post(f"/budgets/{BUDGET}/actualizar-precios")
         body = client.post(f"/budgets/{BUDGET}/actualizar-precios").json()
         assert body["version_nueva"]["version"] == 4
+
+    def test_two_catalogs_future_price_does_not_hide_the_one_in_force(self, client, db):
+        """Codex: H30 in catalog A at 100 (2026-09-01) and in B at 200 (2026-12-01).
+        Quoting today (2026-09-30) must take A's 100, not pick B and report 'sin precio'."""
+        db.tables["catalog_entries"] = [
+            {"id": "a", "org_id": ORG, "tipo": "material", "codigo": "H30", "catalog_id": "catA",
+             "precio_sin_iva": 100, "fecha_precio": "2026-09-01"},
+            {"id": "b", "org_id": ORG, "tipo": "material", "codigo": "H30", "catalog_id": "catB",
+             "precio_sin_iva": 200, "fecha_precio": "2026-12-01"},
+            {"id": "c4", "org_id": ORG, "tipo": "mano_obra", "codigo": "MO-OF",
+             "precio_sin_iva": 300, "fecha_precio": "2026-08-01"},
+        ]
+        db.tables["catalog_price_history"] = []
+        res(db, "r1")["catalog_entry_id"] = None  # resolve by code, like a fresh resource
+        body = client.post(f"/budgets/{BUDGET}/actualizar-precios").json()
+        assert res(db, "r1")["precio_unitario"] == 100
+        assert res(db, "r1")["precio_fecha"] == "2026-09-01"
+        assert res(db, "r1")["catalog_entry_id"] == "a"
+        assert all(p["codigo"] != "H30" for p in body["sin_precio"])
+        # Once linked, the resource keeps its entry (A) on later updates: no silent re-pick
+        with patch("app.routers.analysis.today", return_value=date(2026, 12, 15)):
+            client.post(f"/budgets/{BUDGET}/actualizar-precios")
+        assert res(db, "r1")["catalog_entry_id"] == "a"
+        # A fresh resource resolved by code in December takes B, now in force
+        res(db, "r1")["catalog_entry_id"] = None
+        with patch("app.routers.analysis.today", return_value=date(2026, 12, 15)):
+            client.post(f"/budgets/{BUDGET}/actualizar-precios")
+        assert res(db, "r1")["precio_unitario"] == 200
+        assert res(db, "r1")["catalog_entry_id"] == "b"
 
     def test_past_date(self, client, db):
         r = client.post(f"/budgets/{BUDGET}/actualizar-precios", json={"fecha": "2026-05-01"})

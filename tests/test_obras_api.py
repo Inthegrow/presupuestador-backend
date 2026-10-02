@@ -240,6 +240,21 @@ class TestAnalizar:
         assert precios["LH18"]["problema"] == "duplicado"
         assert len(precios["LH18"]["entradas"]) == 2
 
+    def test_future_price_in_another_catalog_does_not_hide_the_one_in_force(self, client, db):
+        """Codex: LH18 at 500 (2026-01-01, in force) and a copy at 900 dated in the future.
+        The analysis must price LH18 at 500 today, not pick the future entry and go red."""
+        db.tables["price_catalogs"].append({"id": "cat2", "org_id": ORG, "name": "Lista futura"})
+        db.tables["catalog_entries"].append(
+            {"id": "e-fut", "catalog_id": "cat2", "org_id": ORG, "codigo": "LH18", "tipo": "material",
+             "precio_sin_iva": 900, "fecha_precio": "2099-01-01"})
+        _fix_eps(db)
+        body = analizar(client).json()
+        assert all(p["codigo"] != "LH18" for p in body["precios"])
+        assert cargar(client).status_code == 200
+        lh18 = next(r for r in db.tables["item_resources"] if r["codigo"] == "LH18")
+        assert lh18["precio_unitario"] == 500
+        assert lh18["catalog_entry_id"] == "e-LH18"
+
     def test_rejects_other_files(self, client, db):
         res = client.post("/obras/analizar", files={"file": ("obra.csv", b"a,b", "text/csv")})
         assert res.status_code == 400
