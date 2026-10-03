@@ -533,6 +533,12 @@ export default function Editor() {
             IA + Plano
           </button>
           <button
+            onClick={() => navigate(`/app/budgets/${id ?? '1'}/diferencias`)}
+            className="bg-white border border-gray-200 text-gray-700 px-3.5 py-1.5 rounded-xl text-xs font-medium hover:bg-gray-50 hover:shadow-sm transition-all duration-200"
+          >
+            Diferencias con el Excel
+          </button>
+          <button
             onClick={() => navigate(`/app/budgets/${id ?? '1'}/export`)}
             className="bg-white border border-gray-200 text-gray-700 px-3.5 py-1.5 rounded-xl text-xs font-medium hover:bg-gray-50 hover:shadow-sm transition-all duration-200"
           >
