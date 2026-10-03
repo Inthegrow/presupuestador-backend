@@ -80,8 +80,12 @@ Decisión de Carlos: usar **la misma estructura multiempresa de SOLÉ**, no inve
 5. **Encender:** `VITE_AUTH_ENABLED=true` en Vercel (y publicar el frontend) y **borrar `DEMO_ORG_ID`**
    en Render. Probar que sin clave no se ve nada.
 6. La pantalla de login ya existe (`frontend/src/pages/Login.tsx`). Sumar "Olvidé mi clave".
-7. **Preguntarle a Carlos** los nombres exactos de tablas, columnas y roles que usa SOLÉ antes de
-   programar. No suponerlos.
+7. ~~Preguntarle a Carlos los nombres exactos de tablas, columnas y roles que usa SOLÉ~~ **Hecho (03/10):**
+   se leyeron del repo `casanchez71/eos-inthegrow-saas` y están, con el contrato completo del login,
+   en `PLAN_LOGIN_SOLE.md`. Resumen: `organizations` + `memberships` (roles `admin`/`leader`/`member`),
+   `super_admins`, `invitations` + RPC `accept_my_invitations()`, selector de empresa guardado en
+   `localStorage`, "olvidé mi clave" con `resetPasswordForEmail`. El `org_id` de TERRAC no está en ningún
+   repo: se lee con `SELECT org_id FROM budgets` en la base DATA (sección 5 del plan).
 
 ### Etapa A: cerrar la carga de una obra para que Sol la use ya
 0. **Lo que enseñó la primera carga real (01/10 y 03/10):** en producción conviven cuatro catálogos con los
