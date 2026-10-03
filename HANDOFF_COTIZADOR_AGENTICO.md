@@ -47,7 +47,7 @@ Todo lo que se construya se mide contra esto:
 9. **Guardar y seguir después.** La carga en curso vive en la app, no en la pestaña de Sol.
 10. **Botones en infinitivo, una acción por botón, y la acción principal siempre a la derecha.**
 
-## 4. Qué hay hecho (rama `main` + PR #20)
+## 4. Qué hay hecho (rama `main`, PRs #20 a #23)
 
 | Pieza | Estado | Dónde |
 |---|---|---|
@@ -83,15 +83,30 @@ Decisión de Carlos: usar **la misma estructura multiempresa de SOLÉ**, no inve
    programar. No suponerlos.
 
 ### Etapa A: cerrar la carga de una obra para que Sol la use ya
-0. **Lo que enseñó la primera carga real (01/10):** en producción conviven cuatro catálogos con los
-   mismos códigos (Maestro + Las Heras + Lugones + Belgrano) y Ginkgo salió con 55 rojos. Se arregló
-   la regla de desempate en `find_entry` (gana el precio con fecha, luego el catálogo más nuevo; PR de
-   la rama `claude/zealous-johnson-m3rodu`). Queda por hacer bien: **marcar un catálogo como oficial**
-   en la app y dejar los viejos solo para consulta. También: la pregunta de conversión aparece aunque
-   la app ya sepa la respuesta (0,1 m³ por m²); mostrarla como dato resuelto, no como pregunta abierta.
+0. **Lo que enseñó la primera carga real (01/10 y 03/10):** en producción conviven cuatro catálogos con los
+   mismos códigos (Maestro + Las Heras + Lugones + Belgrano) y Ginkgo salió con 55 rojos. Se arregló la
+   regla de desempate en `find_entry` (PR #23, mergeado y desplegado): gana el precio **vigente a la fecha**
+   del presupuesto, después el catálogo más nuevo. Hoy Ginkgo da **85 grupos, 39 verdes, 36 amarillos,
+   10 rojos y 14 códigos sin precio**. Queda por hacer bien: **marcar un catálogo como oficial** en la
+   app y dejar los viejos solo para consulta. También: la pregunta de conversión aparece aunque la app
+   ya sepa la respuesta (0,1 m³ por m²); mostrarla como dato resuelto, no como pregunta abierta.
    Y Render **no despliega solo** aunque Auto-Deploy esté en "On Commit": revisar la conexión con
    GitHub; mientras tanto, "Manual Deploy → Deploy latest commit" después de cada merge.
-1. Correr en Supabase las migraciones **009** y **010** (SQL Editor, idempotentes). El PR #20 ya está mergeado.
+0b. **Los 14 sin precio y cómo los resolvió Sol en su Excel.** En la hoja `00_Mat` del Excel de Ginkgo
+   esos códigos están **sin precio**. Sol los cargó a mano dentro de las hojas de detalle (5.2-6, 5.1-3,
+   5.2-2, 5.2-4, 4.9-2). Valores que usó, sin IVA: RE-PLI20 (látex interior 20 l) 200.000 · RE-END15
+   (enduido) 60.000 · RE-LIJ220 700 · RE-LIJ150 800 · RE-CIN 6.859 · RE-FIJ 57.190 · RE-PINC25 3.000 ·
+   RE-PINC15 2.500 · RE-ROD 10.000 · EPS-500 (placa 30 mm) 10.000 · yeso 13.900. Para cielorrasos Sol
+   usó RE-CLI20 (látex cielorraso) a 140.000, pero la receta del Maestro usa RE-PLI20. Los perfiles
+   **Y-M4X1, Y-L1X1 e Y-MD200X70 están en $0 también en el presupuesto de Sol**, y **SUB-YES-AGARGANTA**
+   no existe en su Excel (la receta 7.4.x del Maestro usa masilla D-MAS + subcontrato SUB-PI; Sol usó
+   enduido RE-END y sin subcontrato). O sea: la app no puede dar el mismo total que el Excel de Sol sin
+   que alguien cargue esos precios en el catálogo (el panel "corregir" de la pantalla lo permite) y sin
+   decidir si las recetas del Maestro o las de Sol son las buenas. Idea para la Etapa B: cuando el Excel
+   trae un precio en la hoja de detalle y el catálogo no lo tiene, **proponerlo** ("Sol usó 200.000, ¿lo
+   guardo?") en vez de pedirlo en blanco.
+1. Migraciones **009** y **010** ya corridas en Supabase (verificado 03/10). PRs #20, #21 y #23 mergeados.
+   El login (PR #22) está mergeado pero **no exige clave todavía**: ver "Antes de todo".
 2. Cargar en la app las recetas (Fase 3) y los catálogos (Fase 1) del Maestro actual, si aún no están.
 3. Primera carga real de **Edificio Ginkgo** con Sol al lado. Anotar cada vez que duda: eso es un bug de UX.
 4. **"Ver diferencias con el Excel"**: tabla trabajo por trabajo, ordenada por la diferencia mayor. Hay que
@@ -157,8 +172,21 @@ Decisión de Carlos: usar **la misma estructura multiempresa de SOLÉ**, no inve
 
 ## 8. Primer mensaje sugerido para el próximo chat
 
-> Leé `HANDOFF_COTIZADOR_AGENTICO.md` y `DISENO_CARGAR_OBRA.md`. Arrancá por "Antes de todo": clave y usuarios con la
-> estructura multiempresa de SOLÉ (preguntame los nombres de tablas y roles antes de programar). Después seguí con la
-> Etapa A: confirmá que corrieron las migraciones 009 y 010 y hacé el punto 4 ("Ver diferencias con el Excel") con un plan de
-> contrato, un subagente Opus para el servidor y uno Sonnet para la pantalla. Probá en el navegador con el
-> Excel de Ginkgo antes de abrir el PR. Escribime corto y sin jerga.
+> Leé `HANDOFF_COTIZADOR_AGENTICO.md` y `DISENO_CARGAR_OBRA.md` antes de tocar nada. Estado: PRs #20, #21,
+> #22 y #23 mergeados; migraciones 009 y 010 corridas; Render desplegado a mano (Auto-Deploy no anda).
+> Ginkgo en producción da 85 grupos, 10 rojos y 14 códigos sin precio (sección 5, punto 0b, dice cómo los
+> resolvió Sol). Yo voy a hacer el rol de Sol varias veces antes de dársela a ella.
+>
+> Orden de trabajo:
+> 1. **Precios que el Excel ya trae**: si la hoja de detalle del Excel tiene un precio y el catálogo no,
+>    la pantalla lo propone ("Sol usó $200.000, ¿lo guardo?") en vez de pedirlo en blanco. Y la pregunta
+>    de conversión que la app ya sabe responder (0,1 m³ por m²) se muestra como dato, no como pregunta.
+> 2. **Catálogo oficial**: marcar uno como oficial y dejar los otros tres solo para consulta.
+> 3. **"Ver diferencias con el Excel"** (Etapa A, punto 4): trabajo por trabajo, ordenado por la diferencia
+>    mayor, para comparar lo que da la app contra lo que estimó Sol.
+> 4. Recién después: login que exija clave con la estructura multiempresa de SOLÉ (preguntame tablas y roles).
+>
+> Forma de trabajar: vos armás el plan con el contrato (campos exactos), un subagente Opus hace el
+> servidor y uno Sonnet la pantalla. Probá en el navegador con el Excel de Ginkgo antes de abrir el PR.
+> Yo mergeo; Codex audita y te paso el veredicto. Después de cada merge me recordás "Manual Deploy" en
+> Render. Escribime corto, sin jerga, en castellano rioplatense. Lo que Sol dude es un bug de UX.
