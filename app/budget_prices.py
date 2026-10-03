@@ -280,19 +280,50 @@ def load_catalog_index(db, org_id: str) -> dict:
         "by_id": by_id,
         "by_codigo": index(by_id),
         "history": history,
+        "consulta_by_id": consulta,
         "consulta_by_codigo": index(consulta),
         "catalogos": catalogos,
         "hay_oficial": hay_oficial,
     }
 
 
-def load_price_lookup(db, org_id: str, fecha: date):
-    """Build ``price_for(resource)`` for the org's catalogs at ``fecha``.
+def discarded_prices(resources: list[dict], idx: dict, fecha: date) -> list[dict]:
+    """Resources whose saved price comes from a reference catalog and has no oficial replacement.
 
-    price_for returns (precio, fecha_precio, entry_id) or None, and records
+    With an oficial catalog, a resource linked (``catalog_entry_id``) to an entry of a
+    "solo consulta" catalog must not keep that price: "Actualizar precios" looks its code
+    up in the oficial catalogs and, when nothing prices it there, the update has to stop
+    (keeping the old value would sum a catalog the org discarded, and reporting it as
+    "sin precio" would hide that). One row per code: {codigo, descripcion, catalogo}.
+    Without an oficial catalog there is nothing to discard.
+    """
+    if not idx.get("hay_oficial"):
+        return []
+    found: dict[str, dict] = {}
+    for r in resources:
+        old = idx["consulta_by_id"].get(str(r.get("catalog_entry_id") or ""))
+        if old is None:
+            continue
+        entry, _ = find_entry({"codigo": r.get("codigo"), "tipo": r.get("tipo")}, idx["by_id"], idx["by_codigo"],
+                              fecha=fecha, history=idx["history"])
+        price = pick_price(entry, idx["history"].get(str(entry["id"]), []), fecha) if entry else None
+        if price is not None and price[0] > 0:
+            continue
+        key = normalize_codigo(r.get("codigo")) or str(old["id"])
+        found.setdefault(key, {"codigo": r.get("codigo") or old.get("codigo"),
+                               "descripcion": r.get("descripcion") or old.get("descripcion") or "",
+                               "catalogo": old.get("catalogo")})
+    return list(found.values())
+
+
+def build_price_lookup(db, org_id: str, fecha: date) -> dict:
+    """{"price_for", "problemas", "idx"} for the org's catalogs at ``fecha``.
+
+    price_for(resource) returns (precio, fecha_precio, entry_id) or None, and records
     resources without a price in ``problemas`` (list of dicts). With an oficial
     catalog only its entries count (see load_catalog_index): a resource linked to
-    a reference entry is looked up again by code.
+    a reference entry is looked up again by code (and ``discarded_prices`` says
+    which ones cannot be repriced at all).
     """
     idx = load_catalog_index(db, org_id)
     by_id, by_codigo, history = idx["by_id"], idx["by_codigo"], idx["history"]
@@ -314,4 +345,10 @@ def load_price_lookup(db, org_id: str, fecha: date):
             return None
         return found[0], found[1], str(entry["id"])
 
-    return price_for, problemas
+    return {"price_for": price_for, "problemas": problemas, "idx": idx}
+
+
+def load_price_lookup(db, org_id: str, fecha: date):
+    """(price_for, problemas): see build_price_lookup."""
+    lookup = build_price_lookup(db, org_id, fecha)
+    return lookup["price_for"], lookup["problemas"]

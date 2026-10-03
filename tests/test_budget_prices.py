@@ -71,6 +71,7 @@ def tables(**over):
         ],
         "indirect_config": [{"id": "cfg", "org_id": ORG, "estructura_pct": 20, "beneficio_pct": 10}],
         "budget_versions": [],
+        "price_catalogs": [],
         "item_templates": [],
     }
     t.update(over)
@@ -576,7 +577,9 @@ class TestLoadCatalogIndex:
         from app.budget_prices import load_catalog_index
 
         idx = load_catalog_index(FakeDB(_catalogs_tables(oficial=False)), ORG)
-        assert set(idx) == {"by_id", "by_codigo", "history", "consulta_by_codigo", "catalogos", "hay_oficial"}
+        assert set(idx) == {"by_id", "by_codigo", "history", "consulta_by_id", "consulta_by_codigo", "catalogos",
+                            "hay_oficial"}
+        assert idx["consulta_by_id"] == {}
         assert idx["hay_oficial"] is False
         assert set(idx["by_id"]) == {"c1", "c4", "lh-h30", "lh-xyz"}
         assert [e["id"] for e in idx["by_codigo"]["H30"]] == ["c1", "lh-h30"]
@@ -611,14 +614,42 @@ class TestLoadCatalogIndex:
 
 
 class TestUpdatePricesWithOficial:
-    def _update(self, client, oficial, h30_entry):
+    def _update(self, client, oficial, h30_entry, xyz_entry=None, expect=200):
         fake = FakeDB(_catalogs_tables(oficial))
         res(fake, "r1")["catalog_entry_id"] = h30_entry
+        if xyz_entry:
+            res(fake, "r3").update({"catalog_entry_id": xyz_entry, "precio_unitario": 9, "subtotal": 9})
         p1, p2, p3 = _patched(fake)
         with p1, p2, p3:
             r = client.post(f"/budgets/{BUDGET}/actualizar-precios")
-        assert r.status_code == 200, r.text
+        assert r.status_code == expect, r.text
         return fake, r.json()
+
+    def test_price_linked_to_a_reference_catalog_blocks_the_update(self, client):
+        """Codex (PR #25): XYZ only exists in Las Heras (now "solo consulta") and r3 is linked
+        to it. Keeping the 9 would sum a discarded catalog: the update stops and writes nothing."""
+        fake, body = self._update(client, oficial=True, h30_entry="lh-h30", xyz_entry="lh-xyz", expect=409)
+        detail = body["detail"]
+        assert detail["codigos"] == ["XYZ"]
+        assert detail["precios"] == [{"codigo": "XYZ", "descripcion": "", "catalogo": "Las Heras"}]
+        assert detail["mensaje"] == (
+            "Hay 1 precio que viene de un catálogo que ya no es oficial y no está en el oficial: XYZ. "
+            "Cargalos en el catálogo oficial y volvé a actualizar. No se cambió nada.")
+        # Nothing changed: no version saved, prices and links as they were
+        assert fake.tables["budget_versions"] == []
+        assert (res(fake, "r3")["precio_unitario"], res(fake, "r3")["catalog_entry_id"]) == (9, "lh-xyz")
+        assert (res(fake, "r1")["precio_unitario"], res(fake, "r1")["catalog_entry_id"]) == (1000, "lh-h30")
+        assert budget(fake)["precios_al"] == "2026-03-01"
+
+    def test_reference_link_with_an_oficial_replacement_is_repriced(self, client):
+        """Linked to the old catalog but the oficial one has the code: repriced from the oficial."""
+        fake, body = self._update(client, oficial=True, h30_entry="lh-h30")
+        assert (res(fake, "r1")["catalog_entry_id"], res(fake, "r1")["precio_unitario"]) == ("c1", 1500)
+
+    def test_without_oficial_a_reference_link_is_not_discarded(self, client):
+        fake, body = self._update(client, oficial=False, h30_entry="lh-h30", xyz_entry="lh-xyz")
+        assert (res(fake, "r3")["precio_unitario"], res(fake, "r3")["catalog_entry_id"]) == (9, "lh-xyz")
+        assert body["sin_precio"] == []
 
     def test_without_oficial_every_catalog_counts(self, client):
         fake, body = self._update(client, oficial=False, h30_entry=None)
@@ -631,6 +662,7 @@ class TestUpdatePricesWithOficial:
         fake, body = self._update(client, oficial=True, h30_entry="lh-h30")  # linked to the old catalog
         # Looked up again by code, only in the oficial catalog
         assert (res(fake, "r1")["catalog_entry_id"], res(fake, "r1")["precio_unitario"]) == ("c1", 1500)
-        # XYZ is only in the reference catalog: not used, reported, keeps its old price
-        assert res(fake, "r3")["precio_unitario"] == 7
+        # XYZ is only in the reference catalog and r3 is NOT linked to it (a hand-typed 7):
+        # not repriced from Las Heras, reported, keeps the hand-typed price
+        assert (res(fake, "r3")["precio_unitario"], res(fake, "r3")["catalog_entry_id"]) == (7, None)
         assert body["sin_precio"] == [{"codigo": "XYZ", "descripcion": "", "motivo": "sin_precio"}]

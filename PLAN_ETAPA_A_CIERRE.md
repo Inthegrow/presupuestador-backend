@@ -49,7 +49,10 @@ dice en una frase y pide cargar la obra de nuevo. No se inventa nada.
   catálogos oficiales**. Las demás son "de consulta" y no se usan ni aunque el código no esté en el oficial
   (en ese caso el problema es `no_esta`, con las referencias de consulta para copiarlo con un clic).
 - Un recurso ya enlazado por `catalog_entry_id` a una entrada de consulta **no la sigue usando**: se busca por
-  código en los oficiales (si no está, queda `sin_precio`/`no_esta` como cualquier otro).
+  código en los oficiales. Si el oficial **no lo tiene**, "Actualizar precios" **se frena antes de escribir
+  nada** (409 con `mensaje`, `codigos` y `precios: [{codigo, descripcion, catalogo}]`): conservar ese precio
+  sumaría un catálogo descartado, y ponerlo en $0 mentiría en silencio (hallazgo de Codex, PR #25). Un precio
+  tipeado a mano (sin enlace) se conserva y se informa en `sin_precio`, como siempre.
 - Si **ningún** catálogo es oficial, todo sigue como hoy (todas las entradas, desempate de `find_entry`).
 
 **Implementación.** Una sola función que arma el índice de catálogos, usada por `PriceBook` (obras) y por
