@@ -87,7 +87,9 @@ def excel_prices(wb) -> dict[str, dict]:
        código y precio > 0, hasta una fila cuya A empiece con "TOTAL" o una sección nueva.
     2. "lista": las hojas 00_Mat/00_MO/00_Eq/00_Sub, leídas con app.maestro_import.parse_workbook
        (mismo formato que el Maestro): codigo, descripcion, unidad, precio_sin_iva, fecha_precio, proveedor.
-       Solo filas con precio > 0.
+       Solo filas con precio > 0. Si una fila solo tiene "precio con IVA" (en el Excel de Ginkgo la sección
+       de pintura está rotulada así aunque la hoja diga "sin IVA"), se propone igual con la aclaración en
+       "nota"; en los demás casos "nota" es null.
 
     Gana el primer "detalle" encontrado (en el orden de las hojas); si no hay, la "lista".
     Los otros precios distintos del mismo código quedan en "otros".
@@ -98,6 +100,7 @@ Cada valor:
 ```json
 {"codigo": "RE-PLI20", "descripcion": "Albalatex Extra Mate 20 l (u)", "unidad": "u", "tipo": "material",
  "precio": 200000.0, "fecha": "2026-09-17" | null, "proveedor": "ML" | null,
+ "nota": "En la lista del Excel figura como precio con IVA: fijate si va sin IVA." | null,
  "origen": "detalle" | "lista", "hoja": "5.2-6",
  "trabajo": "EJECUCION DE PINTURA EN PAREDES. INCLUYE ENDUIDO..." | null,
  "otros": [{"precio": 140000.0, "hoja": "5.1-3"}]}
@@ -198,7 +201,7 @@ Reglas:
 **Panel "Precios para corregir" (PrecioRow):**
 - Si hay `propuesta`: arriba del campo, en una línea: **"En tu Excel usaste $200.000"** + gris: "(hoja 5.2-6,
   Pintura en paredes)" si `origen = detalle`, o "(lista de precios del Excel, 17/09/2026)" si `origen = lista`.
-  Si `otros` no está vacío: "También figura a $140.000 en 5.1-3." El campo de precio arranca **cargado con la
+  Si `nota` no es null, se muestra debajo en ámbar. Si `otros` no está vacío: "También figura a $140.000 en 5.1-3." El campo de precio arranca **cargado con la
   propuesta**. Botón principal: **"Guardar ese precio"** (para `sin_precio`: `updateEntry` con
   `precio_sin_iva` y `fecha_precio = propuesta.fecha ?? hoy`; para `no_esta`: `createEntry` en el catálogo
   elegido con `codigo`, `descripcion` (la de la propuesta si la del recurso está vacía), `unidad`, `tipo`,

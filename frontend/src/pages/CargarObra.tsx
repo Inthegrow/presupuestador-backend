@@ -133,6 +133,7 @@ function PrecioRow({
           <div className="text-[11px] text-gray-600 mb-1.5">
             <span className="font-semibold text-[#143D34]">En tu Excel usaste {fmtCurrency(propuesta.precio)}</span>{' '}
             <span className="text-gray-400">({origenPropuesta(propuesta)})</span>
+            {propuesta.nota && <div className="text-amber-700">{propuesta.nota}</div>}
             {propuesta.otros.length > 0 && (
               <div className="text-gray-500">
                 También figura a{' '}

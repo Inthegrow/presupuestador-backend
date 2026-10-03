@@ -243,6 +243,8 @@ export interface ObraPropuesta {
   precio: number
   fecha: string | null
   proveedor: string | null
+  // Aclaración, si hace falta ("figura como precio con IVA")
+  nota: string | null
   origen: 'detalle' | 'lista'
   hoja: string
   trabajo: string | null
