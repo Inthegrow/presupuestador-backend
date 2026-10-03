@@ -148,3 +148,33 @@ class TestResourceTemplateMigration:
         assert re.search(r"ALTER TABLE item_resources ADD COLUMN IF NOT EXISTS template_id\b", sql)
         assert "ON DELETE SET NULL" in sql
         assert not re.search(r"DROP\s+|DELETE\s+FROM|TRUNCATE|UPDATE\s+\w+\s+SET", sql, re.IGNORECASE)
+
+
+MIGRATION_011 = MIGRATION_004.parent / "011_catalogo_oficial_excel_neto.sql"
+
+
+class TestCatalogoOficialMigration:
+    """011 only adds columns (catálogo oficial, totales del Excel por ítem): idempotent, no data loss."""
+
+    def _sql(self) -> str:
+        text = MIGRATION_011.read_text(encoding="utf-8")
+        return "\n".join(line.split("--", 1)[0] for line in text.splitlines())
+
+    def test_only_idempotent_adds(self):
+        sql = self._sql()
+        adds = re.findall(r"ADD COLUMN[^\n]*", sql)
+        assert len(adds) == 3
+        for line in adds:
+            assert "IF NOT EXISTS" in line
+        for line in re.findall(r"CREATE (?:UNIQUE )?INDEX[^\n]*", sql):
+            assert "IF NOT EXISTS" in line
+        assert not re.search(r"DROP\s+|DELETE\s+FROM|TRUNCATE|UPDATE\s+\w+\s+SET", sql, re.IGNORECASE)
+
+    def test_columns_used_by_the_code(self):
+        sql = self._sql()
+        assert re.search(
+            r"ALTER TABLE price_catalogs ADD COLUMN IF NOT EXISTS oficial boolean NOT NULL DEFAULT false", sql
+        )
+        for column in ("excel_directo", "excel_neto"):
+            assert re.search(rf"ALTER TABLE budget_items\s+ADD COLUMN IF NOT EXISTS {column}\s+numeric", sql), column
+        assert re.search(r"ON price_catalogs\(org_id, oficial\)", sql)

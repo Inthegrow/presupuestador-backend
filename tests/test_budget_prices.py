@@ -543,3 +543,94 @@ class TestPagination:
         fake = FakeDB({"t": [{"id": f"{i:03d}"} for i in range(7)]}, max_rows=3)
         rows = fetch_all(lambda: fake.table("t").select("*").order("id"), page_size=3)
         assert [r["id"] for r in rows] == [f"{i:03d}" for i in range(7)]
+
+
+# ── Catálogo oficial ────────────────────────────────────────────────────────
+
+
+def _catalogs_tables(oficial: bool) -> dict:
+    """H30 in the Maestro (oficial or not) and in an old obra's catalog, newer and cheaper."""
+    t = tables()
+    t["price_catalogs"] = [
+        {"id": "cat-m", "org_id": ORG, "name": "Maestro", "created_at": "2026-01-01", "oficial": oficial},
+        {"id": "cat-lh", "org_id": ORG, "name": "Las Heras", "created_at": "2026-05-01", "oficial": False},
+    ]
+    t["catalog_entries"] = [
+        {"id": "c1", "catalog_id": "cat-m", "org_id": ORG, "tipo": "material", "codigo": "H30",
+         "precio_sin_iva": 2000, "fecha_precio": "2026-12-01"},
+        {"id": "c4", "catalog_id": "cat-m", "org_id": ORG, "tipo": "mano_obra", "codigo": "MO-OF",
+         "precio_sin_iva": 300, "fecha_precio": "2026-08-01"},
+        {"id": "lh-h30", "catalog_id": "cat-lh", "org_id": ORG, "tipo": "material", "codigo": "H30",
+         "precio_sin_iva": 1700, "fecha_precio": "2026-09-20"},
+        {"id": "lh-xyz", "catalog_id": "cat-lh", "org_id": ORG, "tipo": "material", "codigo": "xyz",
+         "precio_sin_iva": 9, "fecha_precio": "2026-09-20"},
+    ]
+    t["catalog_price_history"].append(
+        {"id": "h-lh", "entry_id": "lh-h30", "org_id": ORG, "precio_sin_iva": 1700,
+         "fecha_precio": "2026-09-20", "created_at": "2026-09-20T10:00:00"})
+    return t
+
+
+class TestLoadCatalogIndex:
+    def test_without_oficial_every_catalog_prices(self):
+        from app.budget_prices import load_catalog_index
+
+        idx = load_catalog_index(FakeDB(_catalogs_tables(oficial=False)), ORG)
+        assert set(idx) == {"by_id", "by_codigo", "history", "consulta_by_codigo", "catalogos", "hay_oficial"}
+        assert idx["hay_oficial"] is False
+        assert set(idx["by_id"]) == {"c1", "c4", "lh-h30", "lh-xyz"}
+        assert [e["id"] for e in idx["by_codigo"]["H30"]] == ["c1", "lh-h30"]
+        assert idx["consulta_by_codigo"] == {}
+        lh = idx["by_id"]["lh-h30"]
+        assert (lh["catalogo"], lh["_catalogo_creado"], lh["oficial"]) == ("Las Heras", "2026-05-01", False)
+        assert set(idx["history"]) == {"c1", "lh-h30"}
+        assert idx["catalogos"]["cat-m"]["name"] == "Maestro"
+
+    def test_with_oficial_the_others_are_only_a_reference(self):
+        from app.budget_prices import load_catalog_index
+
+        idx = load_catalog_index(FakeDB(_catalogs_tables(oficial=True)), ORG)
+        assert idx["hay_oficial"] is True
+        assert set(idx["by_id"]) == {"c1", "c4"}
+        assert all(e["oficial"] for e in idx["by_id"].values())
+        assert set(idx["by_codigo"]) == {"H30", "MO-OF"}
+        assert {k: [e["id"] for e in v] for k, v in idx["consulta_by_codigo"].items()} == {
+            "H30": ["lh-h30"], "XYZ": ["lh-xyz"]}
+        assert set(idx["history"]) == {"c1"}  # only the entries that price
+
+    def test_catalogs_before_migration_011(self):
+        """Without the "oficial" column nothing is oficial: everything as before."""
+        from app.budget_prices import load_catalog_index
+
+        t = _catalogs_tables(oficial=False)
+        for c in t["price_catalogs"]:
+            c.pop("oficial")
+        idx = load_catalog_index(FakeDB(t), ORG)
+        assert idx["hay_oficial"] is False
+        assert len(idx["by_id"]) == 4
+
+
+class TestUpdatePricesWithOficial:
+    def _update(self, client, oficial, h30_entry):
+        fake = FakeDB(_catalogs_tables(oficial))
+        res(fake, "r1")["catalog_entry_id"] = h30_entry
+        p1, p2, p3 = _patched(fake)
+        with p1, p2, p3:
+            r = client.post(f"/budgets/{BUDGET}/actualizar-precios")
+        assert r.status_code == 200, r.text
+        return fake, r.json()
+
+    def test_without_oficial_every_catalog_counts(self, client):
+        fake, body = self._update(client, oficial=False, h30_entry=None)
+        # By code: Las Heras has the newest price in force (1700 on 09-20 against 1500 on 09-01)
+        assert (res(fake, "r1")["catalog_entry_id"], res(fake, "r1")["precio_unitario"]) == ("lh-h30", 1700)
+        assert res(fake, "r3")["precio_unitario"] == 9  # XYZ only in Las Heras: used
+        assert body["sin_precio"] == []
+
+    def test_reference_catalog_is_ignored(self, client):
+        fake, body = self._update(client, oficial=True, h30_entry="lh-h30")  # linked to the old catalog
+        # Looked up again by code, only in the oficial catalog
+        assert (res(fake, "r1")["catalog_entry_id"], res(fake, "r1")["precio_unitario"]) == ("c1", 1500)
+        # XYZ is only in the reference catalog: not used, reported, keeps its old price
+        assert res(fake, "r3")["precio_unitario"] == 7
+        assert body["sin_precio"] == [{"codigo": "XYZ", "descripcion": "", "motivo": "sin_precio"}]

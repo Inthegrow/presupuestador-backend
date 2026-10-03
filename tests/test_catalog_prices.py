@@ -281,3 +281,43 @@ class TestUploadCsvDates:
         assert entries[2]["fecha_precio"] is None
         assert len(r.json()["warnings"]) == 1
         assert len(db.inserts["catalog_price_history"]) == 3
+
+
+# ── Catálogo oficial ─────────────────────────────────────────────────────────
+
+
+class TestCatalogOficial:
+    def _db(self):
+        from tests.test_recipes_api import FakeDB
+
+        return FakeDB({"price_catalogs": [
+            {"id": CATALOG, "org_id": "test-org-uuid", "name": "Maestro", "oficial": False},
+            {"id": ENTRY, "org_id": "otra-org", "name": "Ajeno", "oficial": False},
+        ]})
+
+    @patch("app.routers.catalogs.get_data_db")
+    def test_mark_and_unmark(self, mock_db, client):
+        db = mock_db.return_value = self._db()
+        r = client.patch(f"/catalogs/{CATALOG}", json={"oficial": True})
+        assert r.status_code == 200, r.text
+        assert r.json() == {"id": CATALOG, "org_id": "test-org-uuid", "name": "Maestro", "oficial": True}
+        assert db.tables["price_catalogs"][0]["oficial"] is True
+        r = client.patch(f"/catalogs/{CATALOG}", json={"oficial": False})
+        assert r.json()["oficial"] is False
+        assert db.tables["price_catalogs"][1]["oficial"] is False  # the other org's is untouched
+
+    @patch("app.routers.catalogs.get_data_db")
+    def test_catalog_of_another_org(self, mock_db, client):
+        db = mock_db.return_value = self._db()
+        assert client.patch(f"/catalogs/{ENTRY}", json={"oficial": True}).status_code == 404
+        assert db.tables["price_catalogs"][1]["oficial"] is False
+
+    @patch("app.routers.catalogs.get_data_db")
+    @pytest.mark.parametrize("body", [{"oficial": "si"}, {"oficial": 1}, {"oficial": None}, {"name": "x"}])
+    def test_oficial_must_be_true_or_false(self, mock_db, client, body):
+        db = mock_db.return_value = self._db()
+        r = client.patch(f"/catalogs/{CATALOG}", json=body)
+        assert r.status_code == 400
+        assert r.json()["detail"] == "Indicá si el catálogo es oficial: true o false"
+        assert db.tables["price_catalogs"][0] == {"id": CATALOG, "org_id": "test-org-uuid", "name": "Maestro",
+                                                  "oficial": False}

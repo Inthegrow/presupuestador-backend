@@ -257,3 +257,117 @@ def test_suggest_recipes_needs_words() -> None:
     assert (codigo, score) == ("4.2.6", 0.5)
     # Typos and plurals, and the recipe's own description (not the import boilerplate)
     assert suggest_recipes("CIELORASOS APLICADOS EN YESO", SUGGEST)[0][:2] == ("6.1", 1.0)
+
+
+# ── Precios que el Excel de la obra ya trae ──────────────────────────────────
+
+
+def _detail_sheet(wb: openpyxl.Workbook, title: str, codigo: str, trabajo: str, sections: list) -> None:
+    """A detail sheet like the TERRAC ones: row 3 = task, then sections with a 'Código' header."""
+    ws = wb.create_sheet(title)
+    ws["A1"] = "EDIFICIO DE PRUEBA"
+    ws["A3"], ws["B3"] = codigo, trabajo
+    r = 5
+    for name, rows in sections:
+        ws.cell(r, 1, name)
+        header = ["Código", "Descripción", "Unidad", "Cantidad", "Dias", "Desperdicio",
+                  "Cantidad + Desperdicio", "Precio Unitario", "Subtotal"]
+        for c, label in enumerate(header, start=1):
+            ws.cell(r + 1, c, label)
+        r += 2
+        for cod, desc, unidad, precio in rows:
+            ws.cell(r, 1, cod)
+            ws.cell(r, 2, desc)
+            ws.cell(r, 3, unidad)
+            ws.cell(r, 4, 1)
+            ws.cell(r, 8, precio)
+            r += 1
+        ws.cell(r, 1, "TOTAL")
+        ws.cell(r + 1, 1, "m²")
+        ws.cell(r + 1, 8, 999)  # below TOTAL: not a resource
+        r += 4
+
+
+def _prices_workbook(with_lists: bool = True) -> openpyxl.Workbook:
+    wb = _workbook()
+    if with_lists:
+        mat = wb.create_sheet("00_Mat")
+        mat.append(["CODIGO", "MATERIALES CORRALON", "UNIDAD", "PRECIO CON IVA", "PRECIO SIN IVA"])
+        mat.append(["RE-PLI20", "Latex interior 20 l", "u", 121000, 100000, "ML", datetime(2026, 9, 17)])
+        mat.append(["CEM", "Cemento 25 k", "u", 9000, 7438.02, "Corralón", datetime(2026, 9, 17)])
+        mat.append(["LP8", "Ladrillo portante 8", "u", None, 0])  # price 0: not a price
+        mat.append(["RE-END15", "Enduido 15 l", "u", 30661, None])  # only "con IVA": proposed with a warning
+    _detail_sheet(wb, "5.2-6", "5.2-6", "EJECUCION DE PINTURA EN PAREDES.  INCLUYE ENDUIDO", [
+        ("MATERIALES", [
+            ("RE-PLI20", "Albalatex Extra Mate 20 l (u)", "u", 200000),
+            ("re-end", "Enduido  plástico\n", "u", 60000),
+            ("RE-CIN", "Cinta de papel", "u", 0),            # price 0: ignored
+            ("RE-ROD", "Rodillo", "u", "#REF!"),             # error: ignored
+            ("RE-LIJ", "Lija", "u", "a confirmar"),          # text: ignored
+            (None, None, None, 500),                         # no code: ignored
+        ]),
+        ("MANO DE OBRA - PERSONAS", [("MO-OF", "Oficial", "u", 100000)]),
+        ("MANO DE OBRA - SUBCONTRATOS", [("SUB-PI", "Pintura interior", "m2", 15000)]),
+    ])
+    _detail_sheet(wb, "5.1-3", "5.1-3", "EJECUCION DE PINTURA EN CIELORRASOS", [
+        ("MATERIALES", [("RE-PLI20", "Albalatex", "u", 140000), ("RE-END", "Enduido", "u", 60000)]),
+        ("MANO DE OBRA - EQUIPOS", [("E-AND", "Andamio", "u", 5000)]),
+        ("SUBCONTRATOS", [("SUB-PET", "Pintura exterior", "m2", 18000)]),
+    ])
+    # Odd sheets: a name with spaces (a copy of 5.2-6) and one that is a date: skipped
+    _detail_sheet(wb, "REV PROY", "5.2-6", "COPIA", [("MATERIALES", [("XX-1", "Otro", "u", 5)])])
+    _detail_sheet(wb, "2026-02-02", "2.2", "FECHA", [("MATERIALES", [("XX-2", "Otro", "u", 5)])])
+    # A detail sheet broken by #REF! in the title and the headers: nothing to read, no failure
+    broken = wb.create_sheet("2.3")
+    broken["A3"], broken["B3"], broken["A5"], broken["A6"] = "#REF!", "#REF!", "MATERIALES", "#REF!"
+    broken["A7"], broken["H7"] = "#REF!", "#REF!"
+    return wb
+
+
+def test_excel_prices_detail_wins_over_the_list() -> None:
+    from app.obra_import import excel_prices
+
+    precios = excel_prices(_prices_workbook())
+    pli = precios["RE-PLI20"]
+    assert pli == {
+        "codigo": "RE-PLI20", "descripcion": "Albalatex Extra Mate 20 l (u)", "unidad": "u", "tipo": "material",
+        "precio": 200000.0, "fecha": None, "proveedor": None, "nota": None, "origen": "detalle", "hoja": "5.2-6",
+        "trabajo": "EJECUCION DE PINTURA EN PAREDES. INCLUYE ENDUIDO",
+        # the other detail sheet and the list, once per different price
+        "otros": [{"precio": 140000.0, "hoja": "5.1-3"}, {"precio": 100000.0, "hoja": "00_Mat"}],
+    }
+    # Same price in another sheet is not "otro"; codes are normalized
+    assert precios["RE-END"]["otros"] == []
+    assert precios["RE-END"]["descripcion"] == "Enduido plástico"
+    # Sections → tipo
+    assert precios["MO-OF"]["tipo"] == "mano_obra"
+    assert precios["SUB-PI"]["tipo"] == "subcontrato"
+    assert precios["E-AND"]["tipo"] == "equipo"
+    assert precios["SUB-PET"]["tipo"] == "subcontrato"
+
+
+def test_excel_prices_from_the_list_and_what_is_ignored() -> None:
+    from app.obra_import import excel_prices
+
+    precios = excel_prices(_prices_workbook())
+    assert precios["CEM"] == {
+        "codigo": "CEM", "descripcion": "Cemento 25 k", "unidad": "u", "tipo": "material", "precio": 7438.02,
+        "fecha": "2026-09-17", "proveedor": "Corralón", "nota": None, "origen": "lista", "hoja": "00_Mat",
+        "trabajo": None, "otros": [],
+    }
+    # A row with only "precio con IVA" is still proposed, with the warning
+    assert (precios["RE-END15"]["precio"], precios["RE-END15"]["nota"]) == (
+        30661.0, "En la lista del Excel figura como precio con IVA: fijate si va sin IVA.")
+    for codigo in ("RE-CIN", "RE-ROD", "RE-LIJ", "LP8", "XX-1", "XX-2", "#REF!"):
+        assert codigo not in precios, codigo
+    # Rows below TOTAL are not resources
+    assert all(p["precio"] != 999 for p in precios.values())
+
+
+def test_excel_prices_without_lists_or_details() -> None:
+    from app.obra_import import excel_prices
+
+    precios = excel_prices(_prices_workbook(with_lists=False))
+    assert precios["RE-PLI20"]["otros"] == [{"precio": 140000.0, "hoja": "5.1-3"}]
+    assert "CEM" not in precios
+    assert excel_prices(_workbook()) == {}  # only the cómputo: nothing, and no failure
