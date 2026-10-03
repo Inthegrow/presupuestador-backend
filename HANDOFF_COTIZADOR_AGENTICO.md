@@ -58,6 +58,7 @@ Todo lo que se construya se mide contra esto:
 | Script de carga de una obra con SQL (Fase 5, superado por el PR #20) | ✅ mergeado (#19) | `import_obra.py` |
 | Leer la hoja de cómputo, agrupar trabajos por descripción + unidad, cruce con recetas, conversión de unidades explícita, sugerencias por nombre | ✅ | `app/obra_import.py` |
 | **Pantalla "Cargar una obra"**: subir, revisar con semáforo, cargar. Memoria de recetas. | ✅ mergeado (#20) | `frontend/src/pages/CargarObra.tsx`, `app/routers/obras.py`, `migrations/009-010` |
+| **Cierre de la Etapa A** (PR #25): precios que el Excel ya trae (propuestos con un botón, y "Guardar los N"), conversión conocida mostrada como dato, **catálogo oficial** (los demás solo consulta), **"Ver diferencias con el Excel"** trabajo por trabajo | ✅ en PR | `PLAN_ETAPA_A_CIERRE.md` (contrato), `app/obra_import.py` (`excel_prices`), `app/budget_prices.py` (`load_catalog_index`), `app/routers/obras.py` (`/obras/{id}/diferencias`), `frontend/src/pages/DiferenciasExcel.tsx`, `migrations/011` |
 | Diseño completo del caso de uso, pantalla por pantalla, con todas las fallas y la política de precios | ✅ documento | `DISENO_CARGAR_OBRA.md` |
 
 El PR #20 se mergeó el 2026-10-01. Falta correr en Supabase las migraciones 009 y 010 (ver Etapa A).
@@ -79,19 +80,30 @@ Decisión de Carlos: usar **la misma estructura multiempresa de SOLÉ**, no inve
 5. **Encender:** `VITE_AUTH_ENABLED=true` en Vercel (y publicar el frontend) y **borrar `DEMO_ORG_ID`**
    en Render. Probar que sin clave no se ve nada.
 6. La pantalla de login ya existe (`frontend/src/pages/Login.tsx`). Sumar "Olvidé mi clave".
-7. **Preguntarle a Carlos** los nombres exactos de tablas, columnas y roles que usa SOLÉ antes de
-   programar. No suponerlos.
+7. ~~Preguntarle a Carlos los nombres exactos de tablas, columnas y roles que usa SOLÉ~~ **Hecho (03/10):**
+   se leyeron del repo `casanchez71/eos-inthegrow-saas` y están, con el contrato completo del login,
+   en `PLAN_LOGIN_SOLE.md`. Resumen: `organizations` + `memberships` (roles `admin`/`leader`/`member`),
+   `super_admins`, `invitations` + RPC `accept_my_invitations()`, selector de empresa guardado en
+   `localStorage`, "olvidé mi clave" con `resetPasswordForEmail`. El `org_id` de TERRAC no está en ningún
+   repo: se lee con `SELECT org_id FROM budgets` en la base DATA (sección 5 del plan).
 
 ### Etapa A: cerrar la carga de una obra para que Sol la use ya
 0. **Lo que enseñó la primera carga real (01/10 y 03/10):** en producción conviven cuatro catálogos con los
    mismos códigos (Maestro + Las Heras + Lugones + Belgrano) y Ginkgo salió con 55 rojos. Se arregló la
    regla de desempate en `find_entry` (PR #23, mergeado y desplegado): gana el precio **vigente a la fecha**
    del presupuesto, después el catálogo más nuevo. Hoy Ginkgo da **85 grupos, 39 verdes, 36 amarillos,
-   10 rojos y 14 códigos sin precio**. Queda por hacer bien: **marcar un catálogo como oficial** en la
-   app y dejar los viejos solo para consulta. También: la pregunta de conversión aparece aunque la app
-   ya sepa la respuesta (0,1 m³ por m²); mostrarla como dato resuelto, no como pregunta abierta.
+   10 rojos y 14 códigos sin precio**. **Hecho en el PR #25:** catálogo oficial (Catálogos → "Marcar
+   como oficial"; los otros quedan solo para consulta y se muestran como referencia cuando falta un
+   precio) y la conversión conocida como dato ("Cada m² lleva 0,1 m³ de …" + "cambiar").
    Y Render **no despliega solo** aunque Auto-Deploy esté en "On Commit": revisar la conexión con
    GitHub; mientras tanto, "Manual Deploy → Deploy latest commit" después de cada merge.
+   **Después de mergear el #25:** correr `migrations/011` en Supabase ANTES del deploy (si no, cargar
+   una obra falla), después en la app marcar los cuatro catálogos del Maestro como oficiales y volver
+   a cargar Ginkgo. Con el Excel real, en la prueba local: 14 sin precio → "Guardar los 9 precios que
+   trae el Excel" → quedan 5 (EPS-500, SUB-YES-AGARGANTA, Y-L1X1, Y-M4X1, Y-MD200X70), que tampoco
+   tienen precio en el Excel de Sol (ver 0b). La app dio +20% contra el Excel; las diferencias grandes
+   son cielorrasos (+120%), carpeta (+57%) y grueso interior (+55%): trabajo para Emilia con la pantalla
+   "Diferencias con el Excel".
 0b. **Los 14 sin precio y cómo los resolvió Sol en su Excel.** En la hoja `00_Mat` del Excel de Ginkgo
    esos códigos están **sin precio**. Sol los cargó a mano dentro de las hojas de detalle (5.2-6, 5.1-3,
    5.2-2, 5.2-4, 4.9-2). Valores que usó, sin IVA: RE-PLI20 (látex interior 20 l) 200.000 · RE-END15
@@ -102,15 +114,25 @@ Decisión de Carlos: usar **la misma estructura multiempresa de SOLÉ**, no inve
    no existe en su Excel (la receta 7.4.x del Maestro usa masilla D-MAS + subcontrato SUB-PI; Sol usó
    enduido RE-END y sin subcontrato). O sea: la app no puede dar el mismo total que el Excel de Sol sin
    que alguien cargue esos precios en el catálogo (el panel "corregir" de la pantalla lo permite) y sin
-   decidir si las recetas del Maestro o las de Sol son las buenas. Idea para la Etapa B: cuando el Excel
-   trae un precio en la hoja de detalle y el catálogo no lo tiene, **proponerlo** ("Sol usó 200.000, ¿lo
-   guardo?") en vez de pedirlo en blanco.
+   decidir si las recetas del Maestro o las de Sol son las buenas. **Hecho en el PR #25:** cuando el Excel
+   trae un precio (hoja de detalle, o listas 00_*) y el catálogo no lo tiene, la pantalla lo **propone**
+   ("En tu Excel usaste $200.000 · Guardar ese precio"). Lo que no se puede proponer: EPS-500 (Sol lo
+   carga con el código `eps`, no `EPS-500`) y los que están en $0 también en su Excel. Ojo con la lista
+   `00_Mat` de Ginkgo: la sección "MATERIALES PINTURA" dice "PRECIO CON IVA" en la columna que la hoja
+   llama "sin IVA"; la app propone el valor igual con un aviso en ámbar. Convendría que Sol arregle el
+   rótulo en su Excel.
+   **Datos para arreglar en la app (Emilia, pantalla Recetas):** hay recetas del Maestro con nombres que
+   no se entienden solos ("DE CASCOTE", "GRUESO INTERIOR", "CIELORRASO", "TABIQUES"): en la frase de la
+   conversión queda 'Cada m² lleva 0,1 m³ de "De cascote"'. Renombrarlas ("Contrapiso de cascote") es
+   un cambio de datos, no de código.
 1. Migraciones **009** y **010** ya corridas en Supabase (verificado 03/10). PRs #20, #21 y #23 mergeados.
    El login (PR #22) está mergeado pero **no exige clave todavía**: ver "Antes de todo".
 2. Cargar en la app las recetas (Fase 3) y los catálogos (Fase 1) del Maestro actual, si aún no están.
-3. Primera carga real de **Edificio Ginkgo** con Sol al lado. Anotar cada vez que duda: eso es un bug de UX.
-4. **"Ver diferencias con el Excel"**: tabla trabajo por trabajo, ordenada por la diferencia mayor. Hay que
-   guardar `excel_neto` por ítem al cargar. Es lo que Emilia y Sol necesitan para afinar recetas.
+3. Primera carga real de **Edificio Ginkgo** con Sol al lado (Carlos hace de Sol varias veces antes).
+   Anotar cada vez que duda: eso es un bug de UX.
+4. ~~**"Ver diferencias con el Excel"**~~ ✅ PR #25: `GET /obras/{budget_id}/diferencias` y la página
+   `budgets/:id/diferencias` (botón en el resultado de la carga y en el Editor). Los presupuestos cargados
+   antes de la migración 011 no tienen `excel_neto`: la pantalla pide recargar la obra.
 
 ### Etapa B: precios que no mienten
 5. **Estado de cada precio** (al día / viejo / muy viejo / estimado / sin precio) con umbrales en
@@ -144,10 +166,15 @@ Decisión de Carlos: usar **la misma estructura multiempresa de SOLÉ**, no inve
 - **Dos subagentes en paralelo**: uno **Opus** para el servidor (donde están los casos finos que Codex
   encuentra), uno **Sonnet** para la pantalla. El orquestador integra, no programa.
 - **Probar de punta a punta en el navegador** con el Excel real de Ginkgo antes de pedir auditoría.
-  Receta: `scratchpad/serve_fake.py` levanta la app con los datos del Maestro en una base en memoria
-  (puerto 8000), `vite --port 5179` con `VITE_AUTH_ENABLED=false`, y Playwright con
-  `executablePath: '/opt/pw-browsers/chromium'`. Mirar las capturas.
-- **Tests siempre en verde** antes de subir: `python3 -m pytest -q` (hoy 386 passed) y
+  Receta (ahora en el repo): bajar de Drive `ginkgo.xlsx` y `maestro.xlsx` a una carpeta (la herramienta
+  de Drive devuelve base64; si es grande lo deja en un JSON en disco: `jq -j .content | base64 -d`),
+  `EXCEL_DIR=<carpeta> python3 scripts/serve_fake.py` (app con el Maestro + 4 catálogos en memoria,
+  puerto 8000), `cd frontend && VITE_AUTH_ENABLED=false npx vite --port 5179`, y
+  `EXCEL_DIR=<carpeta> NODE_PATH=/opt/node-tools/node_modules node scripts/e2e_ginkgo.cjs`
+  (Playwright con `executablePath: '/opt/pw-browsers/chromium'`). Mirar las capturas en `EXCEL_DIR/shots`.
+  Para matar el servidor falso no usar `pkill -f serve_fake` desde un comando que lo relanza (se mata a sí
+  mismo): matar por PID.
+- **Tests siempre en verde** antes de subir: `python3 -m pytest -q` (hoy 419 passed) y
   `cd frontend && npm run build`. `ruff check` sobre los archivos tocados (el repo tiene errores viejos en
   otros archivos; no arreglarlos en el mismo PR).
 - **Commits chicos, en castellano simple**, con el "por qué" en el cuerpo. Un PR por etapa.
@@ -172,21 +199,18 @@ Decisión de Carlos: usar **la misma estructura multiempresa de SOLÉ**, no inve
 
 ## 8. Primer mensaje sugerido para el próximo chat
 
-> Leé `HANDOFF_COTIZADOR_AGENTICO.md` y `DISENO_CARGAR_OBRA.md` antes de tocar nada. Estado: PRs #20, #21,
-> #22 y #23 mergeados; migraciones 009 y 010 corridas; Render desplegado a mano (Auto-Deploy no anda).
-> Ginkgo en producción da 85 grupos, 10 rojos y 14 códigos sin precio (sección 5, punto 0b, dice cómo los
-> resolvió Sol). Yo voy a hacer el rol de Sol varias veces antes de dársela a ella.
+> Leé `HANDOFF_COTIZADOR_AGENTICO.md`, `DISENO_CARGAR_OBRA.md` y `PLAN_ETAPA_A_CIERRE.md` antes de tocar
+> nada. Estado: PRs #20 a #25 mergeados; migraciones 009, 010 y 011 corridas; Render desplegado a mano
+> (Auto-Deploy no anda); el Maestro marcado como oficial en Catálogos. Yo hago el rol de Sol.
 >
 > Orden de trabajo:
-> 1. **Precios que el Excel ya trae**: si la hoja de detalle del Excel tiene un precio y el catálogo no,
->    la pantalla lo propone ("Sol usó $200.000, ¿lo guardo?") en vez de pedirlo en blanco. Y la pregunta
->    de conversión que la app ya sabe responder (0,1 m³ por m²) se muestra como dato, no como pregunta.
-> 2. **Catálogo oficial**: marcar uno como oficial y dejar los otros tres solo para consulta.
-> 3. **"Ver diferencias con el Excel"** (Etapa A, punto 4): trabajo por trabajo, ordenado por la diferencia
->    mayor, para comparar lo que da la app contra lo que estimó Sol.
-> 4. Recién después: login que exija clave con la estructura multiempresa de SOLÉ (preguntame tablas y roles).
+> 1. **Login que exija clave** con la estructura multiempresa de SOLÉ (sección 5, "Antes de todo"). Las
+>    tablas y roles de SOLÉ son: [Carlos los pega acá]. Selector de empresa arriba, "Olvidé mi clave".
+> 2. Lo que surja de mis cargas de Ginkgo haciendo de Sol (te paso la lista de dudas: cada una es un bug de UX).
+> 3. Etapa B: estado de cada precio (al día / viejo / muy viejo) y la frase de confianza arriba del total.
 >
 > Forma de trabajar: vos armás el plan con el contrato (campos exactos), un subagente Opus hace el
-> servidor y uno Sonnet la pantalla. Probá en el navegador con el Excel de Ginkgo antes de abrir el PR.
-> Yo mergeo; Codex audita y te paso el veredicto. Después de cada merge me recordás "Manual Deploy" en
-> Render. Escribime corto, sin jerga, en castellano rioplatense. Lo que Sol dude es un bug de UX.
+> servidor y uno Sonnet la pantalla. Probá en el navegador con el Excel de Ginkgo antes de abrir el PR
+> (`scripts/serve_fake.py` + `scripts/e2e_ginkgo.cjs`). Yo mergeo; Codex audita y te paso el veredicto.
+> Después de cada merge me recordás "Manual Deploy" en Render. Escribime corto, sin jerga, en castellano
+> rioplatense. Lo que Sol dude es un bug de UX.

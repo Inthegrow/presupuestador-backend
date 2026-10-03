@@ -24,18 +24,28 @@ import re
 import warnings
 from datetime import date, datetime, timezone
 from io import BytesIO
+from uuid import UUID
 
 import openpyxl
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
 from app.auth import get_current_user
-from app.budget_prices import fetch_all, find_entry, initial_indirects, load_org_config, pick_price, today
+from app.budget_prices import (
+    fetch_all,
+    find_entry,
+    initial_indirects,
+    load_catalog_index,
+    load_org_config,
+    pick_price,
+    today,
+)
 from app.calculations import calc_resource_subtotal
-from app.catalog_prices import normalize_codigo
+from app.catalog_prices import normalize_codigo, parse_fecha
 from app.db import get_data_db
 from app.obra_import import (
     SHEET,
     build_plan,
+    excel_prices,
     item_notes,
     match_recipe,
     parse_obra,
@@ -140,35 +150,21 @@ def _templates(db, org_id: str) -> dict[str, dict]:
 
 
 class PriceBook:
-    """Catalog entries and history of the org, priced at one date (rule of Fase 4)."""
+    """Catalog entries and history of the org, priced at one date (rule of Fase 4).
+
+    With an oficial catalog, only its entries price (load_catalog_index); the others
+    are references ("En Las Heras estaba a $X") for the codes that are missing.
+    """
 
     def __init__(self, db, org_id: str, fecha: date):  # type: ignore[no-untyped-def]
         self.fecha = fecha
-        entries = fetch_all(
-            lambda: db.table("catalog_entries").select("*").eq("org_id", org_id).order("id")
-        )
-        catalogs = db.table("price_catalogs").select("id,name,created_at").eq("org_id", org_id).execute().data or []
-        names = {c["id"]: c.get("name") for c in catalogs}
-        created = {c["id"]: str(c.get("created_at") or "") for c in catalogs}
-        self.by_id = {
-            str(e["id"]): {**e, "catalogo": names.get(e.get("catalog_id")),
-                           "_catalogo_creado": created.get(e.get("catalog_id"))}
-            for e in entries
-        }
-        self.by_codigo: dict[str, list[dict]] = {}
-        for e in self.by_id.values():
-            if normalize_codigo(e.get("codigo")):
-                self.by_codigo.setdefault(normalize_codigo(e.get("codigo")), []).append(e)
-        self.history: dict[str, list[dict]] = {}
-        ids = list(self.by_id)
-        for start in range(0, len(ids), CHUNK):
-            chunk = ids[start:start + CHUNK]
-            rows = fetch_all(
-                lambda chunk=chunk: db.table("catalog_price_history").select("*")
-                .eq("org_id", org_id).in_("entry_id", chunk).order("id")
-            )
-            for h in rows:
-                self.history.setdefault(str(h["entry_id"]), []).append(h)
+        idx = load_catalog_index(db, org_id)
+        self.by_id: dict[str, dict] = idx["by_id"]
+        self.by_codigo: dict[str, list[dict]] = idx["by_codigo"]
+        self.history: dict[str, list[dict]] = idx["history"]
+        self.consulta_by_codigo: dict[str, list[dict]] = idx["consulta_by_codigo"]
+        self.catalogos: dict[str, dict] = idx["catalogos"]
+        self.hay_oficial: bool = idx["hay_oficial"]
 
     def price(self, resource: dict) -> tuple[dict | None, float | None, str | None, str | None]:
         """(entry, precio, fecha, problema). problema: None, 'sin_precio', 'duplicado', 'no_esta'."""
@@ -184,12 +180,57 @@ class PriceBook:
     def entries_for(self, codigo: str) -> list[dict]:
         return self.by_codigo.get(normalize_codigo(codigo), [])
 
+    def references_for(self, codigo: str) -> list[dict]:
+        """Reference (non oficial) entries of a code with a price: newest first, undated last, at most 5."""
+        found = [e for e in self.consulta_by_codigo.get(normalize_codigo(codigo), [])
+                 if (_price_value(e.get("precio_sin_iva")) or 0) > 0]
+
+        def newest(e: dict) -> tuple:
+            try:
+                fecha = parse_fecha(e.get("fecha_precio"))
+            except ValueError:
+                fecha = None
+            return (fecha is not None, fecha or date.min, str(e.get("_catalogo_creado") or ""))
+
+        found.sort(key=newest, reverse=True)
+        return [_entry_view(e) for e in found[:MAX_REFERENCIAS]]
+
+    def destination(self, tipo: str | None) -> dict | None:
+        """Oficial catalog where a missing code should be created: the one with most entries
+        of that tipo (newest on a tie). None without an oficial catalog."""
+        oficiales = [c for c in self.catalogos.values() if c["oficial"]]
+        if not oficiales:
+            return None
+        count: dict[str, int] = {}
+        for e in self.by_id.values():
+            if e.get("tipo") == tipo:
+                count[str(e.get("catalog_id"))] = count.get(str(e.get("catalog_id")), 0) + 1
+        best = max(oficiales, key=lambda c: (count.get(str(c["id"]), 0), str(c.get("created_at") or "")))
+        return {"id": best["id"], "name": best.get("name")}
+
+
+MAX_REFERENCIAS = 5
+_ENTRY_FIELDS = ("id", "catalog_id", "catalogo", "codigo", "descripcion", "unidad", "tipo",
+                 "precio_sin_iva", "fecha_precio")
+
+
+def _entry_view(entry: dict) -> dict:
+    return {k: entry.get(k) for k in _ENTRY_FIELDS}
+
+
+def _price_value(value: object) -> float | None:
+    try:
+        return float(value) if value not in (None, "") else None
+    except (TypeError, ValueError):
+        return None
+
 
 MOTIVOS = {
     "sin_precio": "No tiene precio",
     "duplicado": "Está repetido en el catálogo",
     "no_esta": "No está en el catálogo",
 }
+MOTIVO_NO_ESTA_OFICIAL = "No está en el catálogo oficial"
 
 
 # ── Análisis ─────────────────────────────────────────────────────────────────
@@ -266,20 +307,34 @@ def _decide(fila: dict, templates: dict[str, dict], memoria: dict[str, dict],
             "confirmada": elegida.get("confirmada") or not same or origen == "memoria"}
 
 
+def _numero(value: float) -> str:
+    """Argentine number: 0.1 → '0,1', 1234.5 → '1.234,5' (up to 4 decimals, no trailing zeros)."""
+    text = f"{value:,.4f}".rstrip("0").rstrip(".") if round(value, 4) or not value else f"{value:g}"
+    return text.replace(",", "X").replace(".", ",").replace("X", ".")
+
+
 def _pregunta(fila: dict, partes: list[dict]) -> dict | None:
-    """The conversion to ask when a recipe comes in another unit than the obra's."""
+    """The conversion to ask when a recipe comes in another unit than the obra's.
+
+    When the value is already known (rule, memory or Sol's answer), ``dato`` says it
+    as a fact ('Cada m² lleva 0,1 m³ de "Contrapiso de cascote"'): nothing to ask.
+    """
     obra = unit_key(fila.get("unidad"))
     distintas = [p for p in partes if p["nombre"] is not None and unit_key(p["unidad"]) and obra
                  and unit_key(p["unidad"]) != obra]
     if not distintas:
         return None
     parte = next((p for p in distintas if p["factor"] is None), distintas[0])
+    dato = None
+    if parte["factor"] is not None:
+        dato = (f"Cada {_pretty_unit(fila.get('unidad'))} lleva {_numero(parte['factor'])} "
+                f'{_pretty_unit(parte["unidad"])} de "{_human(parte["nombre"])}"')
     return {
         "tipo": "cantidad_por_unidad",
         "texto": f'¿Cuántos {_pretty_unit(parte["unidad"])} de "{_human(parte["nombre"])}" '
                  f"lleva cada {_pretty_unit(fila.get('unidad'))} de este trabajo?",
         "receta": parte["codigo"], "unidad_receta": parte["unidad"], "unidad_obra": fila.get("unidad"),
-        "valor": parte["factor"],
+        "valor": parte["factor"], "dato": dato,
     }
 
 
@@ -295,7 +350,15 @@ def _asks(aviso: str) -> bool:
     return "?" in aviso or "revisar" in aviso.lower()
 
 
-def _price_problems(items: list[dict], book: PriceBook) -> dict[str, dict]:
+def _price_problems(items: list[dict], book: PriceBook, excel: dict[str, dict] | None = None) -> dict[str, dict]:
+    """One row per code without a usable price, with what can fix it.
+
+    entradas: the (oficial) entries of the code, where the price is saved or deleted.
+    referencias: the same code in the reference catalogs (only with an oficial catalog).
+    propuesta: the price the obra's Excel already has for it (excel_prices), except
+    for a repeated code. catalogo_destino: where to create it (oficial catalogs only).
+    """
+    excel = excel or {}
     precios: dict[str, dict] = {}
     for item in items:
         for r in item["recursos"]:
@@ -305,15 +368,15 @@ def _price_problems(items: list[dict], book: PriceBook) -> dict[str, dict]:
             if not problema:
                 continue
             key = normalize_codigo(r["codigo"]) or "(sin código)"
+            tipo = "material" if r["tipo"] == "mo_material" else r["tipo"]
+            motivo = MOTIVO_NO_ESTA_OFICIAL if problema == "no_esta" and book.hay_oficial else MOTIVOS[problema]
             row = precios.setdefault(key, {
                 "codigo": r["codigo"], "descripcion": r.get("descripcion"), "unidad": r.get("unidad"),
-                "tipo": "material" if r["tipo"] == "mo_material" else r["tipo"],
-                "problema": problema, "motivo": MOTIVOS[problema], "recursos": 0, "items": [],
-                "entradas": [
-                    {k: e.get(k) for k in ("id", "catalog_id", "catalogo", "codigo", "descripcion",
-                                           "unidad", "tipo", "precio_sin_iva", "fecha_precio")}
-                    for e in book.entries_for(r["codigo"])
-                ],
+                "tipo": tipo, "problema": problema, "motivo": motivo, "recursos": 0, "items": [],
+                "entradas": [_entry_view(e) for e in book.entries_for(r["codigo"])],
+                "referencias": book.references_for(r["codigo"]),
+                "propuesta": None if problema == "duplicado" else excel.get(normalize_codigo(r["codigo"])),
+                "catalogo_destino": book.destination(tipo),
             })
             row["recursos"] += 1
             if item["codigo"] not in row["items"]:
@@ -326,8 +389,12 @@ def _code_order(codigo: object) -> list:
 
 
 def analyze(parsed: dict, templates: dict[str, dict], book: PriceBook, asignaciones: dict,
-            memoria: dict[str, dict] | None = None) -> dict:
-    """Everything the screen shows: one card per task with its recipe, question and state."""
+            memoria: dict[str, dict] | None = None, excel: dict[str, dict] | None = None) -> dict:
+    """Everything the screen shows: one card per task with its recipe, question and state.
+
+    ``excel`` = excel_prices(wb): the prices the obra's Excel already has, proposed
+    for the codes the catalog cannot price.
+    """
     memoria = memoria or {}
     filas = [f for f in parsed["filas"] if f["nivel"] == "item"]
     grupos: dict[str, list[dict]] = {}
@@ -348,7 +415,7 @@ def analyze(parsed: dict, templates: dict[str, dict], book: PriceBook, asignacio
 
     plan = build_plan(parsed, templates, efectivas)
     items = [i for i in plan["items"] if i["nivel"] == "item"]
-    precios = _price_problems(items, book)
+    precios = _price_problems(items, book, excel)
     faltan_por_item: dict[str, set[str]] = {}
     for p in precios.values():
         for codigo in p["items"]:
@@ -415,6 +482,7 @@ def analyze(parsed: dict, templates: dict[str, dict], book: PriceBook, asignacio
 
     cuenta = {e: sum(1 for t in tareas if t["estado"] == e) for e in ESTADOS}
     return {
+        "catalogo_oficial": book.hay_oficial,
         "titulo": parsed["titulo"],
         "fecha_precios": book.fecha.isoformat(),
         "resumen": {
@@ -456,7 +524,7 @@ async def analizar_obra(
     if not templates:
         raise HTTPException(409, "No hay recetas cargadas en la app: primero hay que importar el Maestro")
     result = analyze(parse_obra(wb), templates, PriceBook(db, org_id, today()), _asignaciones(asignaciones),
-                     _memoria(db, org_id))
+                     _memoria(db, org_id), excel_prices(wb))
     return {"archivo": file.filename, **_public(result)}
 
 
@@ -475,7 +543,8 @@ def _insert(db, table: str, rows: list[dict]) -> list[dict]:
 
 def _item_row(item: dict, budget_id: str, org_id: str, templates: dict[str, dict]) -> dict:
     ex = item.get("excel") or {}
-    sin = item["nivel"] == "item" and not item.get("plantilla")
+    es_item = item["nivel"] == "item"
+    sin = es_item and not item.get("plantilla")
     qty = item["cantidad"]
     mat = float(ex.get("mat_unit", 0)) if sin else 0.0
     mo = float(ex.get("mo_unit", 0)) if sin else 0.0
@@ -489,6 +558,9 @@ def _item_row(item: dict, budget_id: str, org_id: str, templates: dict[str, dict
         "notas": item_notes(item), "sort_order": item["orden"],
         "template_id": templates[item["plantilla"]]["id"] if item.get("plantilla") else None,
         "parametros": item.get("parametros") or {},
+        # What the obra's Excel said (columns N and Z of 01_C&P), for "Ver diferencias con el Excel"
+        "excel_directo": float(ex.get("directo") or 0) if es_item else None,
+        "excel_neto": float(ex.get("neto") or 0) if es_item else None,
     }
 
 
@@ -569,7 +641,7 @@ async def cargar_obra(
     book = PriceBook(db, org_id, today())
     elegidas = _asignaciones(asignaciones)
     memoria = _memoria(db, org_id)
-    result = analyze(parse_obra(wb), templates, book, elegidas, memoria)
+    result = analyze(parse_obra(wb), templates, book, elegidas, memoria, excel_prices(wb))
 
     rojos = [t for t in result["tareas"] if t["estado"] == "rojo"]
     duros = [t["clave"] for t in rojos if t["motivo_rojo"] != "precio"]
@@ -638,4 +710,121 @@ async def cargar_obra(
         "total_excel": result["resumen"]["total_excel"],
         "resumen": cascade.get("summary"),
         "memoria_guardada": guardada,
+    }
+
+
+# ── Diferencias con el Excel ─────────────────────────────────────────────────
+
+SIN_EXCEL = ('Este presupuesto no tiene guardados los totales del Excel. Cargá la obra de nuevo desde '
+             '"Cargar obra" para poder compararla.')
+PARECIDO_PCT = 5.0  # |diferencia| up to this % of the Excel counts as "parecido"
+
+
+def _money(value: float) -> float:
+    return round(value, 2)
+
+
+def _diff(app: float, excel: float) -> tuple[float, float | None]:
+    """(app − excel, % over the Excel with 1 decimal; None when the Excel says 0)."""
+    diferencia = _money(app - excel)
+    return diferencia, (round(diferencia / excel * 100, 1) if excel else None)
+
+
+def _comparison(app_neto: float, excel_neto: float, app_directo: float, excel_directo: float) -> dict:
+    diferencia, pct = _diff(app_neto, excel_neto)
+    return {"app_neto": _money(app_neto), "excel_neto": _money(excel_neto), "diferencia": diferencia,
+            "diferencia_pct": pct, "app_directo": _money(app_directo), "excel_directo": _money(excel_directo)}
+
+
+def _how_different(t: dict) -> str:
+    """'mas_caros', 'mas_baratos' or 'parecidos' (the app against the Excel)."""
+    pct = t["diferencia_pct"]
+    if pct is None:  # the Excel says 0
+        return "mas_caros" if t["app_neto"] > 0 else "mas_baratos" if t["app_neto"] < 0 else "parecidos"
+    return "mas_caros" if pct > PARECIDO_PCT else "mas_baratos" if pct < -PARECIDO_PCT else "parecidos"
+
+
+def _amount(value: object) -> float:
+    try:
+        return float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+@router.get("/{budget_id}/diferencias")
+async def diferencias_con_excel(budget_id: UUID, user: dict = Depends(get_current_user)):
+    """Compara, trabajo por trabajo, lo que calcula la app contra lo que decía el Excel. No escribe nada."""
+    db = get_data_db()
+    org_id = user["org_id"]
+    bid = str(budget_id)
+    budgets = db.table("budgets").select("*").eq("id", bid).eq("org_id", org_id).limit(1).execute().data or []
+    if not budgets:
+        raise HTTPException(404, "Presupuesto no encontrado")
+    budget = budgets[0]
+
+    rows = fetch_all(
+        lambda: db.table("budget_items").select("*").eq("budget_id", bid).eq("org_id", org_id).order("id")
+    )
+    by_id = {str(r["id"]): r for r in rows}
+    items = sorted(
+        (r for r in rows if r.get("notas") != "Seccion" and r.get("excel_neto") is not None),
+        key=lambda r: (r.get("sort_order") is None, r.get("sort_order") or 0),
+    )
+    if not items:
+        raise HTTPException(409, SIN_EXCEL)
+
+    grupos: dict[str, list[dict]] = {}
+    for item in items:
+        grupos.setdefault(task_key(item.get("description") or "", item.get("unidad")), []).append(item)
+
+    template_ids = sorted({str(g[0]["template_id"]) for g in grupos.values() if g[0].get("template_id")})
+    recetas: dict[str, dict] = {}
+    if template_ids:
+        for t in db.table("item_templates").select("*").eq("org_id", org_id).in_("id", template_ids).execute().data or []:
+            recetas[str(t["id"])] = {"codigo": t.get("codigo"), "nombre": t.get("nombre")}
+
+    trabajos = []
+    for clave, its in grupos.items():
+        first = its[0]
+        cantidad = round(sum(_amount(i.get("cantidad")) for i in its), 4)
+        receta = recetas.get(str(first.get("template_id"))) if first.get("template_id") else None
+        comp = _comparison(*(sum(_amount(i.get(k)) for i in its)
+                             for k in ("neto_total", "excel_neto", "directo_total", "excel_directo")))
+        detalle = []
+        for i in its:
+            parent = by_id.get(str(i.get("parent_id"))) if i.get("parent_id") else None
+            app_neto, excel_neto = _amount(i.get("neto_total")), _amount(i.get("excel_neto"))
+            detalle.append({
+                "id": i["id"], "code": i.get("code"), "piso": parent.get("description") if parent else None,
+                "cantidad": _amount(i.get("cantidad")), "app_neto": _money(app_neto), "excel_neto": _money(excel_neto),
+                "diferencia": _diff(app_neto, excel_neto)[0],
+            })
+        trabajos.append({
+            "clave": clave, "descripcion": first.get("description"), "unidad": first.get("unidad"),
+            "veces": len(its), "cantidad_total": cantidad,
+            "receta": receta, "sin_receta": receta is None,
+            **comp,
+            "app_unitario": _money(comp["app_neto"] / cantidad) if cantidad else None,
+            "excel_unitario": _money(comp["excel_neto"] / cantidad) if cantidad else None,
+            "items": detalle,
+        })
+    trabajos.sort(key=lambda t: -abs(t["diferencia"]))
+
+    clases = [_how_different(t) for t in trabajos]
+    total = _comparison(*(sum(_amount(i.get(k)) for i in items)
+                          for k in ("neto_total", "excel_neto", "directo_total", "excel_directo")))
+    return {
+        "budget_id": bid,
+        "nombre": budget.get("name"),
+        "precios_al": budget.get("precios_al"),
+        "source_file": budget.get("source_file"),
+        "total": total,
+        "resumen": {
+            "trabajos": len(trabajos),
+            "mas_caros": clases.count("mas_caros"),
+            "mas_baratos": clases.count("mas_baratos"),
+            "parecidos": clases.count("parecidos"),
+            "sin_receta": sum(1 for t in trabajos if t["sin_receta"]),
+        },
+        "trabajos": trabajos,
     }

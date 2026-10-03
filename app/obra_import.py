@@ -18,6 +18,7 @@ from datetime import date, datetime
 from app.budget_prices import find_entry, pick_price
 from app.catalog_prices import normalize_codigo
 from app.formulas import FormulaError
+from app.maestro_import import SHEET_TIPOS, parse_sheet, parse_workbook
 from app.recipes import expand_resource, merge_params, param_defaults
 from app.tree import normalize_date_code, normalize_item_code
 
@@ -323,6 +324,192 @@ def _fill_units(filas: list[dict], problemas: list[str]) -> None:
             msg = f"La misma tarea figura con unidades distintas en los pisos: {', '.join(sorted(known))}."
             if msg not in f["notas"]:
                 f["notas"].append(msg)
+
+
+# ── Precios que el Excel de la obra ya trae ──────────────────────────────────
+
+# Detail sheet of one task: "5.2-6", "3.1-1", "4.2-4.2", "2.2" (not 00_*/01_*, not "REV PROY")
+_DETAIL_SHEET = re.compile(r"^\d+(?:\.\d+)*(?:-\d+(?:\.\d+)*)?$")
+# Section titles in column A (startswith, after plain()); the longest prefixes go first
+_DETAIL_SECTIONS: tuple[tuple[str, str], ...] = (
+    ("MANO DE OBRA - PERSONAS", "mano_obra"),
+    ("MANO DE OBRA - EQUIPOS", "equipo"),
+    ("MANO DE OBRA - MATERIALES", "material"),
+    ("MANO DE OBRA - SUBCONTRATOS", "subcontrato"),  # how the TERRAC sheets title it
+    ("MATERIALES", "material"),
+    ("SUBCONTRATOS", "subcontrato"),
+)
+_DETAIL_MAX_COL = 12  # the detail tables use A..I; reading wider only creates empty cells (slow)
+
+
+def _section_tipo(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    text = re.sub(r"\s*-\s*", " - ", plain(value))
+    return next((tipo for prefix, tipo in _DETAIL_SECTIONS if text.startswith(prefix)), None)
+
+
+def _cell_text(value: object) -> str | None:
+    """Text of a cell, or None when empty or an Excel error ('#REF!', '#N/A')."""
+    if value is None or isinstance(value, (bool, datetime, date)):
+        return None
+    text = " ".join(str(value).split())
+    return text if text and not text.startswith("#") else None
+
+
+def _price_cell(value: object) -> float | None:
+    """A typed price: a number > 0. Text, errors and zeros are not a price."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value) if value > 0 else None
+
+
+def _sheet_values(ws, max_col: int) -> list[list]:  # type: ignore[no-untyped-def]
+    """Cell values of columns A..max_col, row by row.
+
+    Reads only the cells the sheet has: iter_rows on a normal workbook creates every
+    empty cell it walks over, and the detail sheets declare 1000 rows each (seconds
+    per Excel, on every "Revisar" of the screen).
+    """
+    cells = getattr(ws, "_cells", None)
+    if not isinstance(cells, dict):
+        return [list(r) for r in ws.iter_rows(min_row=1, max_col=max_col, values_only=True)]
+    grid: dict[int, list] = {}
+    for (r, c), cell in cells.items():
+        if c <= max_col and cell.value is not None:
+            grid.setdefault(r, [None] * max_col)[c - 1] = cell.value
+    last = max(grid, default=0)
+    return [grid.get(r, [None] * max_col) for r in range(1, last + 1)]
+
+
+def _detail_prices(ws) -> list[dict]:  # type: ignore[no-untyped-def]
+    """Priced rows of one detail sheet (see excel_prices), in order."""
+    rows = _sheet_values(ws, _DETAIL_MAX_COL)
+    trabajo = _cell_text(rows[2][1]) if len(rows) > 2 and len(rows[2]) > 1 else None
+    found: list[dict] = []
+    tipo: str | None = None
+    cols: dict[str, int] | None = None
+    for row in rows:
+        first = row[0] if row else None
+        section = _section_tipo(first)
+        if section:
+            tipo, cols = section, None
+            continue
+        if tipo is None:
+            continue
+        if isinstance(first, str) and plain(first).startswith("TOTAL"):
+            tipo = cols = None
+            continue
+        if cols is None:
+            if isinstance(first, str) and plain(first) == "CODIGO":
+                labels = [plain(v) if isinstance(v, str) else "" for v in row]
+                cols = {
+                    "descripcion": next((i for i, x in enumerate(labels) if x == "DESCRIPCION"), None),
+                    "unidad": next((i for i, x in enumerate(labels) if x == "UNIDAD"), None),
+                    "precio": next((i for i, x in enumerate(labels) if "PRECIO" in x), None),
+                }
+            continue
+        codigo = normalize_codigo(_cell_text(first))
+        precio = _price_cell(row[cols["precio"]]) if cols["precio"] is not None and cols["precio"] < len(row) else None
+        if not codigo or precio is None:
+            continue
+
+        def text(col: str) -> str | None:
+            i = cols[col]  # type: ignore[index]
+            return _cell_text(row[i]) if i is not None and i < len(row) else None
+
+        found.append({
+            "codigo": codigo, "descripcion": text("descripcion"), "unidad": text("unidad"), "tipo": tipo,
+            "precio": precio, "fecha": None, "proveedor": None, "nota": None,
+            "origen": "detalle", "hoja": ws.title, "trabajo": trabajo,
+        })
+    return found
+
+
+# Sol's lists sometimes label a whole section "PRECIO CON IVA" while the sheet header says
+# "PRECIO SIN IVA": the value is still proposed, with this warning, so she decides.
+NOTA_CON_IVA = "En la lista del Excel figura como precio con IVA: fijate si va sin IVA."
+
+
+def _list_prices(wb) -> list[dict]:  # type: ignore[no-untyped-def]
+    """Priced rows of the 00_Mat/00_MO/00_Eq/00_Sub lists (Maestro format), in order."""
+    try:
+        by_tipo, _ = parse_workbook(wb)
+    except Exception:
+        # One odd list must not hide the others: read them one by one, skipping the bad one
+        by_tipo = {}
+        for sheet, tipo in SHEET_TIPOS.items():
+            if sheet not in wb.sheetnames:
+                continue
+            try:
+                by_tipo[tipo] = parse_sheet(sheet, list(wb[sheet].iter_rows(values_only=True)), tipo)[0]
+            except Exception:
+                continue
+    hojas = {tipo: sheet for sheet, tipo in SHEET_TIPOS.items()}
+    found: list[dict] = []
+    for tipo, entries in by_tipo.items():
+        for e in entries:
+            precio, nota = _price_cell(e.get("precio_sin_iva")), None
+            if precio is None:
+                precio, nota = _price_cell(e.get("precio_con_iva")), NOTA_CON_IVA
+            codigo = normalize_codigo(e.get("codigo"))
+            if not codigo or precio is None:
+                continue
+            found.append({
+                "codigo": codigo, "descripcion": e.get("descripcion") or None, "unidad": e.get("unidad") or None,
+                "tipo": tipo, "precio": precio, "fecha": e.get("fecha_precio"), "proveedor": e.get("proveedor"),
+                "nota": nota, "origen": "lista", "hoja": hojas.get(tipo), "trabajo": None,
+            })
+    return found
+
+
+def excel_prices(wb) -> dict[str, dict]:  # type: ignore[no-untyped-def]
+    """Precios que trae el Excel de la obra, por código normalizado (normalize_codigo).
+
+    Dos fuentes, en este orden de prioridad:
+    1. "detalle": las hojas de detalle de cada trabajo (nombre tipo "5.2-6", "3.1-1", "4.2-4.2", "2.2";
+       se excluyen las 00_* y 01_*). Fila 3: A = código del ítem, B = descripción del trabajo.
+       Secciones por el texto de la columna A (startswith, en mayúsculas):
+         MATERIALES → material · MANO DE OBRA - PERSONAS → mano_obra · MANO DE OBRA - EQUIPOS → equipo
+         MANO DE OBRA - MATERIALES → material · SUBCONTRATOS → subcontrato
+         (y MANO DE OBRA - SUBCONTRATOS → subcontrato, como lo titulan las hojas de TERRAC)
+       Debajo de cada sección, la fila con A == "Código" es el encabezado: de ahí salen las columnas
+       Descripción, Unidad y "Precio Unitario" (contiene PRECIO). Las filas siguientes cuentan si tienen
+       código y precio > 0, hasta una fila cuya A empiece con "TOTAL" o una sección nueva.
+    2. "lista": las hojas 00_Mat/00_MO/00_Eq/00_Sub, leídas con app.maestro_import.parse_workbook
+       (mismo formato que el Maestro): codigo, descripcion, unidad, precio_sin_iva, fecha_precio, proveedor.
+       Solo filas con precio > 0. Si la fila solo tiene "precio con IVA" (secciones mal rotuladas),
+       se propone igual con la aclaración en "nota".
+
+    Gana el primer "detalle" encontrado (en el orden de las hojas); si no hay, la "lista".
+    Los otros precios distintos del mismo código quedan en "otros".
+
+    Each value: {codigo, descripcion, unidad, tipo, precio, fecha, proveedor, nota, origen, hoja,
+    trabajo, otros: [{precio, hoja}]}. Never fails because of an odd sheet: it is skipped.
+    """
+    candidates: list[dict] = []
+    for ws in getattr(wb, "worksheets", []):
+        if not _DETAIL_SHEET.match(str(ws.title).strip()):
+            continue
+        try:
+            candidates += _detail_prices(ws)
+        except Exception:
+            continue
+    try:
+        candidates += _list_prices(wb)
+    except Exception:
+        pass
+
+    out: dict[str, dict] = {}
+    for c in candidates:
+        winner = out.get(c["codigo"])
+        if winner is None:
+            out[c["codigo"]] = {**c, "otros": []}
+            continue
+        seen = {round(winner["precio"], 2)} | {round(o["precio"], 2) for o in winner["otros"]}
+        if round(c["precio"], 2) not in seen:
+            winner["otros"].append({"precio": c["precio"], "hoja": c["hoja"]})
+    return out
 
 
 # ── Plan de carga ────────────────────────────────────────────────────────────

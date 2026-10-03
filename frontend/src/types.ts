@@ -82,6 +82,7 @@ export interface PriceCatalog {
   name: string
   source_file?: string
   created_at: string
+  oficial: boolean
 }
 
 export interface CatalogEntry {

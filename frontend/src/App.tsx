@@ -16,6 +16,7 @@ import MarkupChain from './pages/MarkupChain'
 import CargarObra from './pages/CargarObra'
 import Catalogs from './pages/Catalogs'
 import Versions from './pages/Versions'
+import DiferenciasExcel from './pages/DiferenciasExcel'
 import Templates from './pages/Templates'
 
 export default function App() {
@@ -39,6 +40,7 @@ export default function App() {
             <Route path="budgets/:id/ai" element={<AIPlans />} />
             <Route path="budgets/:id/export" element={<Export />} />
             <Route path="budgets/:id/versions" element={<Versions />} />
+            <Route path="budgets/:id/diferencias" element={<DiferenciasExcel />} />
             <Route path="new-project" element={<NewProject />} />
             <Route path="import" element={<ImportExcel />} />
             <Route path="cargar-obra" element={<CargarObra />} />
