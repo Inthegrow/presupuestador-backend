@@ -373,6 +373,48 @@ async def list_catalogs(user: dict = Depends(get_current_user)):
     return result.data or []
 
 
+# ── Catálogo oficial ─────────────────────────────────────────────────────────
+
+
+@router.patch("/{catalog_id}")
+async def update_catalog(
+    catalog_id: UUID,
+    data: dict = Body(...),
+    user: dict = Depends(get_current_user),
+):
+    """Mark a catalog as oficial (the app prices with it) or only for reference.
+
+    Body: {"oficial": true|false}. Returns the updated catalog row.
+    """
+    db = get_data_db()
+    org_id = user["org_id"]
+    cid = str(catalog_id)
+
+    oficial = data.get("oficial") if isinstance(data, dict) else None
+    if not isinstance(oficial, bool):
+        raise HTTPException(400, "Indicá si el catálogo es oficial: true o false")
+
+    catalog = (
+        db.table("price_catalogs")
+        .select("*")
+        .eq("id", cid)
+        .eq("org_id", org_id)
+        .limit(1)
+        .execute()
+    )
+    if not catalog.data:
+        raise HTTPException(404, "Catalogo no encontrado")
+
+    result = (
+        db.table("price_catalogs")
+        .update({"oficial": oficial})
+        .eq("id", cid)
+        .eq("org_id", org_id)
+        .execute()
+    )
+    return result.data[0] if result.data else {**catalog.data[0], "oficial": oficial}
+
+
 # ── List catalog entries ────────────────────────────────────────────────────
 
 

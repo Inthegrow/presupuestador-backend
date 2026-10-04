@@ -3,8 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import { AlertTriangle, CheckCircle, ChevronDown, ChevronUp, ClipboardCheck, Search, Trash2 } from 'lucide-react'
 import FileUpload from '../components/ui/FileUpload'
 import { catalogApi, obraApi } from '../lib/api'
-import type { ObraAnalisis, ObraAsignaciones, ObraCarga, ObraPrecio, ObraRecetaCatalogo, ObraTarea } from '../lib/api'
-import { fmtCurrency, fmtDate } from '../lib/format'
+import type { ObraAnalisis, ObraAsignaciones, ObraCarga, ObraPrecio, ObraPropuesta, ObraRecetaCatalogo, ObraTarea } from '../lib/api'
+import { fmtCurrency, fmtDate, todayIso } from '../lib/format'
 import type { PriceCatalog } from '../types'
 
 function errorText(e: unknown): string {
@@ -31,11 +31,58 @@ type Filtro = 'revisar' | 'rojo' | 'amarillo' | 'verde' | 'todos'
 
 // ─── Paso 2a: un código sin precio, repetido o que no está ─────────────────────
 
-function PrecioRow({ p, catalogs, onFixed }: { p: ObraPrecio; catalogs: PriceCatalog[]; onFixed: () => void }) {
-  const [precio, setPrecio] = useState('')
-  const [catalogId, setCatalogId] = useState(catalogs[0]?.id || '')
+// "EJECUCION DE PINTURA EN PAREDES. INCLUYE ENDUIDO" → "Ejecucion de pintura en paredes"
+function nombreCorto(texto?: string | null): string {
+  const base = (texto || '').split('.')[0].trim().toLowerCase()
+  if (!base) return ''
+  const cap = base.charAt(0).toUpperCase() + base.slice(1)
+  return cap.length > 48 ? `${cap.slice(0, 47)}…` : cap
+}
+
+function origenPropuesta(pr: ObraPropuesta): string {
+  if (pr.origen === 'detalle') {
+    const trabajo = nombreCorto(pr.trabajo)
+    return `hoja ${pr.hoja}${trabajo ? `, ${trabajo}` : ''}`
+  }
+  return `lista de precios del Excel${pr.fecha ? `, ${fmtDate(pr.fecha)}` : ''}`
+}
+
+// Guarda un precio: si el código ya está sin precio lo completa; si no está, lo crea en el catálogo elegido
+async function guardarPrecio(
+  p: ObraPrecio,
+  datos: { precio: number; fecha: string; descripcion?: string; unidad?: string; catalogId: string },
+) {
+  if (p.problema === 'sin_precio' && p.entradas[0]) {
+    return catalogApi.updateEntry(p.entradas[0].catalog_id, p.entradas[0].id, {
+      precio_sin_iva: datos.precio,
+      fecha_precio: datos.fecha,
+    })
+  }
+  if (!datos.catalogId) throw new Error('No hay un catálogo donde guardarlo.')
+  return catalogApi.createEntry(datos.catalogId, {
+    codigo: p.codigo,
+    descripcion: p.descripcion || datos.descripcion,
+    unidad: p.unidad || datos.unidad,
+    tipo: p.tipo,
+    precio_sin_iva: datos.precio,
+    fecha_precio: datos.fecha,
+  })
+}
+
+function destinoDe(p: ObraPrecio, elegibles: PriceCatalog[]): string {
+  return p.catalogo_destino?.id || elegibles[0]?.id || ''
+}
+
+function PrecioRow({
+  p, elegibles, bloqueado, onFixed,
+}: { p: ObraPrecio; elegibles: PriceCatalog[]; bloqueado: boolean; onFixed: () => void }) {
+  const propuesta = p.propuesta
+  const [precio, setPrecio] = useState(propuesta ? String(propuesta.precio) : '')
+  const [catalogElegido, setCatalogElegido] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+
+  const catalogId = catalogElegido || destinoDe(p, elegibles)
 
   async function run(action: () => Promise<unknown>) {
     setBusy(true)
@@ -51,6 +98,21 @@ function PrecioRow({ p, catalogs, onFixed }: { p: ObraPrecio; catalogs: PriceCat
 
   const valor = Number(String(precio).replace(',', '.'))
   const valido = precio !== '' && valor > 0
+  const textoGuardar = propuesta
+    ? valido && valor === propuesta.precio ? 'Guardar ese precio' : 'Guardar'
+    : p.problema === 'no_esta' ? 'Agregar al catálogo' : 'Guardar'
+  const referencias = !propuesta ? p.referencias.slice(0, 3) : []
+  const sinSelector = p.problema === 'duplicado'
+
+  function guardar() {
+    run(() => guardarPrecio(p, {
+      precio: valor,
+      fecha: propuesta?.fecha ?? todayIso(),
+      descripcion: propuesta?.descripcion,
+      unidad: propuesta?.unidad,
+      catalogId,
+    }))
+  }
 
   return (
     <tr className="border-t align-top">
@@ -67,6 +129,47 @@ function PrecioRow({ p, catalogs, onFixed }: { p: ObraPrecio; catalogs: PriceCat
         </div>
       </td>
       <td className="py-2">
+        {!sinSelector && propuesta && (
+          <div className="text-[11px] text-gray-600 mb-1.5">
+            <span className="font-semibold text-[#143D34]">En tu Excel usaste {fmtCurrency(propuesta.precio)}</span>{' '}
+            <span className="text-gray-400">({origenPropuesta(propuesta)})</span>
+            {propuesta.nota && <div className="text-amber-700">{propuesta.nota}</div>}
+            {propuesta.otros.length > 0 && (
+              <div className="text-gray-500">
+                También figura a{' '}
+                {propuesta.otros.map((o) => `${fmtCurrency(o.precio)} en ${o.hoja}`).join(' y a ')}.
+              </div>
+            )}
+          </div>
+        )}
+
+        {!sinSelector && referencias.length > 0 && (
+          <div className="space-y-1 mb-1.5">
+            {referencias.map((ref) => (
+              <div key={ref.id} className="flex flex-wrap items-center gap-2 text-[11px] text-gray-600">
+                <span>
+                  En {ref.catalogo || 'otro catálogo'} estaba a{' '}
+                  <strong>{fmtCurrency(ref.precio_sin_iva)}</strong>
+                  {ref.fecha_precio && <span className="text-gray-400"> ({fmtDate(ref.fecha_precio)})</span>}
+                </span>
+                <button
+                  disabled={busy || bloqueado || !ref.precio_sin_iva || (p.problema === 'no_esta' && !catalogId)}
+                  onClick={() => run(() => guardarPrecio(p, {
+                    precio: ref.precio_sin_iva || 0,
+                    fecha: ref.fecha_precio || todayIso(),
+                    descripcion: ref.descripcion,
+                    unidad: ref.unidad,
+                    catalogId,
+                  }))}
+                  className="bg-white border text-[#143D34] text-[11px] font-semibold px-2 py-0.5 rounded-lg hover:bg-[#E8F5EE] disabled:opacity-50"
+                >
+                  Usar este
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
         {p.problema === 'sin_precio' && p.entradas[0] && (
           <div className="flex items-center gap-2">
             <input
@@ -76,11 +179,11 @@ function PrecioRow({ p, catalogs, onFixed }: { p: ObraPrecio; catalogs: PriceCat
               className="border rounded-lg px-2 py-1 text-xs w-44"
             />
             <button
-              disabled={busy || !valido}
-              onClick={() => run(() => catalogApi.updateEntry(p.entradas[0].catalog_id, p.entradas[0].id, { precio_sin_iva: valor }))}
+              disabled={busy || bloqueado || !valido}
+              onClick={guardar}
               className="bg-[#2D8D68] disabled:opacity-50 text-white text-xs font-semibold px-3 py-1 rounded-lg"
             >
-              Guardar
+              {textoGuardar}
             </button>
           </div>
         )}
@@ -97,7 +200,7 @@ function PrecioRow({ p, catalogs, onFixed }: { p: ObraPrecio; catalogs: PriceCat
                   {e.catalogo && <span className="text-gray-400"> · {e.catalogo}</span>}
                 </div>
                 <button
-                  disabled={busy}
+                  disabled={busy || bloqueado}
                   title="Borrar este"
                   onClick={() => {
                     if (window.confirm(`¿Borrar "${e.codigo} - ${e.descripcion}" del catálogo?`)) {
@@ -115,8 +218,8 @@ function PrecioRow({ p, catalogs, onFixed }: { p: ObraPrecio; catalogs: PriceCat
 
         {p.problema === 'no_esta' && (
           <div className="flex flex-wrap items-center gap-2">
-            <select value={catalogId} onChange={(e) => setCatalogId(e.target.value)} className="border rounded-lg px-2 py-1 text-xs">
-              {catalogs.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            <select value={catalogId} onChange={(e) => setCatalogElegido(e.target.value)} className="border rounded-lg px-2 py-1 text-xs">
+              {elegibles.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
             <input
               value={precio}
@@ -125,13 +228,11 @@ function PrecioRow({ p, catalogs, onFixed }: { p: ObraPrecio; catalogs: PriceCat
               className="border rounded-lg px-2 py-1 text-xs w-44"
             />
             <button
-              disabled={busy || !valido || !catalogId}
-              onClick={() => run(() => catalogApi.createEntry(catalogId, {
-                codigo: p.codigo, descripcion: p.descripcion, unidad: p.unidad, tipo: p.tipo, precio_sin_iva: valor,
-              }))}
+              disabled={busy || bloqueado || !valido || !catalogId}
+              onClick={guardar}
               className="bg-[#2D8D68] disabled:opacity-50 text-white text-xs font-semibold px-3 py-1 rounded-lg"
             >
-              Agregar al catálogo
+              {textoGuardar}
             </button>
           </div>
         )}
@@ -225,10 +326,13 @@ function TareaCard({
   const preguntaServidor = t.pregunta
   // Si Sol eligió una receta con otra unidad, la pregunta se muestra acá hasta que escriba el número
   const pregunta = pendiente
-    ? { texto: `¿Cuántos ${pendiente.unidad} hay en 1 ${t.unidad || 'unidad'}?`, receta: pendiente.codigo, unidad_receta: pendiente.unidad, valor: null as number | null }
+    ? { texto: `¿Cuántos ${pendiente.unidad} hay en 1 ${t.unidad || 'unidad'}?`, receta: pendiente.codigo, unidad_receta: pendiente.unidad, valor: null as number | null, dato: null as string | null }
     : preguntaServidor
   const [valor, setValor] = useState(pregunta?.valor != null ? String(pregunta.valor) : '')
   useEffect(() => { setValor(pregunta?.valor != null ? String(pregunta.valor) : '') }, [pregunta?.receta, pregunta?.valor])
+  // Con "dato" la conversión ya está resuelta: se muestra como frase y el campo aparece solo al tocar "cambiar"
+  const [editando, setEditando] = useState(false)
+  useEffect(() => { setEditando(false) }, [pregunta?.receta, pregunta?.dato])
 
   const estado = pendiente || (pregunta && pregunta.valor == null) ? 'rojo' : t.estado
   const est = ESTILO[estado]
@@ -242,6 +346,7 @@ function TareaCard({
   function enviarValor() {
     const n = Number(valor.replace(',', '.'))
     if (pregunta && n > 0 && n !== pregunta.valor) onValor(pregunta.receta, n)
+    else if (pregunta?.dato) setEditando(false)
   }
 
   return (
@@ -296,13 +401,23 @@ function TareaCard({
         </ul>
       )}
 
-      {pregunta && (
+      {pregunta && pregunta.dato && !editando && (
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-gray-500 bg-gray-50 rounded-lg px-3 py-2">
+          <span>{pregunta.dato}</span>
+          <button onClick={() => setEditando(true)} className="text-[#2D8D68] hover:underline font-semibold">
+            cambiar
+          </button>
+        </div>
+      )}
+
+      {pregunta && (!pregunta.dato || editando) && (
         <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-gray-700 bg-gray-50 rounded-lg px-3 py-2">
           <span>{pregunta.texto}</span>
           <input
             type="number"
             min="0"
             step="any"
+            autoFocus={editando}
             value={valor}
             onChange={(e) => setValor(e.target.value)}
             onBlur={enviarValor}
@@ -349,8 +464,11 @@ export default function CargarObra() {
   const [carga, setCarga] = useState<ObraCarga | null>(null)
   const [filtro, setFiltro] = useState<Filtro>('revisar')
   const [panelPrecios, setPanelPrecios] = useState(false)
+  const [guardandoExcel, setGuardandoExcel] = useState<{ hecho: number; total: number } | null>(null)
+  const [noGuardados, setNoGuardados] = useState<string[]>([])
   const panelRef = useRef<HTMLDivElement>(null)
   const pedido = useRef(0)
+  const lote = useRef(0)
 
   useEffect(() => { catalogApi.list().then(setCatalogs).catch(() => setCatalogs([])) }, [])
 
@@ -370,6 +488,7 @@ export default function CargarObra() {
 
   function reiniciar() {
     pedido.current++
+    lote.current++
     setFile(null)
     setAnalisis(null)
     setCarga(null)
@@ -380,6 +499,8 @@ export default function CargarObra() {
     setError('')
     setFiltro('revisar')
     setPanelPrecios(false)
+    setGuardandoExcel(null)
+    setNoGuardados([])
   }
 
   function elegirArchivo(f: File) {
@@ -434,6 +555,37 @@ export default function CargarObra() {
     setCargando(false)
   }
 
+  // Guarda de una vez todos los precios que trae el Excel, uno por uno; si uno falla sigue con los demás
+  async function guardarTodosExcel() {
+    const lista = propuestas
+    if (lista.length === 0) return
+    const mio = lote.current
+    const fallidos: string[] = []
+    setNoGuardados([])
+    setGuardandoExcel({ hecho: 0, total: lista.length })
+    for (let i = 0; i < lista.length; i++) {
+      const p = lista[i]
+      const pr = p.propuesta
+      if (!pr) continue
+      try {
+        await guardarPrecio(p, {
+          precio: pr.precio,
+          fecha: pr.fecha ?? todayIso(),
+          descripcion: pr.descripcion,
+          unidad: pr.unidad,
+          catalogId: destinoDe(p, elegibles),
+        })
+      } catch {
+        fallidos.push(p.codigo)
+      }
+      if (mio !== lote.current) return
+      setGuardandoExcel({ hecho: i + 1, total: lista.length })
+    }
+    setNoGuardados(fallidos)
+    setGuardandoExcel(null)
+    revisar()
+  }
+
   function abrirPrecios() {
     setPanelPrecios(true)
     setTimeout(() => panelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50)
@@ -461,6 +613,9 @@ export default function CargarObra() {
   })
 
   const faltanPrecios = (analisis?.precios.length || 0) > 0
+  const oficial = !!analisis?.catalogo_oficial
+  const elegibles = oficial ? catalogs.filter((c) => c.oficial) : catalogs
+  const propuestas = (analisis?.precios || []).filter((p) => p.propuesta && p.problema !== 'duplicado')
   const puedeCargar = !!analisis && !!nombre.trim() && rojosOtros === 0 && (rojosPrecio === 0 || permitir)
   const frase = rojos > 0
     ? `Falta resolver ${rojos} ${rojos === 1 ? 'trabajo' : 'trabajos'} en rojo`
@@ -608,13 +763,37 @@ export default function CargarObra() {
               {faltanPrecios && (panelPrecios || rojosPrecio > 0) && (
                 <div className="mt-3">
                   <p className="text-xs text-gray-500 mb-3">
-                    Lo que corrijas acá queda guardado en los catálogos de la app (precios al {fmtDate(analisis.fecha_precios)}),
-                    y sirve para las próximas obras.
+                    {oficial
+                      ? <>Lo que corrijas acá queda guardado en el catálogo <strong>oficial</strong></>
+                      : 'Lo que corrijas acá queda guardado en los catálogos de la app'}
+                    {' '}(precios al {fmtDate(analisis.fecha_precios)}), y sirve para las próximas obras.
                   </p>
+                  {propuestas.length >= 2 && (
+                    <div className="flex flex-wrap items-center gap-3 mb-3 bg-[#E8F5EE] rounded-lg px-3 py-2">
+                      <span className="text-xs text-[#143D34]">
+                        {guardandoExcel
+                          ? `Guardando ${Math.min(guardandoExcel.hecho + 1, guardandoExcel.total)} de ${guardandoExcel.total}…`
+                          : 'Tu Excel ya trae estos precios.'}
+                      </span>
+                      <button
+                        onClick={guardarTodosExcel}
+                        disabled={!!guardandoExcel || revisando}
+                        className="bg-[#2D8D68] hover:bg-[#1B5E4B] disabled:opacity-50 text-white text-xs font-semibold px-3 py-1.5 rounded-lg flex items-center gap-2"
+                      >
+                        {guardandoExcel && <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+                        Guardar los {propuestas.length} precios que trae el Excel
+                      </button>
+                    </div>
+                  )}
+                  {noGuardados.length > 0 && (
+                    <div className="mb-3 text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                      No pude guardar {noGuardados.length === 1 ? 'este precio' : 'estos precios'}: {noGuardados.join(', ')}. Probá de a uno acá abajo.
+                    </div>
+                  )}
                   <table className="w-full text-left">
                     <tbody>
                       {analisis.precios.map((p) => (
-                        <PrecioRow key={p.codigo} p={p} catalogs={catalogs} onFixed={() => revisar()} />
+                        <PrecioRow key={p.codigo} p={p} elegibles={elegibles} bloqueado={!!guardandoExcel} onFixed={() => revisar()} />
                       ))}
                     </tbody>
                   </table>
@@ -691,18 +870,24 @@ export default function CargarObra() {
                 Ojo: {carga.precios_en_cero} códigos quedaron en $0. Cuando tengan precio, usá “Actualizar precios” en Versiones.
               </p>
             )}
-            <div className="flex gap-3">
-              <button
-                onClick={() => navigate(`/app/budgets/${carga.budget_id}/editor`)}
-                className="bg-[#2D8D68] hover:bg-[#1B5E4B] text-white font-semibold px-5 py-2.5 rounded-lg text-sm"
-              >
-                Abrir el presupuesto
-              </button>
+            <div className="flex flex-wrap gap-3">
               <button
                 onClick={reiniciar}
                 className="bg-white border text-gray-600 px-5 py-2.5 rounded-lg text-sm hover:bg-gray-50"
               >
                 Cargar otra obra
+              </button>
+              <button
+                onClick={() => navigate(`/app/budgets/${carga.budget_id}/diferencias`)}
+                className="bg-white border border-[#2D8D68] text-[#2D8D68] font-semibold px-5 py-2.5 rounded-lg text-sm hover:bg-[#E8F5EE]"
+              >
+                Ver diferencias con el Excel
+              </button>
+              <button
+                onClick={() => navigate(`/app/budgets/${carga.budget_id}/editor`)}
+                className="bg-[#2D8D68] hover:bg-[#1B5E4B] text-white font-semibold px-5 py-2.5 rounded-lg text-sm"
+              >
+                Abrir el presupuesto
               </button>
             </div>
           </div>

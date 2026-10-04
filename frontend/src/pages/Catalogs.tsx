@@ -437,10 +437,12 @@ function CatalogRow({
   catalog,
   budgets,
   onDeleted,
+  onChanged,
 }: {
   catalog: PriceCatalog
   budgets: Budget[]
   onDeleted: (id: string) => void
+  onChanged: (catalog: PriceCatalog) => void
 }) {
   const [open, setOpen] = useState(false)
   const [entries, setEntries] = useState<CatalogEntry[]>([])
@@ -454,6 +456,8 @@ function CatalogRow({
   const [editingId, setEditingId] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [addingEntry, setAddingEntry] = useState(false)
+  const [changingOficial, setChangingOficial] = useState(false)
+  const [oficialError, setOficialError] = useState<string | null>(null)
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   function toggle() {
@@ -468,6 +472,19 @@ function CatalogRow({
         })
         .catch(() => {/* ignore */})
         .finally(() => setLoading(false))
+    }
+  }
+
+  async function handleToggleOficial() {
+    setChangingOficial(true)
+    setOficialError(null)
+    try {
+      const updated = await catalogApi.setOficial(catalog.id, !catalog.oficial)
+      onChanged({ ...catalog, ...updated, oficial: !!updated.oficial })
+    } catch {
+      setOficialError('No se pudo cambiar. Probá de nuevo.')
+    } finally {
+      setChangingOficial(false)
     }
   }
 
@@ -582,7 +599,21 @@ function CatalogRow({
           </div>
         </div>
         <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-          <span className="bg-[#E8F5EE] text-[#1B5E4B] text-[10px] font-semibold px-2 py-0.5 rounded-full">Activo</span>
+          {oficialError && <span className="text-[10px] text-red-600">{oficialError}</span>}
+          <span
+            className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+              catalog.oficial ? 'bg-[#E8F5EE] text-[#1B5E4B]' : 'bg-gray-100 text-gray-500'
+            }`}
+          >
+            {catalog.oficial ? 'Oficial' : 'Solo consulta'}
+          </span>
+          <button
+            onClick={handleToggleOficial}
+            disabled={changingOficial}
+            className="bg-white border text-gray-700 text-[11px] font-semibold px-2.5 py-1 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+          >
+            {catalog.oficial ? 'Dejar solo para consulta' : 'Marcar como oficial'}
+          </button>
           <button
             onClick={handleDeleteCatalog}
             disabled={deletingCatalog}
@@ -828,6 +859,12 @@ export default function Catalogs() {
     setCatalogs((prev) => prev.filter((c) => c.id !== id))
   }
 
+  function handleChanged(catalog: PriceCatalog) {
+    setCatalogs((prev) => prev.map((c) => (c.id === catalog.id ? catalog : c)))
+  }
+
+  const hayOficial = catalogs.some((c) => c.oficial)
+
   return (
     <div className="p-6 fade-in">
       <div className="flex items-center gap-2 text-[#2D8D68] text-[11px] font-bold tracking-wider mb-1">
@@ -890,6 +927,18 @@ export default function Catalogs() {
           </div>
         )}
 
+        {!loading && catalogs.length > 0 && !error && (
+          hayOficial ? (
+            <div className="bg-[#E8F5EE] border border-green-200 rounded-xl px-4 py-3 text-xs text-[#143D34]">
+              La app calcula con los catálogos oficiales. Los demás son solo para consultar.
+            </div>
+          ) : (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-xs text-amber-800">
+              Ningún catálogo es oficial: la app toma el precio más nuevo entre todos. Marcá como oficial el que mantenés; los otros quedan para consultar.
+            </div>
+          )
+        )}
+
         {!loading && catalogs.length === 0 && !error && (
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-8 text-center text-gray-400">
             <BookOpen size={32} className="mx-auto mb-3 text-gray-300" />
@@ -899,7 +948,7 @@ export default function Catalogs() {
         )}
 
         {catalogs.map((c) => (
-          <CatalogRow key={c.id} catalog={c} budgets={budgets} onDeleted={handleDeleted} />
+          <CatalogRow key={c.id} catalog={c} budgets={budgets} onDeleted={handleDeleted} onChanged={handleChanged} />
         ))}
       </div>
     </div>

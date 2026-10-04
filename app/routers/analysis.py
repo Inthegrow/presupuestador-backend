@@ -14,11 +14,12 @@ from app.budget_prices import (
     INDIRECT_DEFAULTS,
     INDIRECT_KEYS,
     budget_overrides,
+    build_price_lookup,
+    discarded_prices,
     effective_indirects,
     fetch_all,
     general_indirects,
     load_org_config,
-    load_price_lookup,
     save_org_config,
     today,
 )
@@ -474,6 +475,22 @@ async def update_prices(
     # Save the current state as a version BEFORE changing anything: if this
     # fails, nothing was touched. It is also used to undo a failed update.
     before = _snapshot(db, org_id, budget, items)
+    lookup = build_price_lookup(db, org_id, fecha)
+    # Codex (PR #25): a price taken from a catalog that is now "solo consulta" must not stay
+    # in the total when the oficial catalog cannot replace it. Stop here, before writing anything.
+    descartados = discarded_prices(before["resources"], lookup["idx"], fecha)
+    if descartados:
+        codigos = [d["codigo"] for d in descartados]
+        n = len(codigos)
+        raise HTTPException(409, {
+            "mensaje": (
+                f"{'Hay ' + str(n) + ' precios que vienen' if n > 1 else 'Hay 1 precio que viene'} de un catálogo "
+                f"que ya no es oficial y {'no están' if n > 1 else 'no está'} en el oficial: {', '.join(codigos)}. "
+                "Cargalos en el catálogo oficial y volvé a actualizar. No se cambió nada."
+            ),
+            "codigos": codigos,
+            "precios": descartados,
+        })
     notas_antes = f"Antes de actualizar precios (precios al {anterior or 'sin fecha'})"
     try:
         version_anterior = _insert_version(db, org_id, user["user_id"], before, notas_antes)
@@ -484,7 +501,7 @@ async def update_prices(
             "No se pudo guardar la versión actual. No se cambió nada; probá de nuevo.",
         ) from exc
 
-    price_for, problemas = load_price_lookup(db, org_id, fecha)
+    price_for, problemas = lookup["price_for"], lookup["problemas"]
     try:
         result = _run_cascade(db, org_id, budget, items, price_for=price_for, strict=True)
         written = db.table("budgets").update({
