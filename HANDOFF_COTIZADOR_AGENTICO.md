@@ -125,6 +125,14 @@ Decisión de Carlos: usar **la misma estructura multiempresa de SOLÉ**, no inve
    no se entienden solos ("DE CASCOTE", "GRUESO INTERIOR", "CIELORRASO", "TABIQUES"): en la frase de la
    conversión queda 'Cada m² lleva 0,1 m³ de "De cascote"'. Renombrarlas ("Contrapiso de cascote") es
    un cambio de datos, no de código.
+0c. **Fallas de UX vistas en producción el 03/10 (pantalla real con Ginkgo), pendientes; el PR #25 ya resolvió la de proponer precios):**
+   (1) el panel "Precios para corregir" está al final de la página, lejos de las tarjetas; tiene que estar
+   a mano. (2) "Guardar" no acepta $0, y hay materiales que legítimamente van en $0 o "no lo cotizo".
+   (3) La casilla "Cargar igual" aparece solo cuando no quedan preguntas abiertas, y nada lo explica.
+   (4) El cuadro de precio dice "Precio sin IVA por u"; mostrar la unidad en palabras. (5) La pregunta
+   de m³ de cascote por m² se puede responder sola con el espesor que dice el nombre del trabajo
+   (8 cm = 0,08). (6) La receta propuesta para "membrana líquida" es pintura de paredes; una
+   coincidencia floja tiene que mostrarse como duda, no como propuesta.
 1. Migraciones **009** y **010** ya corridas en Supabase (verificado 03/10). PRs #20, #21 y #23 mergeados.
    El login (PR #22) está mergeado pero **no exige clave todavía**: ver "Antes de todo".
 2. Cargar en la app las recetas (Fase 3) y los catálogos (Fase 1) del Maestro actual, si aún no están.
@@ -200,7 +208,7 @@ Decisión de Carlos: usar **la misma estructura multiempresa de SOLÉ**, no inve
 ## 8. Primer mensaje sugerido para el próximo chat
 
 > Leé `HANDOFF_COTIZADOR_AGENTICO.md`, `DISENO_CARGAR_OBRA.md` y `PLAN_ETAPA_A_CIERRE.md` antes de tocar
-> nada. Estado: PRs #20 a #25 mergeados; migraciones 009, 010 y 011 corridas; Render desplegado a mano
+> nada. Arreglá primero las seis fallas de UX del punto 0c de la sección 5 (vistas en producción con Ginkgo). Estado: PRs #20 a #25 mergeados; migraciones 009, 010 y 011 corridas; Render desplegado a mano
 > (Auto-Deploy no anda); el Maestro marcado como oficial en Catálogos. Yo hago el rol de Sol.
 >
 > Orden de trabajo:
