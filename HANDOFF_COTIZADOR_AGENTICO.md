@@ -166,6 +166,10 @@ abierta (modo demo), con el usuario demo como admin.
    de m³ de cascote por m² se puede responder sola con el espesor que dice el nombre del trabajo
    (8 cm = 0,08). (6) La receta propuesta para "membrana líquida" es pintura de paredes; una
    coincidencia floja tiene que mostrarse como duda, no como propuesta.
+   **(8) Pendiente (Carlos, 04/10):** si se recarga la página (Cmd+Shift+R) después de subir el Excel, se
+   pierde todo lo subido y lo decidido. La carga en curso tiene que quedar guardada en la app y al volver
+   preguntar "Seguir con Edificio Ginkgo (te faltan 6)" o descartar. Es el borrador de carga (Etapa C,
+   punto 12: tabla `obra_cargas` con el archivo y las decisiones). Principio 9 del handoff.
 1. Migraciones **009** y **010** ya corridas en Supabase (verificado 03/10). PRs #20, #21 y #23 mergeados.
    El login (PR #22) está mergeado pero **no exige clave todavía**: ver "Antes de todo".
 2. Cargar en la app las recetas (Fase 3) y los catálogos (Fase 1) del Maestro actual, si aún no están.
