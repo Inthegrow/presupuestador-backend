@@ -170,6 +170,17 @@ abierta (modo demo), con el usuario demo como admin.
    pierde todo lo subido y lo decidido. La carga en curso tiene que quedar guardada en la app y al volver
    preguntar "Seguir con Edificio Ginkgo (te faltan 6)" o descartar. Es el borrador de carga (Etapa C,
    punto 12: tabla `obra_cargas` con el archivo y las decisiones). Principio 9 del handoff.
+   **(9) Pendiente:** Catálogos tardó más de 40 s en cargar. Es el arranque en frío de Render (plan free:
+   se apaga con inactividad y tarda ~50 s en despertar). Opciones: plan pago, o un aviso en la pantalla
+   "El servidor está despertando, unos segundos…" en vez de "Cargando catálogos…" mudo.
+   **(10) Pendiente:** al tocar "Cambiar" se abre el buscador de recetas sin explicación: Carlos no entendió
+   qué era. Sumar una línea arriba: "Elegí la receta correcta para este trabajo. Si ninguna sirve, usá el
+   precio del Excel." y que la opción "Usar el precio del Excel (sin receta)" diga para qué sirve.
+   **(11) Pendiente:** "Cargar presupuesto" tarda un buen rato (244 trabajos, ~1.100 materiales, inserts de
+   a 200) y el botón solo dice "Cargando…". Mostrar "Calculando 244 trabajos y 1.100 materiales…" (ya está
+   en DISENO_CARGAR_OBRA, pantalla 5) y medir dónde se va el tiempo (inserts vs. cascada).
+   **(12) Menor:** con el login apagado la barra dice "Empresa demo" en vez de TERRAC SA (es el nombre del
+   usuario demo). Se arregla solo al encender el login.
 1. Migraciones **009** y **010** ya corridas en Supabase (verificado 03/10). PRs #20, #21 y #23 mergeados.
    El login (PR #22) está mergeado pero **no exige clave todavía**: ver "Antes de todo".
 2. Cargar en la app las recetas (Fase 3) y los catálogos (Fase 1) del Maestro actual, si aún no están.
