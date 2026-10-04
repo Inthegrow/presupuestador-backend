@@ -214,17 +214,41 @@ export interface ObraPrecio {
   motivo: string
   recursos: number
   items: string[]
-  entradas: {
-    id: string
-    catalog_id: string
-    catalogo?: string
-    codigo: string
-    descripcion?: string
-    unidad?: string
-    tipo?: string
-    precio_sin_iva?: number | null
-    fecha_precio?: string | null
-  }[]
+  entradas: ObraEntrada[]
+  // Entradas de catálogos "solo consulta" con el mismo código (más nueva primero, máx. 5)
+  referencias: ObraEntrada[]
+  // Lo que trae el Excel de la obra para este código
+  propuesta: ObraPropuesta | null
+  // Dónde conviene crear el código si no está (solo con catálogo oficial)
+  catalogo_destino: { id: string; name: string } | null
+}
+
+export interface ObraEntrada {
+  id: string
+  catalog_id: string
+  catalogo?: string
+  codigo: string
+  descripcion?: string
+  unidad?: string
+  tipo?: string
+  precio_sin_iva?: number | null
+  fecha_precio?: string | null
+}
+
+export interface ObraPropuesta {
+  codigo: string
+  descripcion?: string
+  unidad?: string
+  tipo: string
+  precio: number
+  fecha: string | null
+  proveedor: string | null
+  // Aclaración, si hace falta ("figura como precio con IVA")
+  nota: string | null
+  origen: 'detalle' | 'lista'
+  hoja: string
+  trabajo: string | null
+  otros: { precio: number; hoja: string }[]
 }
 
 export interface ObraReceta {
@@ -243,6 +267,8 @@ export interface ObraPregunta {
   unidad_receta: string
   unidad_obra: string
   valor: number | null
+  // Frase para mostrar la conversión como dato ya resuelto (null si falta el valor)
+  dato: string | null
 }
 
 export interface ObraTarea {
@@ -272,6 +298,7 @@ export interface ObraAnalisis {
   archivo: string
   titulo: string
   fecha_precios: string
+  catalogo_oficial: boolean
   resumen: {
     rubros: number
     pisos: number
@@ -301,6 +328,52 @@ export interface ObraCarga {
   memoria_guardada?: number
 }
 
+export interface ObraDiferenciaItem {
+  id: string
+  code: string | null
+  piso: string | null
+  cantidad: number
+  app_neto: number
+  excel_neto: number
+  diferencia: number
+}
+
+export interface ObraDiferenciaTrabajo {
+  clave: string
+  descripcion: string
+  unidad: string | null
+  veces: number
+  cantidad_total: number
+  receta: { codigo: string; nombre: string } | null
+  sin_receta: boolean
+  app_neto: number
+  excel_neto: number
+  diferencia: number
+  diferencia_pct: number | null
+  app_directo: number
+  excel_directo: number
+  app_unitario: number | null
+  excel_unitario: number | null
+  items: ObraDiferenciaItem[]
+}
+
+export interface ObraDiferencias {
+  budget_id: string
+  nombre: string
+  precios_al: string | null
+  source_file: string | null
+  total: {
+    app_neto: number
+    excel_neto: number
+    diferencia: number
+    diferencia_pct: number | null
+    app_directo: number
+    excel_directo: number
+  }
+  resumen: { trabajos: number; mas_caros: number; mas_baratos: number; parecidos: number; sin_receta: number }
+  trabajos: ObraDiferenciaTrabajo[]
+}
+
 // Lo que Sol decidió por trabajo: { clave: { plantillas: [[codigo, factor], ...], confirmada? } } ([] = sin receta)
 export type ObraAsignaciones = Record<string, { plantillas: [string, number][]; confirmada?: boolean }>
 
@@ -320,6 +393,7 @@ export const obraApi = {
       '/obras/cargar',
       obraForm(file, asignaciones, { nombre, permitir_sin_precio: String(permitirSinPrecio) }),
     ),
+  diferencias: (budgetId: string) => get<ObraDiferencias>(`/obras/${budgetId}/diferencias`),
 }
 
 // ─── Catalog API ───────────────────────────────────────────────────────────────
@@ -331,6 +405,7 @@ export const catalogApi = {
     get<CatalogEntry[]>(`/catalogs/${id}/search?q=${encodeURIComponent(q)}`),
   apply: (budgetId: string, catalogId: string) =>
     post<{ items_matched: number; items_unmatched: number; total_updated: number }>(`/catalogs/apply/${budgetId}/${catalogId}`),
+  setOficial: (id: string, oficial: boolean) => patch<PriceCatalog>(`/catalogs/${id}`, { oficial }),
   deleteCatalog: (id: string) => del<any>(`/catalogs/${id}`),
   createEntry: (catalogId: string, data: any) =>
     post<any>(`/catalogs/${catalogId}/entries`, data),

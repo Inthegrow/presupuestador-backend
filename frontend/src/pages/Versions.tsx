@@ -7,6 +7,13 @@ import type { Budget, BudgetVersion, PriceUpdateResult } from '../types'
 
 type VersionRow = BudgetVersion & { neto: number; label: string; author: string; date: string }
 
+// La API contesta "409: {...json...}": mostrar solo el mensaje
+function errorText(e: unknown): string {
+  const msg = e instanceof Error ? e.message : String(e)
+  const m = msg.match(/"mensaje"\s*:\s*"((?:[^"\\]|\\.)*)"/) || msg.match(/"detail"\s*:\s*"((?:[^"\\]|\\.)*)"/)
+  return m ? m[1].replace(/\\"/g, '"') : msg || 'Error al actualizar precios'
+}
+
 export default function Versions() {
   const { id } = useParams<{ id: string }>()
   const [versions, setVersions] = useState<VersionRow[]>([])
@@ -72,7 +79,7 @@ export default function Versions() {
       setBudget((b) => (b ? { ...b, precios_al: result.precios_al } : b))
       setVersions(mapVersions(await budgetApi.getVersions(id)))
     } catch (err) {
-      setPriceError(err instanceof Error ? err.message : 'Error al actualizar precios')
+      setPriceError(errorText(err))
     }
     setUpdating(false)
   }

@@ -219,33 +219,53 @@ def find_entry(
     return None, "duplicado"
 
 
-def catalog_created_at(db, org_id: str) -> dict[str, str]:
-    """{catalog_id: created_at} of the org's price catalogs (tie-break in find_entry)."""
-    rows = db.table("price_catalogs").select("id,created_at").eq("org_id", org_id).execute().data or []
-    return {c["id"]: str(c.get("created_at") or "") for c in rows}
+HISTORY_CHUNK = 200  # entry ids per catalog_price_history request
 
 
-def load_price_lookup(db, org_id: str, fecha: date):
-    """Build ``price_for(resource)`` for the org's catalogs at ``fecha``.
+def load_catalog_index(db, org_id: str) -> dict:
+    """{"by_id", "by_codigo", "history", "consulta_by_codigo", "catalogos", "hay_oficial"}.
 
-    price_for returns (precio, fecha_precio, entry_id) or None, and records
-    resources without a price in ``problemas`` (list of dicts).
+    Cada entrada lleva "catalogo" (nombre), "_catalogo_creado" y "oficial" (bool).
+    Con hay_oficial, by_id y by_codigo tienen solo entradas oficiales; consulta_by_codigo tiene el resto.
+    Sin oficial, consulta_by_codigo está vacío.
+
+    The only rule for which catalog entries price a budget (Cargar obra, "Actualizar
+    precios"): when the org marks a catalog as oficial, the others are only shown as
+    a reference. ``catalogos`` = {catalog_id: catalog row}. ``history`` only covers
+    the entries that price (by_id): the reference ones show their current price.
     """
+    # select("*"): before migration 011 there is no "oficial" column and nothing is oficial
+    catalogs = db.table("price_catalogs").select("*").eq("org_id", org_id).execute().data or []
+    catalogos = {str(c["id"]): {**c, "oficial": c.get("oficial") is True} for c in catalogs}
+    hay_oficial = any(c["oficial"] for c in catalogos.values())
+
     entries = fetch_all(
         lambda: db.table("catalog_entries").select("*").eq("org_id", org_id).order("id")
     )
-    created = catalog_created_at(db, org_id)
-    by_id = {str(e["id"]): {**e, "_catalogo_creado": created.get(e.get("catalog_id"))} for e in entries}
-    by_codigo: dict[str, list[dict]] = {}
-    for e in by_id.values():
-        codigo = normalize_codigo(e.get("codigo"))
-        if codigo:
-            by_codigo.setdefault(codigo, []).append(e)
+    by_id: dict[str, dict] = {}
+    consulta: dict[str, dict] = {}
+    for e in entries:
+        catalogo = catalogos.get(str(e.get("catalog_id"))) or {}
+        entry = {
+            **e,
+            "catalogo": catalogo.get("name"),
+            "_catalogo_creado": str(catalogo.get("created_at") or ""),
+            "oficial": bool(catalogo.get("oficial")),
+        }
+        (consulta if hay_oficial and not entry["oficial"] else by_id)[str(e["id"])] = entry
+
+    def index(rows: dict[str, dict]) -> dict[str, list[dict]]:
+        out: dict[str, list[dict]] = {}
+        for e in rows.values():
+            codigo = normalize_codigo(e.get("codigo"))
+            if codigo:
+                out.setdefault(codigo, []).append(e)
+        return out
 
     history: dict[str, list[dict]] = {}
     ids = list(by_id)
-    for start in range(0, len(ids), 200):
-        chunk = ids[start:start + 200]
+    for start in range(0, len(ids), HISTORY_CHUNK):
+        chunk = ids[start:start + HISTORY_CHUNK]
         rows = fetch_all(
             lambda chunk=chunk: db.table("catalog_price_history")
             .select("*")
@@ -255,6 +275,58 @@ def load_price_lookup(db, org_id: str, fecha: date):
         )
         for h in rows:
             history.setdefault(str(h["entry_id"]), []).append(h)
+
+    return {
+        "by_id": by_id,
+        "by_codigo": index(by_id),
+        "history": history,
+        "consulta_by_id": consulta,
+        "consulta_by_codigo": index(consulta),
+        "catalogos": catalogos,
+        "hay_oficial": hay_oficial,
+    }
+
+
+def discarded_prices(resources: list[dict], idx: dict, fecha: date) -> list[dict]:
+    """Resources whose saved price comes from a reference catalog and has no oficial replacement.
+
+    With an oficial catalog, a resource linked (``catalog_entry_id``) to an entry of a
+    "solo consulta" catalog must not keep that price: "Actualizar precios" looks its code
+    up in the oficial catalogs and, when nothing prices it there, the update has to stop
+    (keeping the old value would sum a catalog the org discarded, and reporting it as
+    "sin precio" would hide that). One row per code: {codigo, descripcion, catalogo}.
+    Without an oficial catalog there is nothing to discard.
+    """
+    if not idx.get("hay_oficial"):
+        return []
+    found: dict[str, dict] = {}
+    for r in resources:
+        old = idx["consulta_by_id"].get(str(r.get("catalog_entry_id") or ""))
+        if old is None:
+            continue
+        entry, _ = find_entry({"codigo": r.get("codigo"), "tipo": r.get("tipo")}, idx["by_id"], idx["by_codigo"],
+                              fecha=fecha, history=idx["history"])
+        price = pick_price(entry, idx["history"].get(str(entry["id"]), []), fecha) if entry else None
+        if price is not None and price[0] > 0:
+            continue
+        key = normalize_codigo(r.get("codigo")) or str(old["id"])
+        found.setdefault(key, {"codigo": r.get("codigo") or old.get("codigo"),
+                               "descripcion": r.get("descripcion") or old.get("descripcion") or "",
+                               "catalogo": old.get("catalogo")})
+    return list(found.values())
+
+
+def build_price_lookup(db, org_id: str, fecha: date) -> dict:
+    """{"price_for", "problemas", "idx"} for the org's catalogs at ``fecha``.
+
+    price_for(resource) returns (precio, fecha_precio, entry_id) or None, and records
+    resources without a price in ``problemas`` (list of dicts). With an oficial
+    catalog only its entries count (see load_catalog_index): a resource linked to
+    a reference entry is looked up again by code (and ``discarded_prices`` says
+    which ones cannot be repriced at all).
+    """
+    idx = load_catalog_index(db, org_id)
+    by_id, by_codigo, history = idx["by_id"], idx["by_codigo"], idx["history"]
 
     problemas: list[dict] = []
 
@@ -273,4 +345,10 @@ def load_price_lookup(db, org_id: str, fecha: date):
             return None
         return found[0], found[1], str(entry["id"])
 
-    return price_for, problemas
+    return {"price_for": price_for, "problemas": problemas, "idx": idx}
+
+
+def load_price_lookup(db, org_id: str, fecha: date):
+    """(price_for, problemas): see build_price_lookup."""
+    lookup = build_price_lookup(db, org_id, fecha)
+    return lookup["price_for"], lookup["problemas"]
