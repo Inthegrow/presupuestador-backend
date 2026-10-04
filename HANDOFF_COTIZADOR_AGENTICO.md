@@ -105,6 +105,15 @@ Decisión de Carlos: usar **la misma estructura multiempresa de SOLÉ**, no inve
    decidir si las recetas del Maestro o las de Sol son las buenas. Idea para la Etapa B: cuando el Excel
    trae un precio en la hoja de detalle y el catálogo no lo tiene, **proponerlo** ("Sol usó 200.000, ¿lo
    guardo?") en vez de pedirlo en blanco.
+0c. **Fallas de UX vistas en producción el 03/10 (pantalla real con Ginkgo), para arreglar primero:**
+   (1) el panel "Precios para corregir" está al final de la página, lejos de las tarjetas; tiene que estar
+   a mano. (2) "Guardar" no acepta $0, y hay materiales que legítimamente van en $0 o "no lo cotizo".
+   (3) La casilla "Cargar igual" aparece solo cuando no quedan preguntas abiertas, y nada lo explica.
+   (4) El cuadro de precio dice "Precio sin IVA por u"; mostrar la unidad en palabras. (5) La pregunta
+   de m³ de cascote por m² se puede responder sola con el espesor que dice el nombre del trabajo
+   (8 cm = 0,08). (6) La receta propuesta para "membrana líquida" es pintura de paredes; una
+   coincidencia floja tiene que mostrarse como duda, no como propuesta. (7) Proponer los precios que
+   Sol escribió en las hojas de detalle del Excel en vez de pedirlos en blanco.
 1. Migraciones **009** y **010** ya corridas en Supabase (verificado 03/10). PRs #20, #21 y #23 mergeados.
    El login (PR #22) está mergeado pero **no exige clave todavía**: ver "Antes de todo".
 2. Cargar en la app las recetas (Fase 3) y los catálogos (Fase 1) del Maestro actual, si aún no están.
@@ -172,7 +181,8 @@ Decisión de Carlos: usar **la misma estructura multiempresa de SOLÉ**, no inve
 
 ## 8. Primer mensaje sugerido para el próximo chat
 
-> Leé `HANDOFF_COTIZADOR_AGENTICO.md` y `DISENO_CARGAR_OBRA.md` antes de tocar nada. Estado: PRs #20, #21,
+> Leé `HANDOFF_COTIZADOR_AGENTICO.md` y `DISENO_CARGAR_OBRA.md` antes de tocar nada. Empezá por las siete fallas
+> de UX del punto 0c de la sección 5: se vieron en producción con el Excel de Ginkgo. Estado: PRs #20, #21,
 > #22 y #23 mergeados; migraciones 009 y 010 corridas; Render desplegado a mano (Auto-Deploy no anda).
 > Ginkgo en producción da 85 grupos, 10 rojos y 14 códigos sin precio (sección 5, punto 0b, dice cómo los
 > resolvió Sol). Yo voy a hacer el rol de Sol varias veces antes de dársela a ella.
