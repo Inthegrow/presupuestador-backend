@@ -15,8 +15,8 @@ de UX y entra a este archivo (sección 5, punto 0c) antes de programarse.
 |---|---|---|---|
 | 1 | Mergear el PR #26 (handoff con las fallas de UX) | Carlos | ✅ 04/10 |
 | 2 | Render → Manual Deploy del PR #25. En la app, Catálogos → marcar los cuatro del Maestro como oficiales | Carlos | pendiente de confirmar |
-| 3 | PR #27 (login con SOLÉ): Codex audita → corregir → mergear → Manual Deploy. La app sigue abierta hasta el paso 5 | chat + Carlos | en auditoría |
-| 4 | Las fallas de UX del punto 0c, un solo PR, probado con el Excel de Ginkgo | chat | después del #27 |
+| 3 | PR #27 (login con SOLÉ): Codex audita → corregir → mergear → Manual Deploy. La app sigue abierta hasta el paso 5 | chat + Carlos | ✅ 04/10 (mergeado; Manual Deploy pendiente de confirmar) |
+| 4 | Las fallas de UX del punto 0c, un solo PR, probado con el Excel de Ginkgo (`PLAN_UX_CARGAR_OBRA.md`) | chat | PR #28 en auditoría |
 | 5 | Encender el login: SQL en DATA y en SOLÉ, invitaciones, `VITE_AUTH_ENABLED=true`, borrar `DEMO_ORG_ID` (sección 5 de `PLAN_LOGIN_SOLE.md`) | Carlos guiado por el chat | después del 4 |
 | 6 | Primera carga real de Ginkgo con Sol | Sol + Carlos | después del 5 |
 | 7 | Etapa B: estado de cada precio y frase de confianza | chat | después del 6 |
@@ -156,7 +156,9 @@ abierta (modo demo), con el usuario demo como admin.
    no se entienden solos ("DE CASCOTE", "GRUESO INTERIOR", "CIELORRASO", "TABIQUES"): en la frase de la
    conversión queda 'Cada m² lleva 0,1 m³ de "De cascote"'. Renombrarlas ("Contrapiso de cascote") es
    un cambio de datos, no de código.
-0c. **Fallas de UX vistas en producción el 03/10 (pantalla real con Ginkgo), pendientes; el PR #25 ya resolvió la de proponer precios):**
+0c. **Fallas de UX vistas en producción el 03/10 (pantalla real con Ginkgo). El PR #25 resolvió la de proponer
+   precios; el PR #28 resuelve las seis de abajo más el aviso del título del Excel (`PLAN_UX_CARGAR_OBRA.md`).
+   Con eso Ginkgo pasa de 10 a 9 rojos al abrir, y "Va en $0" permite cerrar los perfiles que Sol también tiene en $0:**
    (1) el panel "Precios para corregir" está al final de la página, lejos de las tarjetas; tiene que estar
    a mano. (2) "Guardar" no acepta $0, y hay materiales que legítimamente van en $0 o "no lo cotizo".
    (3) La casilla "Cargar igual" aparece solo cuando no quedan preguntas abiertas, y nada lo explica.

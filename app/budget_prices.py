@@ -147,6 +147,19 @@ def pick_price(entry: dict, history: list[dict], fecha: date) -> tuple[float, st
     return precio, (f.isoformat() if f else None)
 
 
+def is_price(found: tuple[float, str | None] | None) -> bool:
+    """Whether a pick_price result is a price the app can use.
+
+    A price > 0 always counts. A 0 counts only when it has a date: Sol said "va en $0"
+    on that day (some materials really go at $0). An undated 0 is "sin precio": that is
+    how the old Maestro left the prices nobody had loaded.
+    """
+    if found is None:
+        return False
+    precio, fecha = found
+    return precio > 0 or (precio == 0 and fecha is not None)
+
+
 def _dated(entry: dict) -> date | None:
     try:
         return parse_fecha(entry.get("fecha_precio"))
@@ -200,7 +213,7 @@ def find_entry(
 
     def rank(e: dict) -> tuple:
         found = pick_price(e, hist.get(str(e.get("id")), []), at)
-        vigente = found is not None and found[0] > 0
+        vigente = is_price(found)
         fecha_vigente = parse_fecha(found[1]) if vigente and found[1] else None
         # An undated value is "in force" but unmaintained: a maintained (dated) entry
         # outranks it even when its price is still pending or not yet in force.
@@ -307,7 +320,7 @@ def discarded_prices(resources: list[dict], idx: dict, fecha: date) -> list[dict
         entry, _ = find_entry({"codigo": r.get("codigo"), "tipo": r.get("tipo")}, idx["by_id"], idx["by_codigo"],
                               fecha=fecha, history=idx["history"])
         price = pick_price(entry, idx["history"].get(str(entry["id"]), []), fecha) if entry else None
-        if price is not None and price[0] > 0:
+        if is_price(price):
             continue
         key = normalize_codigo(r.get("codigo")) or str(old["id"])
         found.setdefault(key, {"codigo": r.get("codigo") or old.get("codigo"),
@@ -320,7 +333,8 @@ def build_price_lookup(db, org_id: str, fecha: date) -> dict:
     """{"price_for", "problemas", "idx"} for the org's catalogs at ``fecha``.
 
     price_for(resource) returns (precio, fecha_precio, entry_id) or None, and records
-    resources without a price in ``problemas`` (list of dicts). With an oficial
+    resources without a price in ``problemas`` (list of dicts). A 0 is a price only
+    with a date (is_price): an undated 0 keeps the resource's old price and is reported. With an oficial
     catalog only its entries count (see load_catalog_index): a resource linked to
     a reference entry is looked up again by code (and ``discarded_prices`` says
     which ones cannot be repriced at all).
@@ -333,7 +347,7 @@ def build_price_lookup(db, org_id: str, fecha: date) -> dict:
     def price_for(resource: dict) -> tuple[float, str | None, str] | None:
         entry, problem = find_entry(resource, by_id, by_codigo, fecha=fecha, history=history)
         found = pick_price(entry, history.get(str(entry["id"]), []), fecha) if entry else None
-        if found is None:
+        if not is_price(found):
             if entry is not None:
                 problem = "sin_precio"
             if problem:

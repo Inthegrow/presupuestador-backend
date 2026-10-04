@@ -15,7 +15,7 @@ import unicodedata
 
 from datetime import date, datetime
 
-from app.budget_prices import find_entry, pick_price
+from app.budget_prices import find_entry, is_price, pick_price
 from app.catalog_prices import normalize_codigo
 from app.formulas import FormulaError
 from app.maestro_import import SHEET_TIPOS, parse_sheet, parse_workbook
@@ -40,6 +40,9 @@ COL_NETO_TOTAL = 26  # Z: total neto
 #               Más de una = ítem compuesto (se suman los recursos).
 #   cliente:    códigos de recursos que no se cobran ("no incluye el porcelanato").
 #   nota:       lo que hay que revisar con Emilia y Sol.
+#   espesor:    True = el factor de la plantilla que viene con factor None es el espesor
+#               en metros que dice el nombre ("e=8cm" → 0,08 m³ por m², espesor_m_from);
+#               si el nombre no lo dice, "factor_defecto".
 MAPEO: list[dict] = [
     {"patron": r"^BASES AISLADAS", "plantillas": [("4.1.3", 1.0)], "obra": "u",
      "nota": "1 m³ por base: en la solapa 3.1-1 de la obra son 35 m³ para 35 bases, llenadas junto con los troncos."},
@@ -64,14 +67,13 @@ MAPEO: list[dict] = [
      "nota": "La receta de grueso interior no lleva hidrófugo."},
     {"patron": r"^REVOQUE INTERIOR$", "plantillas": [("5.5.4", 1.0)],
      "nota": "¿Lleva también fino interior (5.5.2)?"},
-    {"patron": r"^TELGOPOR 50 ?MM \+ CONTRAPISO.*E ?[:=] ?4 ?CM", "plantillas": [("8.3", 1.0), ("5.2.3", 0.04)], "obra": "m2",
-     "nota": "Compuesto: placas EPS (8.3) + contrapiso de cascote (5.2.3) de 4 cm."},
-    {"patron": r"^TELGOPOR 50 ?MM \+ CONTRAPISO", "plantillas": [("8.3", 1.0), ("5.2.3", 0.08)], "obra": "m2",
-     "nota": "Compuesto: placas EPS (8.3) + contrapiso de cascote (5.2.3) de 8 cm."},
+    {"patron": r"^TELGOPOR 50 ?MM \+ CONTRAPISO", "plantillas": [("8.3", 1.0), ("5.2.3", None)], "obra": "m2",
+     "espesor": True, "factor_defecto": 0.08,
+     "nota": "Compuesto: placas EPS (8.3) + contrapiso de cascote (5.2.3)."},
     {"patron": r"^CONTRAPISO/ ?CARPETA EN BALCONES", "plantillas": [("5.4.1", 1.0)],
      "nota": "En el Excel de la obra lleva el precio de la carpeta. ¿Va con hidrófugo (5.4.2)?"},
-    {"patron": r"^CONTRAPISO", "plantillas": [("5.2.3", 0.10)], "obra": "m2",
-     "nota": "Contrapiso de cascote de 10 cm: 0,10 m³ por m²."},
+    {"patron": r"^CONTRAPISO", "plantillas": [("5.2.3", None)], "obra": "m2",
+     "espesor": True, "factor_defecto": 0.10},
     {"patron": r"^CARPETA", "plantillas": [("5.4.1", 1.0)],
      "nota": "La receta no tiene espesor: es la misma para 3 y 4 cm."},
     {"patron": r"REVESTIMIENTOS EN PISOS", "plantillas": [("7.1.1", 1.0)], "cliente": ["RP-PORC"],
@@ -211,6 +213,22 @@ def altura_from(descripcion: str) -> float | None:
     """Wall height from the description: 'h 3m' → 3, 'h 4,4m' → 4.4 ('h 0.2m/1.8m' → None)."""
     m = re.search(r"\bH\s*(\d+(?:[.,]\d+)?)\s*M\b(?!\s*/)", plain(descripcion))
     return float(m.group(1).replace(",", ".")) if m else None
+
+
+_ESPESOR_RE = re.compile(r"\b(?:E|ESP|ESPESOR)\s*[.:=]*\s*(\d+(?:[.,]\d+)?)\s*CM\b")
+
+
+def espesor_m_from(descripcion: str) -> float | None:
+    """'CONTRAPISO e=8cm' → 0.08; 'ESP.=10cm' → 0.10; 'e: 4cm' → 0.04; 'E 12 CM' → 0.12. None si no hay.
+
+    Only centimetres after E/ESP/ESPESOR: in "TELGOPOR 50 mm + CONTRAPISO e=4cm" the 50 mm
+    is the insulation board, not the thickness of the contrapiso.
+    """
+    m = _ESPESOR_RE.search(plain(descripcion))
+    if not m:
+        return None
+    cm = float(m.group(1).replace(",", "."))
+    return round(cm / 100, 4) if cm > 0 else None
 
 
 # ── Lectura del Excel de la obra ─────────────────────────────────────────────
@@ -577,6 +595,12 @@ def rule_for(fila: dict, templates: dict[str, dict], asignaciones: dict | None =
     When the units differ, the conversion must be explicit: a hand-chosen factor, or the
     one of an automatic rule written for that item unit ("obra"). If it is missing, the
     rule comes back with "falta_factor" (the item cannot be loaded until it is given).
+
+    A rule with "espesor" takes the factor of its None plantilla from the thickness in the
+    description (espesor_m_from), or "factor_defecto" when the description does not say it.
+    "origen_factor" says, per plantilla, where its factor came from: "nombre" (thickness in
+    the description), "supuesto" (the rule's default thickness), "regla" (a fixed factor of
+    the rule) or None (a hand-chosen pair, or a missing factor).
     """
     auto = match_recipe(fila["descripcion"])
     elegida = (asignaciones or {}).get(task_key(fila["descripcion"], fila.get("unidad")))
@@ -601,10 +625,15 @@ def rule_for(fila: dict, templates: dict[str, dict], asignaciones: dict | None =
         same = auto and [c for c, _ in auto["plantillas"]] == [c for c, _, _ in pares]
         rule = dict(auto) if same else {"patron": None, "nota": "Receta elegida a mano al cargar la obra."}
 
-    plantillas, falta = [], []
+    plantillas, falta, origenes = [], [], []
     for codigo, factor, automatica in pares:
         receta = unit_key((templates.get(codigo) or {}).get("unidad"))
+        origen = None
         if automatica:
+            origen = "regla"
+            if factor is None and auto.get("espesor"):
+                espesor = espesor_m_from(fila["descripcion"])
+                factor, origen = (espesor, "nombre") if espesor else (auto.get("factor_defecto"), "supuesto")
             # A rule with "obra" was written for that item unit (its factors convert from it);
             # without it, the rule assumes the item already comes in the recipe's unit
             esperada = unit_key(auto.get("obra")) if auto.get("obra") else receta
@@ -614,9 +643,12 @@ def rule_for(fila: dict, templates: dict[str, dict], asignaciones: dict | None =
             factor = 1.0
         if factor is None:
             falta.append(codigo)
+            origen = None
         plantillas.append((codigo, factor))
+        origenes.append(origen)
     rule["plantillas"] = plantillas
     rule["falta_factor"] = falta
+    rule["origen_factor"] = origenes
     return rule
 
 
@@ -677,7 +709,8 @@ def price_problems(plan: dict, entries: list[dict], fecha: date) -> list[dict]:
 
     Same rule as the SQL and as Fase 4 (find_entry + pick_price). Only the
     current price of each entry is known here (no history): the SQL, which
-    reads the real catalog and its history, has the last word.
+    reads the real catalog and its history, has the last word. A 0 is a price
+    only with a date (budget_prices.is_price).
     Returns [{codigo, motivo, recursos, items: [codigos]}], sorted by code.
     """
     by_id = {str(i): {**e, "id": str(i)} for i, e in enumerate(entries)}
@@ -693,8 +726,7 @@ def price_problems(plan: dict, entries: list[dict], fecha: date) -> list[dict]:
                 continue
             entry, problem = find_entry({"codigo": r["codigo"], "tipo": r["tipo"]}, by_id, by_codigo, fecha=fecha)
             if entry is not None:
-                price = pick_price(entry, [], fecha)
-                if price is None or price[0] <= 0:
+                if not is_price(pick_price(entry, [], fecha)):
                     problem = "sin precio"
             elif problem is None:
                 problem = "sin código"

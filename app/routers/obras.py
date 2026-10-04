@@ -6,8 +6,9 @@
    Devuelve cada trabajo (misma descripción + unidad) con un semáforo: verde
    (listo), amarillo (confirmar algo) o rojo (no se puede cargar así), y los
    precios que faltan. La receta de cada trabajo sale, en este orden, de lo que
-   se eligió en la pantalla, de lo que se eligió en otra obra (memoria), de la
-   regla por descripción (MAPEO) o de una sugerencia por parecido. No escribe nada.
+   se eligió en la pantalla, de lo que se eligió en otra obra (memoria) o de la
+   regla por descripción (MAPEO). Las sugerencias por parecido nunca son la receta:
+   se ofrecen para elegir ("Quizás sea"). No escribe nada.
 2. Las correcciones de precios se hacen en los catálogos (endpoints de /catalogs):
    así quedan guardadas en el Maestro de la app para las próximas obras.
 3. POST /obras/cargar: arma el presupuesto (rubros, pisos, ítems y recursos) y lo
@@ -34,6 +35,7 @@ from app.budget_prices import (
     fetch_all,
     find_entry,
     initial_indirects,
+    is_price,
     load_catalog_index,
     load_org_config,
     pick_price,
@@ -49,6 +51,7 @@ from app.obra_import import (
     item_notes,
     match_recipe,
     parse_obra,
+    plain,
     rule_for,
     suggest_recipes,
     task_key,
@@ -62,7 +65,6 @@ router = APIRouter()
 CHUNK = 200
 MAX_BYTES = 15 * 1024 * 1024
 MEMORY = "obra_recetas_memoria"
-SUGGEST_MIN = 0.6  # a suggestion this good is proposed as the recipe (to confirm)
 
 
 # ── Lectura ──────────────────────────────────────────────────────────────────
@@ -173,7 +175,8 @@ class PriceBook:
         if entry is None:
             return None, None, None, "duplicado" if problem == "duplicado" else "no_esta"
         found = pick_price(entry, self.history.get(str(entry["id"]), []), self.fecha)
-        if found is None or found[0] <= 0:
+        if found is None or not is_price(found):
+            # A dated 0 is a price ("Va en $0"); an undated 0 is a price nobody loaded
             return entry, None, None, "sin_precio"
         return entry, found[0], found[1], None
 
@@ -262,49 +265,62 @@ def _codes(pares: list) -> list[str]:
     return [str(p[0]) for p in pares or []]
 
 
-def _proposal(fila: dict, templates: dict[str, dict], memoria: dict[str, dict],
-              sugerencias: list[tuple[str, float, str]]) -> dict | None:
-    """Recipe of a task before the screen's choice: memoria > regla (MAPEO) > sugerencia."""
+def _proposal(fila: dict, templates: dict[str, dict], memoria: dict[str, dict]) -> dict | None:
+    """Recipe of a task before the screen's choice: memoria > regla (MAPEO).
+
+    A suggestion by similar words is never the recipe (a weak match like "membrana
+    líquida" → "pintura en paredes" would bring its prices): it is only offered.
+    "origenes" says, per pair, where its conversion came from (see rule_for).
+    """
     key = task_key(fila["descripcion"], fila.get("unidad"))
     if key in memoria:
-        return {"origen": "memoria", "pares": memoria[key]["plantillas"], "porque": PORQUE["memoria"]}
+        pares = memoria[key]["plantillas"]
+        return {"origen": "memoria", "pares": pares, "porque": PORQUE["memoria"],
+                "origenes": ["memoria" if p[1] is not None else None for p in pares]}
     if match_recipe(fila["descripcion"]):
         rule = rule_for(fila, templates) or {}
         return {"origen": "regla", "pares": [list(p) for p in rule.get("plantillas", [])],
-                "porque": PORQUE["regla"]}
-    if sugerencias:
-        codigo, score, porque = sugerencias[0]
-        receta = unit_key(templates[codigo].get("unidad"))
-        obra = unit_key(fila.get("unidad"))
-        # A suggestion in another unit would need a conversion nobody gave: it stays a suggestion
-        if score >= SUGGEST_MIN and (not receta or not obra or receta == obra):
-            return {"origen": "sugerida", "pares": [[codigo, 1.0]], "porque": porque}
+                "porque": PORQUE["regla"], "origenes": list(rule.get("origen_factor") or [])}
     return None
 
 
-def _decide(fila: dict, templates: dict[str, dict], memoria: dict[str, dict],
-            elegida: dict | None, sugerencias: list) -> dict:
-    """Origin, recipe pairs for build_plan (None = the automatic rule) and whether it is confirmed."""
-    base = _proposal(fila, templates, memoria, sugerencias)
+def _same_factor(a: float | None, b: float | None) -> bool:
+    return a is not None and b is not None and abs(float(a) - float(b)) < 1e-9
+
+
+def _decide(fila: dict, templates: dict[str, dict], memoria: dict[str, dict], elegida: dict | None) -> dict:
+    """Origin, recipe pairs for build_plan (None = the automatic rule) and whether it is confirmed.
+
+    "origenes": per pair, where its conversion came from: "nombre", "supuesto", "regla",
+    "memoria", "mano" (Sol wrote it) or None (missing). None as a whole = the rule's own.
+    """
+    base = _proposal(fila, templates, memoria)
     if elegida is None:
         if base is None:
-            return {"origen": None, "pares": None, "porque": None, "confirmada": False}
-        pares = None if base["origen"] == "regla" else base["pares"]
-        return {"origen": base["origen"], "pares": pares, "porque": base["porque"],
-                "confirmada": base["origen"] == "memoria"}
+            return {"origen": None, "pares": None, "porque": None, "confirmada": False, "origenes": None}
+        regla = base["origen"] == "regla"
+        return {"origen": base["origen"], "pares": None if regla else base["pares"], "porque": base["porque"],
+                "confirmada": base["origen"] == "memoria", "origenes": None if regla else base["origenes"]}
 
     pares = [list(p) for p in elegida["plantillas"]]
     same = base is not None and _codes(base["pares"]) == _codes(pares)
+    origenes: list[str | None] = []
     if same:
         # Confirming the proposal: the conversions already known are kept unless Sol wrote one
-        for par, known in zip(pares, base["pares"]):
+        for i, (par, known) in enumerate(zip(pares, base["pares"])):
+            conocido = base["origenes"][i] if i < len(base["origenes"]) else None
             if par[1] is None:
                 par[1] = known[1]
+                origenes.append(conocido if known[1] is not None else None)
+            else:
+                origenes.append(conocido if _same_factor(par[1], known[1]) else "mano")
+    else:
+        origenes = ["mano" if p[1] is not None else None for p in pares]
     origen = base["origen"] if same else ("manual" if pares else None)
     if not pares and base is None:
         origen = None
     return {"origen": origen, "pares": pares, "porque": base["porque"] if same else PORQUE["manual"],
-            "confirmada": elegida.get("confirmada") or not same or origen == "memoria"}
+            "confirmada": elegida.get("confirmada") or not same or origen == "memoria", "origenes": origenes}
 
 
 def _numero(value: float) -> str:
@@ -313,11 +329,18 @@ def _numero(value: float) -> str:
     return text.replace(",", "X").replace(".", ",").replace("X", ".")
 
 
-def _pregunta(fila: dict, partes: list[dict]) -> dict | None:
+# Where a known conversion came from (rule_for / _decide) → pregunta.origen_valor
+ORIGEN_VALOR = {"nombre": "nombre", "supuesto": "regla", "regla": "regla", "memoria": "memoria", "mano": "mano"}
+
+
+def _pregunta(fila: dict, partes: list[dict], origenes: list | None = None) -> dict | None:
     """The conversion to ask when a recipe comes in another unit than the obra's.
 
     When the value is already known (rule, memory or Sol's answer), ``dato`` says it
     as a fact ('Cada m² lleva 0,1 m³ de "Contrapiso de cascote"'): nothing to ask.
+    A thickness says where it came from: ' (por los 8 cm del nombre)' or ' (supuse 10 cm)'.
+    ``origenes`` (aligned with ``partes``) gives "origen_valor": nombre, regla, memoria,
+    mano, or None while the value is missing.
     """
     obra = unit_key(fila.get("unidad"))
     distintas = [p for p in partes if p["nombre"] is not None and unit_key(p["unidad"]) and obra
@@ -325,16 +348,23 @@ def _pregunta(fila: dict, partes: list[dict]) -> dict | None:
     if not distintas:
         return None
     parte = next((p for p in distintas if p["factor"] is None), distintas[0])
+    i = partes.index(parte)
+    origen = (origenes[i] if origenes and i < len(origenes) else None) if parte["factor"] is not None else None
     dato = None
     if parte["factor"] is not None:
         dato = (f"Cada {_pretty_unit(fila.get('unidad'))} lleva {_numero(parte['factor'])} "
                 f'{_pretty_unit(parte["unidad"])} de "{_human(parte["nombre"])}"')
+        cm = _numero(round(parte["factor"] * 100, 2))
+        if origen == "nombre":
+            dato += f" (por los {cm} cm del nombre)"
+        elif origen == "supuesto":
+            dato += f" (supuse {cm} cm)"
     return {
         "tipo": "cantidad_por_unidad",
         "texto": f'¿Cuántos {_pretty_unit(parte["unidad"])} de "{_human(parte["nombre"])}" '
                  f"lleva cada {_pretty_unit(fila.get('unidad'))} de este trabajo?",
         "receta": parte["codigo"], "unidad_receta": parte["unidad"], "unidad_obra": fila.get("unidad"),
-        "valor": parte["factor"], "dato": dato,
+        "valor": parte["factor"], "dato": dato, "origen_valor": ORIGEN_VALOR.get(origen) if origen else None,
     }
 
 
@@ -408,7 +438,7 @@ def analyze(parsed: dict, templates: dict[str, dict], book: PriceBook, asignacio
         first = fs[0]
         sugeridas[key] = [] if (key in memoria or match_recipe(first["descripcion"])) \
             else suggest_recipes(first["descripcion"], templates)
-        d = _decide(first, templates, memoria, asignaciones.get(key), sugeridas[key])
+        d = _decide(first, templates, memoria, asignaciones.get(key))
         decisiones[key] = d
         if d["pares"] is not None:
             efectivas[key] = {"plantillas": d["pares"]}
@@ -442,7 +472,8 @@ def analyze(parsed: dict, templates: dict[str, dict], book: PriceBook, asignacio
                 "origen": d["origen"] or "manual", "porque": d["porque"] or PORQUE["manual"],
             }
         inexistente = any(p["nombre"] is None and p["codigo"] not in templates for p in partes)
-        pregunta = _pregunta(first, partes) if receta else None
+        origenes = d["origenes"] if d["pares"] is not None else (rule or {}).get("origen_factor")
+        pregunta = _pregunta(first, partes, origenes) if receta else None
         falta_conversion = bool(rule and rule["falta_factor"]) and not inexistente
         avisos = _avisos(rule)
         faltantes = sorted({c for i in its for c in faltan_por_item.get(i["codigo"], ())},
@@ -452,21 +483,18 @@ def analyze(parsed: dict, templates: dict[str, dict], book: PriceBook, asignacio
                   else "precio" if faltantes else None)
         if motivo:
             estado = "rojo"
-        elif not d["confirmada"] and (
-            receta is None or receta["origen"] == "sugerida" or any(_asks(a) for a in avisos)
-        ):
+        elif not d["confirmada"] and (receta is None or any(_asks(a) for a in avisos)):
             estado = "amarillo"
         else:
             estado = "verde"
 
         sugerencias = []
-        if receta is None or receta["origen"] == "sugerida":
-            actual = receta["codigo"] if receta else None
+        if receta is None:
             pool = sugeridas[key] or suggest_recipes(first["descripcion"], templates)
             sugerencias = [
                 {"codigo": c, "nombre": templates[c].get("nombre"), "unidad": templates[c].get("unidad"),
                  "porque": porque}
-                for c, _, porque in pool if c != actual
+                for c, _, porque in pool
             ][:3]
 
         tareas.append({
@@ -506,6 +534,29 @@ def analyze(parsed: dict, templates: dict[str, dict], book: PriceBook, asignacio
     }
 
 
+# Words too common in obra titles and file names to tell two obras apart
+_TITULO_GENERICAS = {"EDIFICIO", "OBRA", "COMPUTO", "PRESUPUESTO", "CASA", "TORRE"}
+
+
+def _titulo_palabras(text: object) -> set[str]:
+    return {w for w in re.findall(r"[A-Z]+", plain(text)) if len(w) >= 4 and w not in _TITULO_GENERICAS}
+
+
+def titulo_dudoso(titulo: object, archivo: object) -> bool:
+    """True when the Excel's title (cell A1) and the file name share no word: maybe another obra.
+
+    Words of 4 letters or more, without accents, leaving out the generic ones (EDIFICIO,
+    OBRA, COMPUTO, PRESUPUESTO, CASA, TORRE). Ginkgo: title "EDIFICIO LAS HERAS", file
+    "EDIFICIO GINKGO_Computo y Presupuesto_V2.xlsx" → True. When the file name or the
+    title has no such word ("obra.xlsx"), there is nothing to compare: False.
+    """
+    nombre = re.sub(r"\.[A-Za-z0-9]+$", "", str(archivo or "").replace("\\", "/").rsplit("/", 1)[-1])
+    del_titulo, del_archivo = _titulo_palabras(titulo), _titulo_palabras(nombre)
+    if not del_titulo or not del_archivo:
+        return False
+    return not (del_titulo & del_archivo)
+
+
 def _public(result: dict) -> dict:
     return {k: v for k, v in result.items() if not k.startswith("_")}
 
@@ -525,7 +576,8 @@ async def analizar_obra(
         raise HTTPException(409, "No hay recetas cargadas en la app: primero hay que importar el Maestro")
     result = analyze(parse_obra(wb), templates, PriceBook(db, org_id, today()), _asignaciones(asignaciones),
                      _memoria(db, org_id), excel_prices(wb))
-    return {"archivo": file.filename, **_public(result)}
+    return {"archivo": file.filename, "titulo_dudoso": titulo_dudoso(result["titulo"], file.filename),
+            **_public(result)}
 
 
 # ── Carga ────────────────────────────────────────────────────────────────────
@@ -578,11 +630,12 @@ def _resource_rows(item: dict, item_id: str, org_id: str, templates: dict[str, d
             row["desperdicio_pct"], row["desperdicio_origen"] = pct, origen
         elif row["tipo"] != "mano_obra":
             row["desperdicio_origen"] = ORIGEN_RECURSO
-        entry, precio, fecha, _ = book.price(row)
+        entry, precio, fecha, problema = book.price(row)
+        con_precio = entry is not None and problema is None  # a dated $0 is a price too
         row.update({
             "item_id": item_id, "org_id": org_id, "precio_unitario": precio or 0,
-            "catalog_entry_id": entry["id"] if entry and precio else None,
-            "precio_fecha": fecha if precio else None,
+            "catalog_entry_id": entry["id"] if con_precio else None,
+            "precio_fecha": fecha if con_precio else None,
         })
         calc_resource_subtotal(row)
         rows.append(row)

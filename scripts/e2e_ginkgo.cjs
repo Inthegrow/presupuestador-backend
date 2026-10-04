@@ -61,10 +61,33 @@ async function subir(page) {
     console.log('campo visible tras cambiar:', await misma.locator('input[type=number]').count())
   }
 
-  // 2c. Panel de precios con las propuestas del Excel
-  await page.getByText('Precios para corregir').click()
+  // 2b'. Fallas de UX (PLAN_UX_CARGAR_OBRA): aviso del título, espesor del nombre, frase de estado, membrana amarilla
+  console.log('aviso título dudoso:', texto.includes("El Excel dice 'EDIFICIO LAS HERAS'"))
+  console.log('espesor del nombre:', texto.includes('(por los 8 cm del nombre)'), texto.includes('(por los 4 cm del nombre)'))
+  console.log('frase de estado:', texto.match(/Te faltan[^\n]*|Faltan? \d+ precios?[^\n]*/)?.[0])
+  const membrana = page.locator('div.border-l-4').filter({ hasText: 'MEMBRANA LIQUIDA' }).first()
+  console.log('membrana líquida:', (await membrana.innerText()).split('\n').filter((l) => /Para confirmar|Falta resolver|Sin receta|Quizás/.test(l)).join(' | '))
+
+  // 2c. Panel de precios con las propuestas del Excel (ahora arriba de las tarjetas, abierto si hay rojos)
+  const guardarVisible = await page.getByRole('button', { name: /Guardar los \d+ precios que trae el Excel/ }).isVisible().catch(() => false)
+  if (!guardarVisible) { await page.getByText('Precios para corregir').click(); await page.waitForTimeout(300) }
+  const panelBox = await page.getByText('Precios para corregir').boundingBox()
+  const primeraTarjeta = await page.locator('div.border-l-4').first().boundingBox()
+  console.log('panel arriba de las tarjetas:', panelBox && primeraTarjeta && panelBox.y < primeraTarjeta.y)
+  await page.evaluate(() => { const m = document.querySelector('main'); if (m) m.scrollTo(0, 0); window.scrollTo(0, 0) })
   await page.waitForTimeout(300)
+  await page.screenshot({ path: path.join(shots, '05a_panel_arriba.png') })
   await shot(page, '05_precios_propuestos')
+
+  // 2c'. "Va en $0" para un perfil que Sol también tiene en $0
+  const filaY = page.locator('tr').filter({ hasText: 'Y-M4X1' }).first()
+  await filaY.getByRole('button', { name: 'Va en $0' }).click()
+  // La fila desaparece cuando el análisis vuelve sin ese código
+  await filaY.waitFor({ state: 'detached', timeout: 120000 })
+  await page.waitForFunction(() => !document.body.innerText.includes('Revisando'), null, { timeout: 120000 })
+  const t1 = await page.locator('body').innerText()
+  console.log('Y-M4X1 después de "Va en $0":', t1.includes('Y-M4X1') ? 'sigue en pantalla (mal)' : 'ya no está (bien)')
+  console.log('frase de estado:', t1.match(/Te faltan[^\n]*|Faltan? \d+ precios?[^\n]*/)?.[0])
   const guardarTodos = page.getByRole('button', { name: /Guardar los \d+ precios que trae el Excel/ })
   console.log('guardar todos:', await guardarTodos.count(), await guardarTodos.count() ? await guardarTodos.first().innerText() : '')
   if (await guardarTodos.count()) {

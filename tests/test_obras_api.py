@@ -15,6 +15,7 @@ os.environ.setdefault("SUPABASE_KEY", "test-key")
 import pytest
 from fastapi.testclient import TestClient
 
+from app.budget_prices import today
 from app.main import create_app
 from tests.test_obra_import import TEMPLATES, _workbook
 from tests.test_recipes_api import MOCK_USER, ORG, FakeDB
@@ -46,8 +47,9 @@ def _tables(**over) -> dict:
         "indirect_config": [{"id": "cfg", "org_id": ORG, "desperdicio_pct": 5}],
         "price_catalogs": [{"id": "cat1", "org_id": ORG, "name": "Maestro TERRAC - Materiales"}],
         "catalog_entries": [
+            # EPS-500 is an old Maestro zero: undated, so "sin precio" (a dated 0 would be a price)
             {"id": f"e-{c}", "catalog_id": "cat1", "org_id": ORG, "codigo": c, "tipo": t,
-             "precio_sin_iva": p, "fecha_precio": "2026-01-01"} for c, t, p in entries
+             "precio_sin_iva": p, "fecha_precio": None if c == "EPS-500" else "2026-01-01"} for c, t, p in entries
         ],
         "catalog_price_history": [],
     }
@@ -93,6 +95,25 @@ TENSORES = "TENSORES 20 CM X 40 CM. | m"
 OBRADOR = "OBRADOR | gl"
 
 
+HALL = "CONTRAPISO EN HALL + RAMPAS. ESP.=10CM. | m2"
+CONTRAPISO = "CONTRAPISO | m2"
+BALCONES = "TELGOPOR 50 MM + CONTRAPISO/CARPETA EN AZOTEA INACCESIBLE (BALCONES) E=4CM | m2"
+
+
+def _workbook_contrapisos():
+    """The obra plus three contrapisos (Ginkgo's names): thickness in the name, or not."""
+    wb = _workbook()
+    ws = wb["01_C&P"]
+    for r, (code, desc) in enumerate([
+        ("4.3-6", "CONTRAPISO EN HALL + RAMPAS. ESP.=10cm."),
+        ("4.3-7", "CONTRAPISO"),
+        ("4.3-8", "TELGOPOR 50 mm + CONTRAPISO/CARPETA EN AZOTEA INACCESIBLE (BALCONES) e=4cm"),
+    ], start=ws.max_row + 1):
+        for col, value in ((1, code), (2, desc), (3, "m²"), (4, 10), (5, 1), (10, 1), (14, 20), (26, 30)):
+            ws.cell(r, col, value)
+    return wb
+
+
 def _fix_eps(db):
     next(e for e in db.tables["catalog_entries"] if e["codigo"] == "EPS-500")["precio_sin_iva"] = 10
 
@@ -102,9 +123,10 @@ class TestAnalizar:
         res = analizar(client)
         assert res.status_code == 200, res.text
         body = res.json()
-        assert set(body) == {"archivo", "catalogo_oficial", "titulo", "fecha_precios", "resumen", "tareas",
-                             "precios", "recetas", "correcciones_excel", "listo"}
+        assert set(body) == {"archivo", "titulo_dudoso", "catalogo_oficial", "titulo", "fecha_precios", "resumen",
+                             "tareas", "precios", "recetas", "correcciones_excel", "listo"}
         assert body["catalogo_oficial"] is False
+        assert body["titulo_dudoso"] is False  # "obra.xlsx": nothing to compare the title with
         assert body["resumen"] == {
             "rubros": 3, "pisos": 3, "trabajos": 7, "grupos": 6,
             "verdes": 3, "amarillos": 2, "rojos": 1, "total_excel": 13850.0,
@@ -126,16 +148,18 @@ class TestAnalizar:
         assert telgopor["pregunta"]["receta"] == "5.2.3"
         assert telgopor["pregunta"]["valor"] == 0.08
         assert set(telgopor["pregunta"]) == {"tipo", "texto", "receta", "unidad_receta", "unidad_obra", "valor",
-                                             "dato"}
-        # The rule already knows the conversion: shown as a fact, not as a question
-        assert telgopor["pregunta"]["dato"] == 'Cada m² lleva 0,08 m³ de "Receta 5.2.3"'
-        assert telgopor["avisos"] == ["Compuesto: placas EPS + contrapiso de cascote de 8 cm."]  # sin códigos
+                                             "dato", "origen_valor"}
+        # The thickness is in the name ("e: 8cm"): shown as a fact, saying where it came from
+        assert telgopor["pregunta"]["dato"] == 'Cada m² lleva 0,08 m³ de "Receta 5.2.3" (por los 8 cm del nombre)'
+        assert telgopor["pregunta"]["origen_valor"] == "nombre"
+        assert telgopor["avisos"] == ["Compuesto: placas EPS + contrapiso de cascote."]  # sin códigos
 
         tensores = tareas[TENSORES]
         assert tensores["estado"] == "verde"
         assert tensores["pregunta"]["texto"] == '¿Cuántos m³ de "Receta 4.1.7" lleva cada ml de este trabajo?'
         assert (tensores["pregunta"]["unidad_receta"], tensores["pregunta"]["unidad_obra"]) == ("m3", "ml")
         assert tensores["pregunta"]["dato"] == 'Cada ml lleva 0,08 m³ de "Receta 4.1.7"'
+        assert tensores["pregunta"]["origen_valor"] == "regla"
 
         assert len(body["precios"]) == 1
         for p in body["precios"]:
@@ -175,6 +199,7 @@ class TestAnalizar:
         assert (aristas["estado"], aristas["motivo_rojo"]) == ("rojo", "pregunta")
         assert aristas["pregunta"]["valor"] is None
         assert aristas["pregunta"]["dato"] is None
+        assert aristas["pregunta"]["origen_valor"] is None
         assert aristas["pregunta"]["texto"] == '¿Cuántos m² de "Receta 5.1.4" lleva cada m de este trabajo?'
         assert aristas["receta"]["origen"] == "manual"
 
@@ -183,6 +208,7 @@ class TestAnalizar:
         assert aristas["estado"] == "verde"
         assert aristas["pregunta"]["valor"] == 2.5
         assert aristas["pregunta"]["dato"] == 'Cada m lleva 2,5 m² de "Receta 5.1.4"'
+        assert aristas["pregunta"]["origen_valor"] == "mano"
         assert aristas["receta"]["partes"][0]["factor"] == 2.5
         assert aristas["receta"]["porque"] == "La elegiste vos"
 
@@ -199,18 +225,33 @@ class TestAnalizar:
         assert tareas[TENSORES]["pregunta"]["valor"] == 0.08
 
     def test_suggestion_until_confirmed(self, client, db):
+        """A suggestion by similar words is never the recipe, however good: the card stays
+        yellow without recipe (the Excel price) and offers it in "sugerencias"."""
         db.tables["item_templates"].append({"id": "tmpl-6.9", "org_id": ORG, "codigo": "6.9", "unidad": "m",
                                             "nombre": "ARISTAS DE YESO", "parametros": [], "recursos": []})
         aristas = _tareas(analizar(client).json())[ARISTAS]
-        assert aristas["estado"] == "amarillo"
-        assert aristas["receta"]["codigo"] == "6.9"
-        assert aristas["receta"]["origen"] == "sugerida"
-        assert aristas["receta"]["porque"] == "Se parece por 'aristas', 'yeso'"
-        assert all(s["codigo"] != "6.9" for s in aristas["sugerencias"])
+        assert (aristas["estado"], aristas["receta"], aristas["motivo_rojo"]) == ("amarillo", None, None)
+        assert aristas["sugerencias"][0] == {"codigo": "6.9", "nombre": "ARISTAS DE YESO", "unidad": "m",
+                                             "porque": "Se parece por 'aristas', 'yeso'"}
 
+        # Sol picks it: a recipe chosen by hand
         body = analizar(client, {ARISTAS: {"plantillas": [["6.9", 1]], "confirmada": True}}).json()
         aristas = _tareas(body)[ARISTAS]
-        assert (aristas["estado"], aristas["receta"]["origen"]) == ("verde", "sugerida")
+        assert (aristas["estado"], aristas["receta"]["origen"]) == ("verde", "manual")
+        assert aristas["receta"]["porque"] == "La elegiste vos"
+        assert aristas["sugerencias"] == []
+
+    def test_weak_suggestion_does_not_bring_its_prices(self, client, db):
+        """Ginkgo: "membrana líquida" looked like "pintura en paredes" and the card went red
+        with the paint's missing prices. Now it stays yellow, with the Excel price."""
+        db.tables["item_templates"].append({"id": "tmpl-7.4.2", "org_id": ORG, "codigo": "7.4.2", "unidad": "m",
+                                            "nombre": "ARISTAS PINTADAS", "parametros": [],
+                                            "recursos": [{"tipo": "material", "codigo": "NO-ESTA", "formula": "Q"}]})
+        body = analizar(client).json()
+        aristas = _tareas(body)[ARISTAS]
+        assert (aristas["estado"], aristas["receta"], aristas["precios_faltantes"]) == ("amarillo", None, [])
+        assert aristas["sugerencias"][0]["codigo"] == "7.4.2"
+        assert all(p["codigo"] != "NO-ESTA" for p in body["precios"])
 
     def test_memory(self, client, db):
         db.tables["obra_recetas_memoria"] = [
@@ -271,9 +312,88 @@ class TestAnalizar:
         assert lh18["precio_unitario"] == 500
         assert lh18["catalog_entry_id"] == "e-LH18"
 
+    def test_thickness_from_the_name(self, client, db):
+        """The m³ of contrapiso per m² comes from the thickness in the name; without one, the
+        rule's 10 cm, saying it was assumed."""
+        _fix_eps(db)
+        tareas = _tareas(analizar(client, wb=_workbook_contrapisos()).json())
+        hall, sin, balcon = tareas[HALL], tareas[CONTRAPISO], tareas[BALCONES]
+        assert [p["factor"] for p in hall["receta"]["partes"]] == [0.1]
+        assert hall["pregunta"]["dato"] == 'Cada m² lleva 0,1 m³ de "Receta 5.2.3" (por los 10 cm del nombre)'
+        assert hall["pregunta"]["origen_valor"] == "nombre"
+        assert sin["pregunta"]["dato"] == 'Cada m² lleva 0,1 m³ de "Receta 5.2.3" (supuse 10 cm)'
+        assert sin["pregunta"]["origen_valor"] == "regla"
+        # "TELGOPOR 50 mm": the 50 mm is the board, the contrapiso is the e=4cm
+        assert [p["factor"] for p in balcon["receta"]["partes"]] == [1.0, 0.04]
+        assert balcon["pregunta"]["dato"] == 'Cada m² lleva 0,04 m³ de "Receta 5.2.3" (por los 4 cm del nombre)'
+        assert all(t["estado"] == "verde" for t in (hall, sin, balcon))
+
+    def test_thickness_origin_after_confirming_or_changing(self, client, db):
+        wb = _workbook_contrapisos()
+        tareas = _tareas(analizar(client, {
+            # Confirming sends back the value shown: it is still the rule's assumption
+            CONTRAPISO: {"plantillas": [["5.2.3", 0.1]], "confirmada": True},
+            # Sol writes another thickness: hers
+            HALL: {"plantillas": [["5.2.3", 0.12]], "confirmada": True},
+            BALCONES: {"plantillas": [["8.3", None], ["5.2.3", None]], "confirmada": True},
+        }, wb=wb).json())
+        assert tareas[CONTRAPISO]["pregunta"]["dato"].endswith("(supuse 10 cm)")
+        assert tareas[CONTRAPISO]["receta"]["origen"] == "regla"
+        assert (tareas[HALL]["pregunta"]["dato"], tareas[HALL]["pregunta"]["origen_valor"]) == (
+            'Cada m² lleva 0,12 m³ de "Receta 5.2.3"', "mano")
+        assert tareas[BALCONES]["pregunta"]["origen_valor"] == "nombre"
+        assert tareas[BALCONES]["pregunta"]["valor"] == 0.04
+
+        db.tables["obra_recetas_memoria"] = [
+            {"id": "m1", "org_id": ORG, "clave": CONTRAPISO, "plantillas": [["5.2.3", 0.07]], "veces": 1}]
+        sin = _tareas(analizar(client, wb=wb).json())[CONTRAPISO]
+        assert (sin["pregunta"]["dato"], sin["pregunta"]["origen_valor"]) == (
+            'Cada m² lleva 0,07 m³ de "Receta 5.2.3"', "memoria")
+
+    def test_title_that_does_not_match_the_file(self, client, db):
+        wb = _workbook()
+        wb["01_C&P"]["A1"] = "EDIFICIO LAS HERAS"
+        res = client.post("/obras/analizar",
+                          files={"file": ("EDIFICIO GINKGO_Computo y Presupuesto_V2.xlsx", _excel(wb), XLSX)})
+        assert res.json()["titulo_dudoso"] is True
+        res = client.post("/obras/analizar",
+                          files={"file": ("Edificio Las Heras - cómputo.xlsx", _excel(wb), XLSX)})
+        assert res.json()["titulo_dudoso"] is False
+
     def test_rejects_other_files(self, client, db):
         res = client.post("/obras/analizar", files={"file": ("obra.csv", b"a,b", "text/csv")})
         assert res.status_code == 400
+
+
+class TestVaEnCero:
+    def test_dated_zero_is_a_price(self, client, db):
+        """Sol: "Va en $0" on EPS-500 saves 0 dated today; the card stops being red and the
+        resource loads at 0, linked to its catalog entry."""
+        cat, eid = "00000000-0000-0000-0000-00000000ca71", "00000000-0000-0000-0000-0000000000e5"
+        db.tables["price_catalogs"][0]["id"] = cat
+        for e in db.tables["catalog_entries"]:
+            e["catalog_id"] = cat
+            if e["codigo"] == "EPS-500":
+                e["id"] = eid
+        body = analizar(client).json()
+        assert "EPS-500" in [p["codigo"] for p in body["precios"]]  # an undated 0: no price
+        assert _tareas(body)[TELGOPOR]["estado"] == "rojo"
+
+        with patch("app.routers.catalogs.get_data_db", return_value=db):
+            res = client.patch(f"/catalogs/{cat}/entries/{eid}", json={"precio_sin_iva": 0})
+        assert res.status_code == 200, res.text
+        eps = next(e for e in db.tables["catalog_entries"] if e["id"] == eid)
+        assert (eps["precio_sin_iva"], eps["fecha_precio"]) == (0, today().isoformat())
+
+        body = analizar(client).json()
+        assert body["precios"] == []
+        telgopor = _tareas(body)[TELGOPOR]
+        assert (telgopor["estado"], telgopor["precios_faltantes"]) == ("verde", [])
+        assert body["listo"] is True
+
+        assert cargar(client).status_code == 200
+        r = next(r for r in db.tables["item_resources"] if r["codigo"] == "EPS-500")
+        assert (r["precio_unitario"], r["catalog_entry_id"], r["precio_fecha"]) == (0, eid, today().isoformat())
 
 
 class TestCargar:

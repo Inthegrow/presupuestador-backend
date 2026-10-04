@@ -11,10 +11,12 @@ from app.formulas import evaluate
 from app.obra_import import (
     altura_from,
     build_plan,
+    espesor_m_from,
     item_notes,
     match_recipe,
     parse_obra,
     report_markdown,
+    rule_for,
     suggest_recipes,
 )
 from import_obra import sql_script
@@ -128,6 +130,41 @@ def test_match_recipe_and_height() -> None:
     assert altura_from("MURO DE CARGA h 0.2m/1.8m") is None
 
 
+@pytest.mark.parametrize("descripcion, espesor", [
+    ("TELGOPOR 50 mm + CONTRAPISO EN AZOTEA ACCESIBLE e: 8cm", 0.08),
+    ("CONTRAPISO EN HALL + RAMPAS. ESP.=10cm.", 0.10),
+    ("CONTRAPISO e=10cm", 0.10),
+    ("CONTRAPISO/ CARPETA e=10cm", 0.10),
+    ("TELGOPOR 50 mm + CONTRAPISO/CARPETA EN AZOTEA INACCESIBLE (BALCONES) e=4cm", 0.04),
+    ("LOSA E 12 CM", 0.12),
+    ("Contrapiso espesor 7,5 cm", 0.075),
+    ("TELGOPOR 50 mm + CONTRAPISO", None),   # 50 mm is the board, not the contrapiso
+    ("CONTRAPISO DE 10 CM", None),           # no E / ESP / ESPESOR before the number
+    ("CONTRAPISO", None),
+])
+def test_espesor_from_the_name(descripcion: str, espesor: float | None) -> None:
+    assert espesor_m_from(descripcion) == espesor
+
+
+@pytest.mark.parametrize("descripcion, factores, origenes", [
+    ("TELGOPOR 50 mm + CONTRAPISO EN AZOTEA ACCESIBLE e: 8cm", [1.0, 0.08], ["regla", "nombre"]),
+    ("TELGOPOR 50 mm + CONTRAPISO/CARPETA EN AZOTEA INACCESIBLE (BALCONES) e=4cm", [1.0, 0.04],
+     ["regla", "nombre"]),
+    ("TELGOPOR 50 mm + CONTRAPISO EN AZOTEA", [1.0, 0.08], ["regla", "supuesto"]),
+    ("CONTRAPISO EN HALL + RAMPAS. ESP.=10cm.", [0.10], ["nombre"]),
+    ("CONTRAPISO/ CARPETA e=12cm", [0.12], ["nombre"]),
+    ("CONTRAPISO", [0.10], ["supuesto"]),
+])
+def test_contrapiso_factor_is_its_thickness(descripcion: str, factores: list, origenes: list) -> None:
+    rule = rule_for({"descripcion": descripcion, "unidad": "m²"}, TEMPLATES)
+    assert [f for _, f in rule["plantillas"]] == factores
+    assert rule["origen_factor"] == origenes
+    assert rule["falta_factor"] == []
+    # In another unit than the rule's, the thickness does not convert: it is asked
+    rule = rule_for({"descripcion": descripcion, "unidad": "m3"}, TEMPLATES)
+    assert "5.2.3" in rule["falta_factor"]
+
+
 def test_recipe_uses_obra_height(plan: dict) -> None:
     item = _item(plan, "4.2.1")
     assert item["plantilla"] == "5.1.4"
@@ -229,6 +266,21 @@ def test_price_problems_in_report(parsed: dict, plan: dict) -> None:
     md = report_markdown(parsed, plan, "obra.xlsx", list(probs.values()))
     assert "## Recursos sin precio válido (la carga se frena)" in md
     assert "`HADN6`" in md
+
+
+def test_dated_zero_is_a_price(plan: dict) -> None:
+    """'Va en $0': a 0 with a date is a confirmed price; an undated 0 is still no price."""
+    from datetime import date
+
+    from app.obra_import import price_problems
+
+    entries = [
+        {"tipo": "material", "codigo": "HADN6", "precio_sin_iva": 0, "fecha_precio": "2026-09-01"},
+        {"tipo": "material", "codigo": "LH18", "precio_sin_iva": 0, "fecha_precio": None},
+    ]
+    probs = {p["codigo"]: p for p in price_problems(plan, entries, date(2026, 9, 30))}
+    assert "HADN6" not in probs
+    assert probs["LH18"]["motivo"] == "sin precio"
 
 
 SUGGEST = {
