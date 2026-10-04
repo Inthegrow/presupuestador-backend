@@ -24,6 +24,12 @@ de UX y entra a este archivo (sección 5, punto 0c) antes de programarse.
 | 7 | Etapa B: estado de cada precio y frase de confianza | chat | después del 6 |
 | — | Limpieza: borrar las ramas viejas `claude/*` y `codex/*` ya mergeadas en GitHub | Carlos | cuando quiera |
 
+**Cuándo hace falta "Manual Deploy" en Render:** cuando el PR toca `app/`, `requirements.txt` o `migrations/`
+(el servidor). Si toca solo `frontend/`, Vercel lo publica solo. Cada PR lo dice en su descripción: "Render:
+Manual Deploy sí/no". El 04/10 el deploy del PR #28 falló a los 18 minutos sin tocar el código: pip probaba
+decenas de versiones de `realtime` (dependencia de `supabase`) porque no estaba fijada; desde el PR #29 las
+dependencias de supabase van fijadas en `requirements.txt`.
+
 Reglas para no volver a pisarse: el handoff lo edita solo el chat que programa, dentro del PR del trabajo;
 Carlos no abre otro chat de programación mientras haya un PR abierto; si abre uno de consulta, le pide que
 **no toque el repo**.

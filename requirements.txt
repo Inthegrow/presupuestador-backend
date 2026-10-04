@@ -13,3 +13,10 @@ openai==1.57.0
 reportlab==4.2.5
 Pillow==10.4.0
 PyMuPDF==1.24.12
+# Dependencias de supabase fijadas: sin esto pip prueba decenas de versiones de realtime y el build de Render se cae (04/10/2026)
+realtime==2.5.3
+postgrest==0.16.11
+gotrue==2.11.4
+storage3==0.7.7
+supafunc==0.5.1
+websockets==15.0.1
