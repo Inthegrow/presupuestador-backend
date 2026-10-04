@@ -666,3 +666,74 @@ class TestUpdatePricesWithOficial:
         # not repriced from Las Heras, reported, keeps the hand-typed price
         assert (res(fake, "r3")["precio_unitario"], res(fake, "r3")["catalog_entry_id"]) == (7, None)
         assert body["sin_precio"] == [{"codigo": "XYZ", "descripcion": "", "motivo": "sin_precio"}]
+
+
+# ── $0 con fecha ("Va en $0") ───────────────────────────────────────────────
+
+
+class TestZeroPrice:
+    """A 0 is a price only with a date (Sol said "va en $0"); an undated 0 is "sin precio"
+    (how the old Maestro left the prices nobody had loaded)."""
+
+    def test_is_price(self):
+        from app.budget_prices import is_price
+
+        assert is_price((10.0, None)) and is_price((10.0, "2026-09-01"))
+        assert is_price((0.0, "2026-09-01"))
+        assert not is_price((0.0, None))
+        assert not is_price((-5.0, "2026-09-01"))
+        assert not is_price(None)
+
+    def _lookup(self, precio, fecha):
+        from app.budget_prices import build_price_lookup
+
+        t = tables()
+        t["catalog_entries"].append({"id": "c-xyz", "org_id": ORG, "tipo": "material", "codigo": "XYZ",
+                                     "precio_sin_iva": precio, "fecha_precio": fecha})
+        lookup = build_price_lookup(FakeDB(t), ORG, TODAY)
+        return lookup["price_for"]({"codigo": "XYZ", "tipo": "material"}), lookup["problemas"]
+
+    def test_undated_zero_is_no_price(self):
+        found, problemas = self._lookup(0, None)
+        assert found is None
+        assert problemas == [{"codigo": "XYZ", "descripcion": None, "motivo": "sin_precio"}]
+
+    def test_dated_zero_is_a_price(self):
+        found, problemas = self._lookup(0, "2026-09-15")
+        assert (found, problemas) == ((0.0, "2026-09-15", "c-xyz"), [])
+
+    def test_update_prices_with_zeros(self, client, db):
+        """Actualizar precios: the dated 0 is applied; the undated 0 keeps the old price."""
+        db.tables["catalog_entries"] += [
+            {"id": "c-xyz", "org_id": ORG, "tipo": "material", "codigo": "XYZ", "precio_sin_iva": 0,
+             "fecha_precio": None},
+        ]
+        body = client.post(f"/budgets/{BUDGET}/actualizar-precios").json()
+        assert res(db, "r3")["precio_unitario"] == 7
+        assert body["sin_precio"] == [{"codigo": "XYZ", "descripcion": "", "motivo": "sin_precio"}]
+
+        db.tables["catalog_entries"][-1]["fecha_precio"] = "2026-09-15"
+        body = client.post(f"/budgets/{BUDGET}/actualizar-precios").json()
+        assert (res(db, "r3")["precio_unitario"], res(db, "r3")["catalog_entry_id"]) == (0, "c-xyz")
+        assert res(db, "r3")["precio_fecha"] == "2026-09-15"
+        assert body["sin_precio"] == []
+
+    @pytest.mark.parametrize("fecha, descartado", [(None, True), ("2026-09-15", False)])
+    def test_discarded_prices(self, fecha, descartado):
+        """Linked to a reference catalog: an oficial 0 replaces it only when dated."""
+        from app.budget_prices import discarded_prices, load_catalog_index
+
+        t = _catalogs_tables(oficial=True)
+        t["catalog_entries"].append({"id": "c-xyz", "catalog_id": "cat-m", "org_id": ORG, "tipo": "material",
+                                     "codigo": "XYZ", "precio_sin_iva": 0, "fecha_precio": fecha})
+        idx = load_catalog_index(FakeDB(t), ORG)
+        found = discarded_prices([resource(codigo="XYZ", catalog_entry_id="lh-xyz")], idx, TODAY)
+        assert [d["codigo"] for d in found] == (["XYZ"] if descartado else [])
+
+    def test_dated_zero_counts_when_breaking_ties(self):
+        """Two dated copies of a code: Sol's newer "va en $0" is in force, the pending one is not."""
+        pendiente = {"id": "a", "codigo": "Y-M4X1", "tipo": "material", "precio_sin_iva": None,
+                     "fecha_precio": "2026-03-01"}
+        cero = {"id": "b", "codigo": "Y-M4X1", "tipo": "material", "precio_sin_iva": 0, "fecha_precio": "2026-09-01"}
+        assert find_entry({"codigo": "Y-M4X1", "tipo": "material"}, {}, {"Y-M4X1": [pendiente, cero]},
+                          fecha=TODAY) == (cero, None)

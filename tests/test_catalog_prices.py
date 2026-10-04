@@ -20,6 +20,7 @@ from app.catalog_prices import (
     price_changed,
     price_from_payload,
 )
+from app.budget_prices import today
 from app.main import create_app
 
 MOCK_USER = {
@@ -180,7 +181,26 @@ class TestCreateEntry:
         assert r.status_code == 200
         entry = db.inserts["catalog_entries"][0]
         assert entry["precio_sin_iva"] == 50
-        assert entry["fecha_precio"] == date.today().isoformat()
+        assert entry["fecha_precio"] == today().isoformat()
+
+    @patch("app.routers.catalogs.get_data_db")
+    def test_without_price_stays_undated(self, mock_db, client):
+        # A dated 0 is a confirmed "va en $0": an entry created without a price is not one
+        db = RecordingDB({"price_catalogs": [{"id": CATALOG}]})
+        mock_db.return_value = db
+        r = client.post(f"/catalogs/{CATALOG}/entries", json={"codigo": "X", "descripcion": "X"})
+        assert r.status_code == 200
+        entry = db.inserts["catalog_entries"][0]
+        assert (entry["precio_sin_iva"], entry["fecha_precio"]) == (0, None)
+
+    @patch("app.routers.catalogs.get_data_db")
+    def test_zero_price_is_dated_today(self, mock_db, client):
+        db = RecordingDB({"price_catalogs": [{"id": CATALOG}]})
+        mock_db.return_value = db
+        r = client.post(f"/catalogs/{CATALOG}/entries", json={"codigo": "X", "precio_sin_iva": 0})
+        assert r.status_code == 200
+        entry = db.inserts["catalog_entries"][0]
+        assert (entry["precio_sin_iva"], entry["fecha_precio"]) == (0, today().isoformat())
 
     @patch("app.routers.catalogs.get_data_db")
     def test_bad_date_is_400(self, mock_db, client):
@@ -198,7 +218,7 @@ class TestUpdateEntry:
         assert r.status_code == 200
         update = db.updates["catalog_entries"][0]
         assert update["precio_sin_iva"] == 120
-        assert update["fecha_precio"] == date.today().isoformat()
+        assert update["fecha_precio"] == today().isoformat()
         hist = db.inserts["catalog_price_history"]
         assert len(hist) == 1
         assert hist[0]["entry_id"] == ENTRY
@@ -234,6 +254,18 @@ class TestUpdateEntry:
         assert r.status_code == 200
         assert "catalog_price_history" not in db.inserts
         assert "fecha_precio" not in db.updates["catalog_entries"][0]
+
+    @pytest.mark.parametrize("old_price", [None, 0])
+    @patch("app.routers.catalogs.get_data_db")
+    def test_zero_price_is_dated_today(self, mock_db, client, old_price):
+        """'Va en $0': a 0 saved on an entry without price (or with an undated 0) is dated today."""
+        db = _db_with_entry(precio_sin_iva=old_price, fecha_precio=None)
+        mock_db.return_value = db
+        r = client.patch(f"/catalogs/{CATALOG}/entries/{ENTRY}", json={"precio_sin_iva": 0})
+        assert r.status_code == 200
+        update = db.updates["catalog_entries"][0]
+        assert (update["precio_sin_iva"], update["fecha_precio"]) == (0, today().isoformat())
+        assert db.inserts["catalog_price_history"][0]["precio_sin_iva"] == 0
 
     @patch("app.routers.catalogs.get_data_db")
     def test_precio_unitario_alias_is_saved(self, mock_db, client):

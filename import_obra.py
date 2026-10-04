@@ -217,7 +217,7 @@ BEGIN
   SELECT r.n, sel.entry_id, p.precio, p.fecha,
          CASE WHEN sel.n_all = 0 THEN 'no esta en el catalogo'
               WHEN sel.entry_id IS NULL THEN 'codigo duplicado en el catalogo'
-              WHEN p.precio IS NULL OR p.precio <= 0 THEN 'sin precio al ' || to_char(v_fecha, 'DD/MM/YYYY')
+              WHEN p.precio IS NULL OR p.precio < 0 OR (p.precio = 0 AND p.fecha IS NULL) THEN 'sin precio al ' || to_char(v_fecha, 'DD/MM/YYYY')
          END AS problema
   FROM obra_recursos r
   CROSS JOIN LATERAL (
@@ -247,7 +247,7 @@ BEGIN
     LIMIT 1
   ) p ON true;
 
-  -- Control: se frena si un recurso no tiene precio valido (> 0) a la fecha del presupuesto.
+  -- Control: se frena si un recurso no tiene precio valido (> 0, o 0 con fecha) a la fecha del presupuesto.
   -- El control y la carga usan la misma tabla obra_precios.
   SELECT string_agg(DISTINCT r.codigo || ' (' || op.problema || ')', ', ') INTO faltan
   FROM obra_recursos r JOIN obra_precios op ON op.n = r.n

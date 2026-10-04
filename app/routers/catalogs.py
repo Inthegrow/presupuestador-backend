@@ -5,12 +5,12 @@ from __future__ import annotations
 import csv
 import io
 import warnings
-from datetime import date
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, UploadFile
 
 from app.auth import get_current_user, require_admin, require_editor
+from app.budget_prices import today
 from app.catalog_prices import fecha_iso, history_row, price_changed, price_from_payload
 from app.db import get_data_db
 from app.schemas import CatalogTipo
@@ -563,8 +563,9 @@ async def create_catalog_entry(
         "unidad": data.get("unidad", ""),
         "precio_sin_iva": precio if precio is not None else 0,
         "tipo": data.get("tipo", "material"),
-        # A price typed in by hand is dated today unless the user says otherwise
-        "fecha_precio": fecha or date.today().isoformat(),
+        # A price typed in by hand is dated today unless the user says otherwise. Without a
+        # price it stays undated: a dated 0 means "va en $0" (budget_prices.is_price)
+        "fecha_precio": fecha or (today().isoformat() if precio is not None else None),
         "proveedor": data.get("proveedor") or None,
     }
     result = db.table("catalog_entries").insert(entry).execute()
@@ -619,9 +620,13 @@ async def update_catalog_entry(
         raise HTTPException(400, "No hay campos validos para actualizar")
 
     old = entry.data
-    if "fecha_precio" not in update_data and price_changed(old, update_data):
-        # New price without an explicit date: it is today's price
-        update_data["fecha_precio"] = date.today().isoformat()
+    confirma = "precio_sin_iva" in update_data and not old.get("fecha_precio")
+    if "fecha_precio" not in update_data and (price_changed(old, update_data) or confirma):
+        # New price without an explicit date: it is today's price (in Argentina, the date the
+        # prices are read at: a price saved at 22 h must be in force that same day). Saving the
+        # same value on an undated entry confirms it today too (an undated 0 is "sin precio";
+        # a dated 0 is "va en $0": budget_prices.is_price)
+        update_data["fecha_precio"] = today().isoformat()
 
     result = (
         db.table("catalog_entries")
