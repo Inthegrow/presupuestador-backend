@@ -17,7 +17,7 @@ de UX y entra a este archivo (sección 5, punto 0c) antes de programarse.
 | 2 | Render → Manual Deploy del PR #25. En la app, Catálogos → marcar los cuatro del Maestro como oficiales | Carlos | ✅ 04/10 |
 | 3 | PR #27 (login con SOLÉ): Codex audita → corregir → mergear → Manual Deploy. La app sigue abierta hasta el paso 5 | chat + Carlos | ✅ 04/10 |
 | 4 | Las fallas de UX del punto 0c (1 a 7), un solo PR, probado con el Excel de Ginkgo (`PLAN_UX_CARGAR_OBRA.md`) | chat | ✅ 04/10 PR #28 mergeado y desplegado |
-| 4b | Segunda tanda de fallas de UX (8 a 14: borrador de carga, servidor despertando, "Cambiar", progreso, qué pasó con los amarillos, diferencias por costo directo y margen), un solo PR (`PLAN_UX_2_CARGAR_OBRA.md`) | chat | PR #29 en auditoría |
+| 4b | Segunda tanda de fallas de UX (8 a 14: borrador de carga, servidor despertando, "Cambiar", progreso, qué pasó con los amarillos, diferencias por costo directo y margen), un solo PR (`PLAN_UX_2_CARGAR_OBRA.md`) | chat | ✅ 04/10 PR #29 mergeado |
 | 4c | Excel sin precios: si el 01_C&P no trae costos, los trabajos sin receta van en rojo y no se ofrece "Ver diferencias" (punto 15 de 0c) | chat | después del 4b, PR chico |
 | 5 | Encender el login: SQL en DATA y en SOLÉ, invitaciones, `VITE_AUTH_ENABLED=true`, borrar `DEMO_ORG_ID` (sección 5 de `PLAN_LOGIN_SOLE.md`) | Carlos guiado por el chat | después del 4 |
 | 6 | Primera carga real de Ginkgo con Sol | Sol + Carlos | después del 5 |
