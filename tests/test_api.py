@@ -14,7 +14,10 @@ from fastapi.testclient import TestClient
 
 from app.main import create_app
 
-MOCK_USER = {"user_id": "test-user-uuid", "org_id": "test-org-uuid"}
+MOCK_USER = {
+    "user_id": "test-user-uuid", "email": "test@terrac.com", "org_id": "test-org-uuid", "role": "admin",
+    "orgs": [{"id": "test-org-uuid", "name": "TERRAC SA", "slug": "terrac", "role": "admin"}],
+}
 
 
 class MockSupabaseResponse:

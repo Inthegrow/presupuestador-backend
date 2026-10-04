@@ -69,6 +69,16 @@ El PR #20 se mergeó el 2026-10-01. Falta correr en Supabase las migraciones 009
 Hoy cualquiera con el link entra y ve todo. Esto va **antes** de cargar obras reales de TERRAC.
 Decisión de Carlos: usar **la misma estructura multiempresa de SOLÉ**, no inventar una nueva.
 
+**Estado (04/10): programado en el PR #26** según `PLAN_LOGIN_SOLE.md`: `GET /me`, empresa activa en el
+header `X-Org-Id` (403 si no es miembro, 428 si tiene varias y no eligió), roles `admin`/`leader`/`member`
+en todas las rutas (`tests/test_auth.py` tiene la tabla ruta → rol y falla si alguien agrega una ruta sin rol),
+pantallas "Olvidé mi clave", "Creá tu clave" y "¿Con qué empresa entrás?", selector de empresa en la barra,
+botones ocultos para quien solo mira. Probado en el navegador con `scripts/e2e_login.cjs`
+(`FAKE_DOS_EMPRESAS=1 python3 scripts/serve_fake.py`). **Lo que falta es operativo** y está en la sección 5
+del plan: crear TERRAC en SOLÉ con el `org_id` de la base DATA, invitar a Sol/Emilia/Carlos, poner
+`VITE_AUTH_ENABLED=true` en Vercel y **borrar `DEMO_ORG_ID`** en Render. Hasta ese momento la app sigue
+abierta (modo demo), con el usuario demo como admin.
+
 1. **Login con usuario y clave** usando el Supabase de auth compartido con SOLÉ/EOS (`AUTH_SUPABASE_*`):
    tablas `organizations` y `memberships`. Cada usuario pertenece a una o más empresas (`org_id`).
 2. **Cada empresa ve solo lo suyo.** Todas las tablas ya tienen `org_id` y `app/auth.py` ya lo resuelve
@@ -204,8 +214,8 @@ Decisión de Carlos: usar **la misma estructura multiempresa de SOLÉ**, no inve
 > (Auto-Deploy no anda); el Maestro marcado como oficial en Catálogos. Yo hago el rol de Sol.
 >
 > Orden de trabajo:
-> 1. **Login que exija clave** con la estructura multiempresa de SOLÉ (sección 5, "Antes de todo"). Las
->    tablas y roles de SOLÉ son: [Carlos los pega acá]. Selector de empresa arriba, "Olvidé mi clave".
+> 1. **Encender el login** (PR #26 mergeado): me guiás con la sección 5 de `PLAN_LOGIN_SOLE.md` (SQL en DATA y
+>    en SOLÉ, invitaciones, `VITE_AUTH_ENABLED=true`, borrar `DEMO_ORG_ID`) y probamos que sin clave no se ve nada.
 > 2. Lo que surja de mis cargas de Ginkgo haciendo de Sol (te paso la lista de dudas: cada una es un bug de UX).
 > 3. Etapa B: estado de cada precio (al día / viejo / muy viejo) y la frase de confianza arriba del total.
 >

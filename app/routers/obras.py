@@ -29,7 +29,7 @@ from uuid import UUID
 import openpyxl
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
-from app.auth import get_current_user
+from app.auth import get_current_user, require_editor
 from app.budget_prices import (
     fetch_all,
     find_entry,
@@ -514,7 +514,7 @@ def _public(result: dict) -> dict:
 async def analizar_obra(
     file: UploadFile = File(...),
     asignaciones: str | None = Form(None),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_editor),
 ):
     """Revisa el Excel de la obra. No escribe nada."""
     wb = await _read_workbook(file)
@@ -626,7 +626,7 @@ async def cargar_obra(
     nombre: str = Form(...),
     asignaciones: str | None = Form(None),
     permitir_sin_precio: bool = Form(False),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_editor),
 ):
     """Carga la obra como presupuesto nuevo y lo recalcula entero."""
     from app.routers.analysis import _run_cascade  # same recalculation as "Recalcular obra"

@@ -16,7 +16,10 @@ from fastapi.testclient import TestClient
 from app.main import create_app
 
 ORG = "test-org-uuid"
-MOCK_USER = {"user_id": "test-user-uuid", "org_id": ORG}
+MOCK_USER = {
+    "user_id": "test-user-uuid", "email": "test@terrac.com", "org_id": ORG, "role": "admin",
+    "orgs": [{"id": ORG, "name": "TERRAC SA", "slug": "terrac", "role": "admin"}],
+}
 BUDGET = "00000000-0000-0000-0000-0000000000b1"
 ITEM = "00000000-0000-0000-0000-0000000000a1"
 ITEM2 = "00000000-0000-0000-0000-0000000000a2"

@@ -18,7 +18,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, File, HTTPException, UploadFile
 
-from app.auth import get_current_user
+from app.auth import require_editor
 from app.config import get_settings
 from app.db import get_data_db
 from app.routers.ai import _pdf_pages_to_images
@@ -186,7 +186,7 @@ Respondé ÚNICAMENTE con JSON válido (sin markdown, sin texto extra):
 async def classify_plans(
     budget_id: UUID,
     files: list[UploadFile] = File(...),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_editor),
 ):
     """PASO 0: Classify multiple construction plan PDFs."""
     settings = get_settings()
@@ -311,7 +311,7 @@ async def analyze_architecture(
     budget_id: UUID,
     files: list[UploadFile] = File(...),
     building_context: str = Body("", embed=True),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_editor),
 ):
     """PASO 1A: Deep analysis of architecture plans."""
     settings = get_settings()
@@ -384,7 +384,7 @@ async def analyze_structure(
     budget_id: UUID,
     files: list[UploadFile] = File(...),
     building_context: str = Body("", embed=True),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_editor),
 ):
     """PASO 1B: Structural analysis — sends each plan individually then aggregates.
 
@@ -502,7 +502,7 @@ async def analyze_sections(
     budget_id: UUID,
     files: list[UploadFile] = File(...),
     building_context: str = Body("", embed=True),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_editor),
 ):
     """PASO 1C: Analyze section/cut/facade plans."""
     settings = get_settings()
@@ -593,7 +593,7 @@ async def synthesize(
     arch_data: dict = Body(...),
     struct_data: dict = Body(...),
     section_data: dict = Body(...),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_editor),
 ):
     """PASO 1D: Cross-reference all analyses and compute real cómputo métrico.
 

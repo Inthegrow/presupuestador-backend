@@ -11,6 +11,7 @@ from app.routers import (
     excel,
     health,
     indirects,
+    me,
     obras,
     standard_trees,
     templates,
@@ -31,6 +32,7 @@ def create_app() -> FastAPI:
     )
 
     app.include_router(health.router)
+    app.include_router(me.router)
     app.include_router(budgets.router, prefix="/budgets", tags=["Presupuestos"])
     app.include_router(excel.router, prefix="/budgets", tags=["Excel"])
     app.include_router(ai.router, prefix="/budgets", tags=["IA"])

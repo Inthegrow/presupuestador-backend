@@ -20,7 +20,7 @@ import pandas as pd
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 
-from app.auth import get_current_user
+from app.auth import get_current_user, require_editor
 from app.budget_prices import budget_config, initial_indirects, today
 from app.calculations import fraction_to_pct, pct_or_default
 from app.db import get_data_db
@@ -324,7 +324,7 @@ def _parse_detail_sheets(
 @router.post("/import-excel")
 async def import_excel(
     file: UploadFile = File(...),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_editor),
 ):
     """Import a construction budget Excel (Las Heras format)."""
     if not file.filename or not file.filename.lower().endswith((".xlsx", ".xls")):

@@ -11,7 +11,7 @@ import json
 
 from fastapi import APIRouter, Body, Depends, HTTPException
 
-from app.auth import get_current_user
+from app.auth import get_current_user, require_editor
 from app.calculations import calc_item_from_resources, calc_resource_subtotal
 from app.db import get_data_db
 from app.formulas import FormulaError
@@ -91,7 +91,7 @@ async def get_template(template_id: str, user: dict = Depends(get_current_user))
 
 
 @router.post("")
-async def create_template(body: TemplateCreate, user: dict = Depends(get_current_user)):
+async def create_template(body: TemplateCreate, user: dict = Depends(require_editor)):
     db = get_data_db()
     org_id = user["org_id"]
     parametros = [p.model_dump() for p in body.parametros]
@@ -116,7 +116,7 @@ async def create_template(body: TemplateCreate, user: dict = Depends(get_current
 async def update_template(
     template_id: str,
     body: TemplateUpdate,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_editor),
 ):
     db = get_data_db()
     org_id = user["org_id"]
@@ -159,7 +159,7 @@ async def update_template(
 
 
 @router.delete("/{template_id}")
-async def delete_template(template_id: str, user: dict = Depends(get_current_user)):
+async def delete_template(template_id: str, user: dict = Depends(require_editor)):
     db = get_data_db()
     org_id = user["org_id"]
     db.table("item_templates").delete().eq("id", template_id).eq("org_id", org_id).execute()
@@ -167,7 +167,7 @@ async def delete_template(template_id: str, user: dict = Depends(get_current_use
 
 
 @router.post("/preview")
-async def preview_template(body: TemplatePreview, user: dict = Depends(get_current_user)):
+async def preview_template(body: TemplatePreview, user: dict = Depends(require_editor)):
     """Calculate a template's quantities for a test quantity (nothing is saved).
 
     Used by the formula editor. Errors are returned in the body, not as HTTP errors.
@@ -207,7 +207,7 @@ async def apply_template(
     budget_id: str,
     item_id: str,
     body: TemplateApply = Body(default=TemplateApply()),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_editor),
 ):
     """Apply a template's resources to an existing budget item.
 

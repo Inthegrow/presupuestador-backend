@@ -22,7 +22,10 @@ from app.catalog_prices import (
 )
 from app.main import create_app
 
-MOCK_USER = {"user_id": "test-user-uuid", "org_id": "test-org-uuid"}
+MOCK_USER = {
+    "user_id": "test-user-uuid", "email": "test@terrac.com", "org_id": "test-org-uuid", "role": "admin",
+    "orgs": [{"id": "test-org-uuid", "name": "TERRAC SA", "slug": "terrac", "role": "admin"}],
+}
 CATALOG = "00000000-0000-0000-0000-00000000000c"
 ENTRY = "00000000-0000-0000-0000-00000000000e"
 

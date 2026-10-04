@@ -10,7 +10,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, File, HTTPException, UploadFile
 
-from app.auth import get_current_user
+from app.auth import require_editor
 from app.calculations import calc_item_from_resources, calc_resource_subtotal
 from app.config import get_settings
 from app.db import get_data_db
@@ -359,7 +359,7 @@ def _normalize_recursos(raw_recursos: object) -> dict | None:
 async def analyze_plan(
     budget_id: UUID,
     file: UploadFile = File(...),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_editor),
 ):
     """Analyze a construction plan image with GPT-4o Vision."""
     settings = get_settings()
@@ -1050,7 +1050,7 @@ def _auto_assign_catalog_resources(
 async def insert_ai_suggestions(
     budget_id: UUID,
     items: list[dict] = Body(..., embed=True),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_editor),
 ):
     """Insert AI-suggested items into budget_items.
 

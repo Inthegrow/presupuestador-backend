@@ -9,7 +9,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException
 
-from app.auth import get_current_user
+from app.auth import get_current_user, require_editor
 from app.budget_prices import (
     INDIRECT_DEFAULTS,
     INDIRECT_KEYS,
@@ -126,7 +126,7 @@ async def get_indirects(
 async def update_indirects(
     budget_id: UUID,
     payload: IndirectConfigUpdate,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_editor),
 ):
     """Change the indirect % of this budget only.
 
@@ -167,7 +167,7 @@ async def update_indirects(
 async def apply_indirects(
     budget_id: UUID,
     request: IndirectApplyRequest = Body(default=IndirectApplyRequest()),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_editor),
 ):
     """Apply this budget's cascade indirect % to all its leaf items."""
     db = get_data_db()
@@ -241,7 +241,7 @@ async def apply_indirects(
 @router.post("/{budget_id}/cascade-recalculate")
 async def cascade_recalculate(
     budget_id: UUID,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_editor),
 ):
     """Full cascade recalculation from scratch.
 
@@ -453,7 +453,7 @@ def _run_cascade(
 async def update_prices(
     budget_id: UUID,
     payload: PriceUpdateRequest = Body(default=PriceUpdateRequest()),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_editor),
 ):
     """Take the last price of each resource (to today, or to ``fecha``), recalculate
     and save a new version. The state before the update is saved as a version too.
@@ -644,7 +644,7 @@ def _save_version(db, org_id: str, user_id: str, budget: dict, items: list[dict]
 async def create_version(
     budget_id: UUID,
     version: VersionCreate = Body(default=VersionCreate()),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_editor),
 ):
     """Create a snapshot of the current budget state."""
     db = get_data_db()

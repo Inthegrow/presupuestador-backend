@@ -29,7 +29,8 @@ async function shot(page, name) {
   await page.waitForURL(/olvide-mi-clave/)
   await shot(page, '02_olvide_mi_clave')
   await page.goto(BASE + '/nueva-clave?invite=1')
-  await page.getByText('Creá tu clave').waitFor()
+  // Sin sesión de recuperación de Supabase la página dice que el enlace no sirve: es lo esperado
+  await page.getByText(/Creá tu clave|El enlace ya no sirve/).waitFor()
   await shot(page, '03_crea_tu_clave')
 
   // 2. Dos empresas: selector
