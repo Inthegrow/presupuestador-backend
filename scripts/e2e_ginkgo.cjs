@@ -15,6 +15,15 @@ async function shot(page, name) {
   console.log('shot', name)
 }
 
+let fallas = 0
+function check(nombre, ok, extra = '') {
+  console.log(ok ? 'OK   ' : 'FALLA', nombre, extra)
+  if (!ok) fallas++
+}
+
+const rojosDe = async (page) => Number((await page.locator('body').innerText()).match(/Rojos \((\d+)\)/)?.[1] ?? -1)
+const sinRevisando = (page) => page.waitForFunction(() => !document.body.innerText.includes('Revisando'), null, { timeout: 120000 })
+
 async function subir(page) {
   await page.goto(BASE + '/app/cargar-obra')
   await page.setInputFiles('input[type=file]', XLSX)
@@ -100,15 +109,62 @@ async function subir(page) {
     console.log(t2.match(/Falta resolver[^\n]*|Todo listo[^\n]*/)?.[0], '|', t2.match(/Precios para corregir \(\d+\)|Todos los materiales tienen precio/)?.[0])
   }
 
+  // 2d. "Cambiar" explica qué es el buscador de recetas (PLAN_UX_2, 3.4)
+  const botonCambiar = page.getByRole('button', { name: /^(Cambiar|Elegir receta)$/ }).first()
+  await botonCambiar.click()
+  check('buscador explica qué es', await page.getByText('Elegí la receta correcta para este trabajo. Si ninguna sirve, usá el precio del Excel.').isVisible())
+  check('opción verde en dos líneas',
+    await page.getByText('Usar el precio del Excel (sin receta)').isVisible()
+    && await page.getByText('Se carga con lo que cobró tu Excel; la app no desglosa materiales.').isVisible())
+  await page.getByRole('button', { name: 'Cerrar', exact: true }).first().click()
+
+  // 2e. Confirmo un amarillo (queda en las asignaciones) y recargo: el borrador sigue en el navegador (3.2)
+  const confirmar = page.getByRole('button', { name: 'Confirmar', exact: true })
+  const hayConfirmar = (await confirmar.count()) > 0
+  console.log('amarillos para confirmar:', await confirmar.count())
+  if (hayConfirmar) {
+    await confirmar.first().click()
+    await sinRevisando(page)
+  }
+  const rojosAntes = await rojosDe(page)
+  const confirmarAntes = await confirmar.count() // one less than before the click
+  console.log('rojos antes de recargar:', rojosAntes, '| amarillos sin confirmar:', confirmarAntes)
+  await page.waitForTimeout(1500) // the draft is saved 500 ms after the last change
+  await page.reload()
+  await page.getByText('Tenías una carga a medias').waitFor({ timeout: 30000 })
+  const tarjetaBorrador = await page.locator('body').innerText()
+  check('tarjeta con el nombre del archivo', tarjetaBorrador.includes('ginkgo.xlsx'))
+  check('tarjeta con "hace"', /hace (un momento|\d+ minutos?)/.test(tarjetaBorrador))
+  await shot(page, '05b_borrador')
+  const pedidoSeguir = page.waitForRequest((r) => r.url().includes('/obras/analizar'), { timeout: 30000 })
+  await page.getByRole('button', { name: 'Seguir', exact: true }).click()
+  await pedidoSeguir
+  await page.getByText('trabajos distintos').waitFor({ timeout: 120000 })
+  await sinRevisando(page)
+  // The multipart body is not readable from Playwright: check the effect instead (the confirmed task stays confirmed)
+  if (hayConfirmar) check('Seguir manda las asignaciones guardadas', (await confirmar.count()) === confirmarAntes,
+    `(${confirmarAntes} sin confirmar antes y ${await confirmar.count()} después)`)
+  const rojosDespues = await rojosDe(page)
+  check('mismos rojos después de Seguir', rojosDespues === rojosAntes, `(${rojosAntes} -> ${rojosDespues})`)
+  check('la tarjeta del borrador desaparece al seguir', (await page.getByText('Tenías una carga a medias').count()) === 0)
+  await shot(page, '05c_despues_de_seguir')
+
   // 3. Cargar el presupuesto
   const nombre = page.getByPlaceholder('Nombre del presupuesto')
   await nombre.fill('')
   await nombre.fill('EDIFICIO GINKGO')
   const permitir = page.getByLabel(/Cargar igual/)
   if (await permitir.count()) await permitir.check()
+  // 3.5: contador mientras calcula (la espera arranca antes del clic para no perder el estado)
+  const calculando = page.getByText(/Calculando \d+ trabajos?… \d+ s/).waitFor({ timeout: 30000 }).then(() => true, () => false)
   await page.getByRole('button', { name: 'Cargar presupuesto' }).click()
+  check('botón con contador al cargar', await calculando)
+  check('aviso de espera al cargar', await page.getByText('Puede tardar un minuto: la app arma los materiales de cada trabajo y recalcula la obra.').isVisible().catch(() => false))
   await page.getByText('Total calculado por la app').waitFor({ timeout: 180000 })
   await shot(page, '07_cargado')
+  // 3.6: qué pasó con los amarillos
+  const sinConfirmar = await page.getByText(/entr(aron|ó) sin confirmar/).first().innerText().catch(() => '')
+  check('el resultado dice qué pasó con los amarillos', /entr(aron|ó) sin confirmar/.test(sinConfirmar) && /Para confirmar/.test(sinConfirmar), sinConfirmar)
 
   // 4. Diferencias con el Excel
   await page.getByRole('button', { name: 'Ver diferencias con el Excel' }).click()
@@ -124,6 +180,44 @@ async function subir(page) {
   }
   const t3 = await page.locator('body').innerText()
   console.log(t3.split('\n').slice(0, 30).join(' | '))
+
+  // 4b. Costo directo y margen (PLAN_UX_2, 3.7)
+  const botonDirecto = page.getByRole('button', { name: 'Costo directo (sin margen)' })
+  const botonFinal = page.getByRole('button', { name: 'Precio final' })
+  check('el conmutador arranca en costo directo', (await botonDirecto.getAttribute('aria-pressed')) === 'true')
+  check('línea de costo directo', await page.getByText('Acá se ven las recetas: lo que cuesta hacer cada trabajo, sin margen.').isVisible())
+  check('columnas de costo', /EXCEL \(COSTO\)/i.test(t3) && /APP \(COSTO\)/i.test(t3))
+  const tarjetaMargen = page.locator('div.rounded-xl').filter({ hasText: 'Si querés que coincidan, ajustá la cadena de markups del presupuesto.' }).first()
+  const textoMargen = await tarjetaMargen.innerText()
+  check('tarjeta Margen con los dos porcentajes', /Tu Excel: [\d.,]+% promedio · La app: [\d.,]+%/.test(textoMargen), textoMargen.replace(/\n/g, ' | '))
+  const tarjetas = async () => ({
+    excel: await page.locator('div.rounded-xl').filter({ hasText: 'Excel de Sol' }).first().innerText(),
+    app: await page.locator('div.rounded-xl').filter({ hasText: /^La app/ }).first().innerText(),
+  })
+  const directo = await tarjetas()
+  const filasDirecto = await page.locator('tbody tr').first().innerText()
+  await shot(page, '08b_diferencias_directo')
+  await botonFinal.click()
+  await page.waitForTimeout(300)
+  check('"Precio final" está activo', (await botonFinal.getAttribute('aria-pressed')) === 'true')
+  check('línea de precio final', await page.getByText('Lo que cobra cada uno, con su margen.').isVisible())
+  const final = await tarjetas()
+  check('"Precio final" cambia los números', final.app !== directo.app, `(${directo.app.replace(/\n/g, ' ')} -> ${final.app.replace(/\n/g, ' ')})`)
+  check('"Precio final" cambia las filas', (await page.locator('tbody tr').first().innerText()) !== filasDirecto)
+  check('columnas sin "(costo)" en precio final', !/\(COSTO\)/i.test(await page.locator('thead').first().innerText()))
+  await shot(page, '08c_diferencias_precio_final')
+  await botonDirecto.click()
+  await page.waitForTimeout(300)
+  check('volver a costo directo restaura los números', (await tarjetas()).app === directo.app)
+
+  // 4c. Al cargar, el borrador se borró (PLAN_UX_2, 3.2)
+  await page.goto(BASE + '/app/cargar-obra')
+  await page.getByText('1. SUBÍ EL EXCEL').waitFor()
+  await page.waitForTimeout(1000)
+  check('sin borrador después de cargar', (await page.getByText('Tenías una carga a medias').count()) === 0)
+
+  console.log(fallas ? `\n${fallas} verificaciones FALLARON` : '\nTodas las verificaciones nuevas pasaron')
+  if (fallas) process.exitCode = 1
 
   await browser.close()
 })().catch((e) => { console.error(e); process.exit(1) })

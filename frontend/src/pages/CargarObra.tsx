@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import { AlertTriangle, CheckCircle, ChevronDown, ChevronUp, ClipboardCheck, Search, Trash2 } from 'lucide-react'
 import FileUpload from '../components/ui/FileUpload'
 import { catalogApi, obraApi } from '../lib/api'
+import { borrarBorrador, guardarBorrador, leerBorrador } from '../lib/borrador'
+import type { Borrador } from '../lib/borrador'
 import { useAuth } from '../contexts/AuthContext'
 import type { ObraAnalisis, ObraAsignaciones, ObraCarga, ObraPrecio, ObraPropuesta, ObraRecetaCatalogo, ObraTarea } from '../lib/api'
 import { fmtCurrency, fmtDate, todayIso, unidadEnPalabras } from '../lib/format'
@@ -25,6 +27,35 @@ function fmtNum(n: number): string {
 
 function fmtMillones(n: number): string {
   return Math.abs(n) >= 1_000_000 ? `$${fmtNum(n / 1_000_000)} M` : fmtCurrency(n)
+}
+
+// "hace 12 minutos", "hace 3 horas", "ayer" or the date
+function haceCuanto(iso: string, ahora = new Date()): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  const min = Math.floor((ahora.getTime() - d.getTime()) / 60000)
+  if (min < 1) return 'hace un momento'
+  if (min < 60) return `hace ${min} ${min === 1 ? 'minuto' : 'minutos'}`
+  const mismoDia = d.toDateString() === ahora.toDateString()
+  if (mismoDia) {
+    const h = Math.floor(min / 60)
+    return `hace ${h} ${h === 1 ? 'hora' : 'horas'}`
+  }
+  const ayer = new Date(ahora)
+  ayer.setDate(ayer.getDate() - 1)
+  if (d.toDateString() === ayer.toDateString()) return 'ayer'
+  return fmtDate(iso.slice(0, 10))
+}
+
+// What happened with the yellow jobs that went in without confirmation
+function fraseSinConfirmar(sc: { total: number; con_receta: number; sin_receta: number }) {
+  const uno = sc.total === 1
+  const cabeza = `${sc.total} ${uno ? 'trabajo entró' : 'trabajos entraron'} sin confirmar`
+  let detalle: string
+  if (sc.sin_receta === 0) detalle = uno ? 'con la receta propuesta' : 'todos con la receta propuesta'
+  else if (sc.con_receta === 0) detalle = uno ? 'con el precio del Excel' : 'todos con el precio del Excel'
+  else detalle = `${sc.con_receta} con la receta propuesta y ${sc.sin_receta} con el precio del Excel`
+  return { cabeza: `${cabeza}: ${detalle}.`, revisar: uno ? 'Podés revisarlo en el presupuesto: en las notas dice ' : 'Podés revisarlos en el presupuesto: en las notas dicen ' }
 }
 
 type Pendiente = { codigo: string; nombre: string; unidad: string }
@@ -296,12 +327,18 @@ function RecetaBuscador({
         />
         <button onClick={onCerrar} className="text-xs text-gray-500 hover:text-gray-800">Cerrar</button>
       </div>
+      <p className="px-3 py-1.5 text-[11px] text-gray-500 border-b">
+        Elegí la receta correcta para este trabajo. Si ninguna sirve, usá el precio del Excel.
+      </p>
       <div className="max-h-64 overflow-y-auto">
         <button
           onClick={onSinReceta}
-          className="w-full text-left px-3 py-2 text-sm text-[#143D34] bg-[#E8F5EE] hover:bg-[#d8eee2] font-medium"
+          className="w-full text-left px-3 py-2 text-[#143D34] bg-[#E8F5EE] hover:bg-[#d8eee2]"
         >
-          Usar el precio del Excel (sin receta)
+          <span className="block text-sm font-medium">Usar el precio del Excel (sin receta)</span>
+          <span className="block text-[11px] text-gray-500 font-normal">
+            Se carga con lo que cobró tu Excel; la app no desglosa materiales.
+          </span>
         </button>
         {Object.entries(grupos).map(([cat, items]) => (
           <div key={cat}>
@@ -493,10 +530,39 @@ export default function CargarObra() {
   const [guardandoExcel, setGuardandoExcel] = useState<{ hecho: number; total: number } | null>(null)
   const [noGuardados, setNoGuardados] = useState<string[]>([])
   const panelRef = useRef<HTMLDivElement>(null)
+  const [segundos, setSegundos] = useState(0)
+  // Draft left in this browser by a previous visit (null = none)
+  const [borrador, setBorrador] = useState<Borrador | null>(null)
   const pedido = useRef(0)
   const lote = useRef(0)
 
   useEffect(() => { catalogApi.list().then(setCatalogs).catch(() => setCatalogs([])) }, [])
+  useEffect(() => { leerBorrador().then(setBorrador) }, [])
+
+  // Seconds counter while the budget is being calculated
+  useEffect(() => {
+    if (!cargando) return
+    setSegundos(0)
+    const t = setInterval(() => setSegundos((s) => s + 1), 1000)
+    return () => clearInterval(t)
+  }, [cargando])
+
+  // Keep the work in progress in this browser (debounced 500 ms)
+  useEffect(() => {
+    if (!file || !analisis || carga) return
+    const t = setTimeout(() => {
+      void guardarBorrador({
+        archivo: file,
+        nombreArchivo: file.name,
+        nombre,
+        asignaciones,
+        pendientes,
+        permitir,
+        guardadoEn: new Date().toISOString(),
+      })
+    }, 500)
+    return () => clearTimeout(t)
+  }, [file, analisis, carga, nombre, asignaciones, pendientes, permitir])
 
   async function revisar(f: File | null = file, asig: ObraAsignaciones = asignaciones) {
     if (!f) return
@@ -531,9 +597,37 @@ export default function CargarObra() {
 
   function elegirArchivo(f: File) {
     reiniciar()
+    setBorrador(null)
     setFile(f)
     setNombre(f.name.replace(/\.xlsx?$/i, '').replace(/_/g, ' '))
     revisar(f, {})
+  }
+
+  // Resume the draft as if the file had just been dropped, with everything already decided
+  function seguirBorrador() {
+    if (!borrador) return
+    const b = borrador
+    const f = new File([b.archivo], b.nombreArchivo, { type: b.archivo.type })
+    reiniciar()
+    setBorrador(null)
+    setFile(f)
+    setNombre(b.nombre)
+    setAsignaciones(b.asignaciones)
+    setPendientes(b.pendientes)
+    setPermitir(b.permitir)
+    revisar(f, b.asignaciones)
+  }
+
+  function descartarBorrador() {
+    setBorrador(null)
+    void borrarBorrador()
+  }
+
+  // "Quitar" on the uploaded file: start over and forget the draft
+  function quitarArchivo() {
+    reiniciar()
+    setBorrador(null)
+    void borrarBorrador()
   }
 
   function asignar(clave: string, plantillas: [string, number][], confirmada = true) {
@@ -573,7 +667,11 @@ export default function CargarObra() {
     setCargando(true)
     setError('')
     try {
-      setCarga(await obraApi.cargar(file, asignaciones, nombre.trim(), permitir))
+      const res = await obraApi.cargar(file, asignaciones, nombre.trim(), permitir)
+      if (res.tiempos) console.info('Carga de obra: tiempos del servidor', res.tiempos)
+      setCarga(res)
+      setBorrador(null)
+      void borrarBorrador()
     } catch (e) {
       setError(errorText(e))
       revisar()
@@ -698,6 +796,30 @@ export default function CargarObra() {
         </div>
 
         {/* Paso 1 */}
+        {!carga && !file && borrador && (
+          <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex flex-wrap items-center gap-3">
+            <div className="flex-1 min-w-[220px]">
+              <div className="text-sm font-bold text-amber-800">Tenías una carga a medias</div>
+              <div className="text-xs text-amber-800">
+                <span className="font-semibold">{borrador.nombreArchivo}</span>
+                {haceCuanto(borrador.guardadoEn) && <>, {haceCuanto(borrador.guardadoEn)}</>}
+              </div>
+            </div>
+            <button
+              onClick={seguirBorrador}
+              className="bg-[#2D8D68] hover:bg-[#1B5E4B] text-white font-semibold px-4 py-1.5 rounded-lg text-sm"
+            >
+              Seguir
+            </button>
+            <button
+              onClick={descartarBorrador}
+              className="bg-white border text-gray-600 font-semibold px-4 py-1.5 rounded-lg text-sm hover:bg-gray-50"
+            >
+              Descartar
+            </button>
+          </div>
+        )}
+
         {!carga && (
           <div>
             <div className="text-xs font-bold text-gray-500 mb-2">1. SUBÍ EL EXCEL</div>
@@ -706,6 +828,8 @@ export default function CargarObra() {
               label="Arrastrá el Excel de la obra acá"
               hint="El cómputo de la obra que hacés siempre, el que tiene la hoja 01_C&P. No hay que agregarle nada."
               onFile={elegirArchivo}
+              value={file}
+              onClear={quitarArchivo}
             />
           </div>
         )}
@@ -881,9 +1005,16 @@ export default function CargarObra() {
                   className="bg-[#2D8D68] hover:bg-[#1B5E4B] disabled:opacity-50 text-white font-semibold px-5 py-2 rounded-lg text-sm flex items-center gap-2"
                 >
                   {cargando && <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
-                  {cargando ? 'Cargando…' : 'Cargar presupuesto'}
+                  {cargando
+                    ? `Calculando ${r.trabajos} ${r.trabajos === 1 ? 'trabajo' : 'trabajos'}… ${segundos} s`
+                    : 'Cargar presupuesto'}
                 </button>
               </div>
+              {cargando && (
+                <p className="text-xs text-gray-500 mt-2">
+                  Puede tardar un minuto: la app arma los materiales de cada trabajo y recalcula la obra.
+                </p>
+              )}
               {fraseFalta && (
                 <p className={`text-xs mt-2 ${rojosOtros > 0 ? 'text-red-600' : 'text-gray-600'}`}>{fraseFalta}</p>
               )}
@@ -925,6 +1056,14 @@ export default function CargarObra() {
                 <div className="text-lg font-bold text-[#2D8D68]">{fmtCurrency(carga.resumen?.neto_total)}</div>
               </div>
             </div>
+            {carga.sin_confirmar && carga.sin_confirmar.total > 0 && (() => {
+              const f = fraseSinConfirmar(carga.sin_confirmar)
+              return (
+                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-4 max-w-lg">
+                  {f.cabeza} {f.revisar}<em>Para confirmar</em>.
+                </p>
+              )
+            })()}
             {carga.precios_en_cero > 0 && (
               <p className="text-xs text-amber-700 mb-4">
                 Ojo: {carga.precios_en_cero} códigos quedaron en $0. Cuando tengan precio, usá “Actualizar precios” en Versiones.

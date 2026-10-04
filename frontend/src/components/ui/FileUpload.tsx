@@ -6,6 +6,9 @@ interface Props {
   label?: string
   hint?: string
   onFile: (file: File) => void
+  // Optional: lets the parent show a file it restored itself, and hear about "Quitar"
+  value?: File | null
+  onClear?: () => void
   icon?: React.ReactNode
 }
 
@@ -14,11 +17,14 @@ export default function FileUpload({
   label = 'Arrastrá el archivo acá',
   hint,
   onFile,
+  value,
+  onClear,
   icon,
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [dragging, setDragging] = useState(false)
-  const [file, setFile] = useState<File | null>(null)
+  const [localFile, setFile] = useState<File | null>(null)
+  const file = value !== undefined ? value : localFile
 
   function handleFile(f: File) {
     setFile(f)
@@ -41,6 +47,7 @@ export default function FileUpload({
     e.stopPropagation()
     setFile(null)
     if (inputRef.current) inputRef.current.value = ''
+    onClear?.()
   }
 
   return (

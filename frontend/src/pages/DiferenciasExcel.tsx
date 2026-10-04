@@ -21,6 +21,11 @@ function fmtPct(n: number | null): string {
   return `${n > 0 ? '+' : n < 0 ? '-' : ''}${new Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(Math.abs(n))}%`
 }
 
+function fmtMargen(n: number | null | undefined): string {
+  if (n == null) return 's/d'
+  return `${new Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(n)}%`
+}
+
 function fmtSigned(n: number): string {
   if (Math.round(n) === 0) return '$0'
   return `${n > 0 ? '+' : '-'}${fmtCurrency(Math.abs(n))}`
@@ -28,6 +33,7 @@ function fmtSigned(n: number): string {
 
 type Tono = 'caro' | 'barato' | 'parecido'
 type Filtro = 'todos' | Tono | 'sin_receta'
+type Modo = 'directo' | 'neto'
 
 const UMBRAL = 5
 
@@ -57,9 +63,31 @@ function Diferencia({ valor, pct, tono }: { valor: number; pct: number | null; t
   )
 }
 
-function TrabajoRow({ t }: { t: ObraDiferenciaTrabajo }) {
+// The numbers of a job in the chosen mode (direct cost without margin, or final price)
+function valoresDe(t: ObraDiferenciaTrabajo, modo: Modo) {
+  return modo === 'directo'
+    ? {
+        excel: t.excel_directo,
+        app: t.app_directo,
+        diferencia: t.diferencia_directo,
+        pct: t.diferencia_directo_pct,
+        excelUnit: t.excel_unitario_directo,
+        appUnit: t.app_unitario_directo,
+      }
+    : {
+        excel: t.excel_neto,
+        app: t.app_neto,
+        diferencia: t.diferencia,
+        pct: t.diferencia_pct,
+        excelUnit: t.excel_unitario,
+        appUnit: t.app_unitario,
+      }
+}
+
+function TrabajoRow({ t, modo }: { t: ObraDiferenciaTrabajo; modo: Modo }) {
   const [abierto, setAbierto] = useState(false)
-  const tono = tonoDe(t.app_neto, t.excel_neto, t.diferencia_pct)
+  const v = valoresDe(t, modo)
+  const tono = tonoDe(v.app, v.excel, v.pct)
   const unidad = t.unidad || 's/u'
 
   return (
@@ -79,19 +107,19 @@ function TrabajoRow({ t }: { t: ObraDiferenciaTrabajo }) {
             ? <span className="text-gray-400">Precio del Excel</span>
             : <span className="text-gray-800">{t.receta.nombre}</span>}
         </td>
-        <td className="py-2.5 pr-3 text-xs text-right whitespace-nowrap">{fmtCurrency(t.excel_neto)}</td>
-        <td className="py-2.5 pr-3 text-xs text-right whitespace-nowrap">{fmtCurrency(t.app_neto)}</td>
+        <td className="py-2.5 pr-3 text-xs text-right whitespace-nowrap">{fmtCurrency(v.excel)}</td>
+        <td className="py-2.5 pr-3 text-xs text-right whitespace-nowrap">{fmtCurrency(v.app)}</td>
         <td className="py-2.5 pr-3 text-xs text-right whitespace-nowrap">
-          <Diferencia valor={t.diferencia} pct={t.diferencia_pct} tono={tono} />
+          <Diferencia valor={v.diferencia} pct={v.pct} tono={tono} />
         </td>
       </tr>
       {abierto && (
         <tr className="bg-gray-50">
           <td />
           <td colSpan={5} className="pb-3 pr-3">
-            {t.app_unitario != null && t.excel_unitario != null && (
+            {v.appUnit != null && v.excelUnit != null && (
               <div className="text-[11px] text-gray-500 mb-2">
-                Por {unidad}: Excel {fmtCurrency(t.excel_unitario)} · App {fmtCurrency(t.app_unitario)}
+                Por {unidad}: Excel {fmtCurrency(v.excelUnit)} · App {fmtCurrency(v.appUnit)}
               </div>
             )}
             <table className="w-full text-left">
@@ -106,8 +134,11 @@ function TrabajoRow({ t }: { t: ObraDiferenciaTrabajo }) {
               </thead>
               <tbody>
                 {t.items.map((it) => {
-                  const pct = it.excel_neto ? Math.round((it.diferencia / it.excel_neto) * 1000) / 10 : null
-                  const tonoItem = tonoDe(it.app_neto, it.excel_neto, pct)
+                  const iExcel = modo === 'directo' ? it.excel_directo : it.excel_neto
+                  const iApp = modo === 'directo' ? it.app_directo : it.app_neto
+                  const iDif = modo === 'directo' ? it.diferencia_directo : it.diferencia
+                  const pct = iExcel ? Math.round((iDif / iExcel) * 1000) / 10 : null
+                  const tonoItem = tonoDe(iApp, iExcel, pct)
                   return (
                     <tr key={it.id} className="border-t border-gray-200 text-xs">
                       <td className="py-1.5 pr-2">
@@ -115,9 +146,9 @@ function TrabajoRow({ t }: { t: ObraDiferenciaTrabajo }) {
                         {it.code && <span className="ml-2 font-mono text-[10px] text-gray-400">{it.code}</span>}
                       </td>
                       <td className="py-1.5 pr-2 text-right whitespace-nowrap">{fmtNum(it.cantidad)} {unidad}</td>
-                      <td className="py-1.5 pr-2 text-right whitespace-nowrap">{fmtCurrency(it.excel_neto)}</td>
-                      <td className="py-1.5 pr-2 text-right whitespace-nowrap">{fmtCurrency(it.app_neto)}</td>
-                      <td className={`py-1.5 text-right whitespace-nowrap font-semibold ${COLOR[tonoItem]}`}>{fmtSigned(it.diferencia)}</td>
+                      <td className="py-1.5 pr-2 text-right whitespace-nowrap">{fmtCurrency(iExcel)}</td>
+                      <td className="py-1.5 pr-2 text-right whitespace-nowrap">{fmtCurrency(iApp)}</td>
+                      <td className={`py-1.5 text-right whitespace-nowrap font-semibold ${COLOR[tonoItem]}`}>{fmtSigned(iDif)}</td>
                     </tr>
                   )
                 })}
@@ -138,6 +169,8 @@ export default function DiferenciasExcel() {
   const [error, setError] = useState('')
   const [sinTotales, setSinTotales] = useState(false)
   const [filtro, setFiltro] = useState<Filtro>('todos')
+  // Starts on direct cost: that is where the recipes show
+  const [modo, setModo] = useState<Modo>('directo')
 
   useEffect(() => {
     if (!id) return
@@ -157,13 +190,27 @@ export default function DiferenciasExcel() {
     return () => { vigente = false }
   }, [id])
 
-  const trabajos = data?.trabajos || []
-  const tonoTrabajo = (t: ObraDiferenciaTrabajo) => tonoDe(t.app_neto, t.excel_neto, t.diferencia_pct)
-  const cuenta = {
-    todos: trabajos.length,
+  const directo = modo === 'directo'
+  const trabajosServidor = data?.trabajos || []
+  // The server orders by final-price difference; in direct-cost mode the list follows direct cost
+  const trabajos = directo
+    ? [...trabajosServidor].sort((a, b) => Math.abs(b.diferencia_directo) - Math.abs(a.diferencia_directo))
+    : trabajosServidor
+  const tonoTrabajo = (t: ObraDiferenciaTrabajo) => {
+    const v = valoresDe(t, modo)
+    return tonoDe(v.app, v.excel, v.pct)
+  }
+  const cuentaLocal = {
     caro: trabajos.filter((t) => tonoTrabajo(t) === 'caro').length,
     barato: trabajos.filter((t) => tonoTrabajo(t) === 'barato').length,
     parecido: trabajos.filter((t) => tonoTrabajo(t) === 'parecido').length,
+  }
+  const rd = data?.resumen?.directo
+  const cuenta = {
+    todos: trabajos.length,
+    ...(directo && rd
+      ? { caro: rd.mas_caros, barato: rd.mas_baratos, parecido: rd.parecidos }
+      : cuentaLocal),
     sin_receta: trabajos.filter((t) => t.sin_receta).length,
   }
   const visibles = trabajos.filter((t) => {
@@ -173,8 +220,13 @@ export default function DiferenciasExcel() {
   })
 
   const total = data?.total
-  const tonoTotal: Tono = total ? tonoDe(total.app_neto, total.excel_neto, total.diferencia_pct) : 'parecido'
-  const muyDistinto = total?.diferencia_pct != null && Math.abs(total.diferencia_pct) > 20
+  const tot = total
+    ? directo
+      ? { excel: total.excel_directo, app: total.app_directo, diferencia: total.diferencia_directo, pct: total.diferencia_directo_pct }
+      : { excel: total.excel_neto, app: total.app_neto, diferencia: total.diferencia, pct: total.diferencia_pct }
+    : null
+  const tonoTotal: Tono = tot ? tonoDe(tot.app, tot.excel, tot.pct) : 'parecido'
+  const muyDistinto = tot?.pct != null && Math.abs(tot.pct) > 20
 
   return (
     <div className="p-6 fade-in">
@@ -226,32 +278,64 @@ export default function DiferenciasExcel() {
           </div>
         )}
 
-        {data && total && (
+        {data && total && tot && (
           <>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div>
+              <div className="inline-flex rounded-lg border bg-white p-0.5 gap-0.5">
+                {([
+                  ['directo', 'Costo directo (sin margen)'],
+                  ['neto', 'Precio final'],
+                ] as [Modo, string][]).map(([k, txt]) => (
+                  <button
+                    key={k}
+                    onClick={() => setModo(k)}
+                    aria-pressed={modo === k}
+                    className={`text-xs font-semibold px-3 py-1.5 rounded-md ${modo === k ? 'bg-[#143D34] text-white' : 'text-gray-600 hover:bg-gray-50'}`}
+                  >
+                    {txt}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[11px] text-gray-500 mt-1.5">
+                {directo
+                  ? 'Acá se ven las recetas: lo que cuesta hacer cada trabajo, sin margen.'
+                  : 'Lo que cobra cada uno, con su margen.'}
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
               <div className="bg-white border rounded-xl p-4">
                 <div className="text-[11px] text-gray-500">Excel de Sol</div>
-                <div className="text-xl font-bold text-gray-900">{fmtCurrency(total.excel_neto)}</div>
+                <div className="text-xl font-bold text-gray-900">{fmtCurrency(tot.excel)}</div>
               </div>
               <div className="bg-[#E8F5EE] rounded-xl p-4">
                 <div className="text-[11px] text-gray-500">La app</div>
-                <div className="text-xl font-bold text-[#2D8D68]">{fmtCurrency(total.app_neto)}</div>
+                <div className="text-xl font-bold text-[#2D8D68]">{fmtCurrency(tot.app)}</div>
               </div>
               <div className={`${FONDO[tonoTotal]} rounded-xl p-4`}>
                 <div className="text-[11px] text-gray-500">Diferencia</div>
                 <div className={`text-xl font-bold ${COLOR[tonoTotal]}`}>
-                  {fmtSigned(total.diferencia)}
-                  {total.diferencia_pct != null && (
-                    <span className="text-sm font-semibold ml-2">{fmtPct(total.diferencia_pct)}</span>
+                  {fmtSigned(tot.diferencia)}
+                  {tot.pct != null && (
+                    <span className="text-sm font-semibold ml-2">{fmtPct(tot.pct)}</span>
                   )}
+                </div>
+              </div>
+              <div className="bg-white border rounded-xl p-4">
+                <div className="text-[11px] text-gray-500">Margen</div>
+                <div className="text-sm font-bold text-gray-900 mt-1">
+                  Tu Excel: {fmtMargen(total.margen_excel_pct)} promedio · La app: {fmtMargen(total.margen_app_pct)}
+                </div>
+                <div className="text-[11px] text-gray-500 mt-1">
+                  Si querés que coincidan, ajustá la cadena de markups del presupuesto.
                 </div>
               </div>
             </div>
 
-            {muyDistinto && total.diferencia_pct != null && (
+            {muyDistinto && tot.pct != null && (
               <div className="bg-amber-50 border border-amber-200 text-amber-800 text-sm px-4 py-3 rounded-lg">
-                El total da {new Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(Math.abs(total.diferencia_pct))}%{' '}
-                {total.diferencia_pct > 0 ? 'más caro' : 'más barato'} que tu Excel. Mirá las diferencias antes de usarlo.
+                El total da {new Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(Math.abs(tot.pct))}%{' '}
+                {tot.pct > 0 ? 'más caro' : 'más barato'} que tu Excel. Mirá las diferencias antes de usarlo.
               </div>
             )}
 
@@ -280,13 +364,13 @@ export default function DiferenciasExcel() {
                     <th className="w-6" />
                     <th className="font-semibold py-2 pr-3">Trabajo</th>
                     <th className="font-semibold py-2 pr-3">Receta</th>
-                    <th className="font-semibold py-2 pr-3 text-right">Excel</th>
-                    <th className="font-semibold py-2 pr-3 text-right">App</th>
+                    <th className="font-semibold py-2 pr-3 text-right">{directo ? 'Excel (costo)' : 'Excel'}</th>
+                    <th className="font-semibold py-2 pr-3 text-right">{directo ? 'App (costo)' : 'App'}</th>
                     <th className="font-semibold py-2 pr-3 text-right">Diferencia</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {visibles.map((t) => <TrabajoRow key={t.clave} t={t} />)}
+                  {visibles.map((t) => <TrabajoRow key={t.clave} t={t} modo={modo} />)}
                 </tbody>
               </table>
               {visibles.length === 0 && (
