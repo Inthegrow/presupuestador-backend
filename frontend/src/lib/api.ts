@@ -25,22 +25,38 @@ function getToken(): string | null {
   return localStorage.getItem('sb-auth-token')
 }
 
-// Id de la empresa activa (lo guarda AuthContext). Viaja en cada pedido como X-Org-Id.
+// Empresa activa de ESTA pestaña. Viaja en cada pedido como X-Org-Id.
+// Vive en memoria y en sessionStorage (por pestaña): cambiar de empresa en otra pestaña
+// no puede hacer que esta guarde datos en una empresa distinta de la que muestra (Codex, PR #27).
+// La preferencia "última empresa elegida" por usuario sí va en localStorage, la maneja AuthContext.
 export const ORG_ACTUAL_KEY = 'presu_org_actual'
+let orgActual: string | null = null
 
-function getOrgId(): string | null {
+export function setOrgActual(id: string | null) {
+  orgActual = id
   try {
-    return localStorage.getItem(ORG_ACTUAL_KEY)
+    if (id) sessionStorage.setItem(ORG_ACTUAL_KEY, id)
+    else sessionStorage.removeItem(ORG_ACTUAL_KEY)
   } catch {
-    return null
+    /* sin almacenamiento: queda en memoria */
   }
+}
+
+export function getOrgActual(): string | null {
+  if (orgActual) return orgActual
+  try {
+    orgActual = sessionStorage.getItem(ORG_ACTUAL_KEY)
+  } catch {
+    orgActual = null
+  }
+  return orgActual
 }
 
 function authHeaders(): Record<string, string> {
   const headers: Record<string, string> = {}
   const token = getToken()
   if (token) headers.Authorization = `Bearer ${token}`
-  const orgId = getOrgId()
+  const orgId = getOrgActual()
   if (orgId) headers['X-Org-Id'] = orgId
   return headers
 }

@@ -22,6 +22,7 @@ import {
   Check,
 } from 'lucide-react'
 import { budgetApi, catalogApi } from '../lib/api'
+import { useAuth } from '../contexts/AuthContext'
 import type { Budget, PriceCatalog, AIAnalysisResult } from '../types'
 import FileUpload from '../components/ui/FileUpload'
 import GenericTaskSelector from '../components/ui/GenericTaskSelector'
@@ -104,6 +105,7 @@ function uid() {
 
 export default function NewProject() {
   const navigate = useNavigate()
+  const { puedeEditar } = useAuth()
   const [step, setStep] = useState(0)
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState('')
@@ -607,6 +609,19 @@ export default function NewProject() {
   }
 
   // ─── Render ───────────────────────────────────────────────────────────────
+
+  if (!puedeEditar) {
+    return (
+      <div className="p-6 fade-in">
+        <div className="flex items-center gap-2 text-[#2D8D68] text-[11px] font-bold tracking-wider mb-1">
+          <Plus size={14} /> NUEVO PRESUPUESTO
+        </div>
+        <div className="max-w-xl bg-white border rounded-xl shadow-sm px-6 py-5 text-sm text-gray-700">
+          Tu usuario solo puede mirar.
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="p-6 fade-in">

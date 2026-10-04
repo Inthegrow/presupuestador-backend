@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { RefreshCw, Eye, GitCompare, Plus, CalendarClock } from 'lucide-react'
 import { budgetApi } from '../lib/api'
+import { useAuth } from '../contexts/AuthContext'
 import { fmtCurrency, fmtDate } from '../lib/format'
 import type { Budget, BudgetVersion, PriceUpdateResult } from '../types'
 
@@ -16,6 +17,7 @@ function errorText(e: unknown): string {
 
 export default function Versions() {
   const { id } = useParams<{ id: string }>()
+  const { puedeEditar } = useAuth()
   const [versions, setVersions] = useState<VersionRow[]>([])
   const [budget, setBudget] = useState<Budget | null>(null)
   const [loading, setLoading] = useState(true)
@@ -98,6 +100,7 @@ export default function Versions() {
           <h1 className="text-xl font-extrabold text-gray-900">VERSIONES — {budgetName.toUpperCase()}</h1>
           <span className="text-xs text-gray-500">Precios al {budget?.precios_al ? fmtDate(budget.precios_al) : 'sin fecha'}</span>
         </div>
+        {puedeEditar && (
         <div className="flex gap-2">
         <button
           onClick={updatePrices}
@@ -124,6 +127,7 @@ export default function Versions() {
           Guardar version actual
         </button>
         </div>
+        )}
       </div>
 
       {priceError && (

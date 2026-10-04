@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import { useNavigate } from 'react-router-dom'
 import type { Session, User } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
-import { meApi, ORG_ACTUAL_KEY } from '../lib/api'
+import { getOrgActual, meApi, setOrgActual } from '../lib/api'
 import type { Me, OrgResumen, Rol } from '../types'
 
 const AUTH_ENABLED = import.meta.env.VITE_AUTH_ENABLED === 'true'
@@ -116,7 +116,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setOrgId(null)
     setRole(null)
     setNeedsOrgSelect(false)
-    storageRemove(ORG_ACTUAL_KEY)
+    setOrgActual(null)
   }, [])
 
   const cerrarSesion = useCallback(async () => {
@@ -147,8 +147,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
 
     async function pedirMe(candidata: string | null): Promise<Me> {
-      if (candidata) storageSet(ORG_ACTUAL_KEY, candidata)
-      else storageRemove(ORG_ACTUAL_KEY)
+      if (candidata) setOrgActual(candidata)
+      else setOrgActual(null)
       return meApi.get()
     }
 
@@ -157,7 +157,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Convierte las invitaciones pendientes del mail en membresías
         await Promise.resolve(supabase.rpc('accept_my_invitations')).catch(() => {})
       }
-      const candidata = wantedOrg.current || urlOrg.current || storageGet(orgKey(userKey))
+      // Primero la empresa de ESTA pestaña (sessionStorage), después la última elegida por el usuario
+      const candidata = wantedOrg.current || urlOrg.current || getOrgActual() || storageGet(orgKey(userKey))
       try {
         let me: Me
         try {
@@ -179,10 +180,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setRole(rol)
         setNeedsOrgSelect(!activa && me.orgs.length > 1)
         if (activa) {
-          storageSet(ORG_ACTUAL_KEY, activa)
+          setOrgActual(activa)
           storageSet(orgKey(userKey), activa)
         } else {
-          storageRemove(ORG_ACTUAL_KEY)
+          setOrgActual(null)
         }
         wantedOrg.current = null
         urlOrg.current = null
@@ -198,7 +199,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setOrgs([demo])
           setOrgId(demo.id)
           setRole(demo.role)
-          storageRemove(ORG_ACTUAL_KEY)
+          setOrgActual(null)
           setError('')
         } else if (status === 403) {
           setError(texto || SIN_EMPRESA)
@@ -238,7 +239,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const switchOrg = async (nuevaId: string) => {
     storageSet(orgKey(userKey), nuevaId)
-    storageSet(ORG_ACTUAL_KEY, nuevaId)
+    setOrgActual(nuevaId)
     wantedOrg.current = nuevaId
     forceLoad.current = true
     setMeKey(null)

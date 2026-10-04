@@ -19,6 +19,7 @@ import {
   Library,
 } from 'lucide-react'
 import { budgetApi, templateApi } from '../lib/api'
+import { useAuth } from '../contexts/AuthContext'
 import { fmtCurrency, fmtNumber, fmtPercent } from '../lib/format'
 import type { ItemResource, BudgetItem, Budget, ItemAudit, IndirectConfig } from '../types'
 
@@ -111,6 +112,7 @@ interface ResourceRowProps {
 }
 
 function ResourceRow({ resource, tipo, onSave, onDelete, startEditing, onEditDone }: ResourceRowProps) {
+  const { puedeEditar } = useAuth()
   const [editing, setEditing] = useState(startEditing)
   const [draft, setDraft] = useState<Partial<ItemResource>>({})
   const [saving, setSaving] = useState(false)
@@ -162,7 +164,7 @@ function ResourceRow({ resource, tipo, onSave, onDelete, startEditing, onEditDon
   const inputCls = 'w-full border border-[#2D8D68] rounded px-1.5 py-0.5 text-xs bg-white outline-none focus:ring-1 focus:ring-[#2D8D68]'
   const numCls = inputCls + ' text-right'
 
-  if (editing) {
+  if (editing && puedeEditar) {
     if (tipo === 'mano_obra') {
       return (
         <tr className="bg-[#E8F5EE]/40">
@@ -261,6 +263,7 @@ function ResourceRow({ resource, tipo, onSave, onDelete, startEditing, onEditDon
         <td className="px-3 py-1.5 text-right text-gray-700">{fmtARS(resource.precio_unitario)}</td>
         <td className="px-3 py-1.5 text-right font-bold text-gray-900">{fmtARS(resource.subtotal)}</td>
         <td className="px-3 py-1.5">
+          {puedeEditar && (
           <div className="flex items-center gap-1 justify-center">
             <button onClick={handleEdit} className="p-1 text-gray-300 hover:text-[#2D8D68] transition-colors rounded hover:bg-[#E8F5EE]">
               <Pencil size={12} />
@@ -269,6 +272,7 @@ function ResourceRow({ resource, tipo, onSave, onDelete, startEditing, onEditDon
               <Trash2 size={12} />
             </button>
           </div>
+          )}
         </td>
       </tr>
     )
@@ -306,6 +310,7 @@ function ResourceRow({ resource, tipo, onSave, onDelete, startEditing, onEditDon
       <td className="px-3 py-1.5 text-right text-gray-700">{fmtARS(resource.precio_unitario)}</td>
       <td className="px-3 py-1.5 text-right font-bold text-gray-900">{fmtARS(resource.subtotal)}</td>
       <td className="px-3 py-1.5">
+        {puedeEditar && (
         <div className="flex items-center gap-1 justify-center">
           <button onClick={handleEdit} className="p-1 text-gray-300 hover:text-[#2D8D68] transition-colors rounded hover:bg-[#E8F5EE]">
             <Pencil size={12} />
@@ -314,6 +319,7 @@ function ResourceRow({ resource, tipo, onSave, onDelete, startEditing, onEditDon
             <Trash2 size={12} />
           </button>
         </div>
+        )}
       </td>
     </tr>
   )
@@ -331,6 +337,7 @@ interface SectionProps {
 }
 
 function ResourceSection({ tipo, recursos, itemQty, budgetId, itemId, onReload }: SectionProps) {
+  const { puedeEditar } = useAuth()
   const [open, setOpen] = useState(true)
   const [adding, setAdding] = useState(false)
   const [newResource, setNewResource] = useState<Partial<ItemResource> | null>(null)
@@ -469,6 +476,7 @@ function ResourceSection({ tipo, recursos, itemQty, budgetId, itemId, onReload }
           )}
 
           {/* Add resource button */}
+          {puedeEditar && (
           <div className="px-4 py-2 border-t">
             <button
               onClick={handleAddNew}
@@ -479,6 +487,7 @@ function ResourceSection({ tipo, recursos, itemQty, budgetId, itemId, onReload }
               Agregar recurso
             </button>
           </div>
+          )}
         </>
       )}
     </div>
@@ -641,6 +650,7 @@ function ItemParams({
   item: BudgetItem
   onSaved: () => void
 }) {
+  const { puedeEditar } = useAuth()
   const [draft, setDraft] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -682,14 +692,18 @@ function ItemParams({
         {Object.keys(draft).map((k) => (
           <label key={k} className="flex items-center gap-1 text-xs text-gray-600">
             <span className="font-mono">{k}</span>
-            <input
-              value={draft[k]}
-              onChange={(e) => setDraft({ ...draft, [k]: e.target.value })}
-              className="w-20 text-right px-2 py-1 text-xs border border-gray-200 rounded-md focus:outline-none focus:border-[#2D8D68]"
-            />
+            {puedeEditar ? (
+              <input
+                value={draft[k]}
+                onChange={(e) => setDraft({ ...draft, [k]: e.target.value })}
+                className="w-20 text-right px-2 py-1 text-xs border border-gray-200 rounded-md focus:outline-none focus:border-[#2D8D68]"
+              />
+            ) : (
+              <span className="font-semibold text-gray-800">{draft[k]}</span>
+            )}
           </label>
         ))}
-        {changed && (
+        {changed && puedeEditar && (
           <button
             onClick={handleSave}
             disabled={saving}
@@ -865,6 +879,7 @@ function TemplateModal({ budgetId, itemId, onApplied, onClose }: TemplateModalPr
 export default function ItemDetail() {
   const { id, itemId } = useParams<{ id: string; itemId: string }>()
   const navigate = useNavigate()
+  const { puedeEditar } = useAuth()
   const [budget, setBudget] = useState<Budget | null>(null)
   const [item, setItem] = useState<BudgetItem | null>(null)
   const [recursos, setRecursos] = useState<ItemResource[]>([])
@@ -982,6 +997,11 @@ export default function ItemDetail() {
 
   return (
     <div className="p-6 fade-in max-w-6xl mx-auto">
+      {!puedeEditar && (
+        <div className="mb-3 rounded-lg bg-gray-100 border border-gray-200 px-3 py-1.5 text-xs text-gray-600">
+          Tu usuario solo puede mirar. Los cambios los hace quien carga y edita.
+        </div>
+      )}
       {/* Breadcrumb */}
       <div className="flex items-center gap-1.5 text-xs mb-2">
         <span className="text-gray-400 cursor-pointer hover:text-[#2D8D68]" onClick={() => navigate('/app/dashboard')}>Presupuestos</span>
@@ -1001,6 +1021,7 @@ export default function ItemDetail() {
             <ArrowLeft size={13} />
             Volver al editor
           </button>
+          {puedeEditar && (
           <button
             onClick={() => setTemplateModalOpen(true)}
             className="flex items-center gap-1.5 text-xs bg-[#2D8D68] hover:bg-[#1E6B4E] text-white px-3 py-1.5 rounded-lg font-medium transition-colors"
@@ -1008,6 +1029,7 @@ export default function ItemDetail() {
             <Library size={13} />
             Cargar template
           </button>
+          )}
         </div>
         <div className="flex items-center gap-2 text-[#2D8D68] text-[11px] font-bold tracking-wider">
           <ClipboardList size={14} /> DETALLE DE RECURSOS
@@ -1015,7 +1037,7 @@ export default function ItemDetail() {
       </div>
 
       {/* Template modal */}
-      {templateModalOpen && id && itemId && (
+      {templateModalOpen && puedeEditar && id && itemId && (
         <TemplateModal
           budgetId={id}
           itemId={itemId}
@@ -1113,7 +1135,7 @@ export default function ItemDetail() {
         </button>
         {memoriaOpen && (
           <div className="p-4">
-            {editingMemoria ? (
+            {editingMemoria && puedeEditar ? (
               <div className="space-y-3">
                 <textarea
                   value={memoriaDraft}
@@ -1167,6 +1189,7 @@ export default function ItemDetail() {
                 ) : (
                   <p className="text-sm text-gray-400 italic mb-3">Sin memoria de calculo para este item.</p>
                 )}
+                {puedeEditar && (
                 <button
                   onClick={() => {
                     setMemoriaDraft(item?.notas_calculo ?? '')
@@ -1177,6 +1200,7 @@ export default function ItemDetail() {
                   <Pencil size={12} />
                   {item?.notas_calculo ? 'Editar memoria' : 'Agregar memoria de calculo'}
                 </button>
+                )}
               </div>
             )}
           </div>

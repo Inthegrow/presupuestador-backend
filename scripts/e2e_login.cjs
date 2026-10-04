@@ -17,7 +17,8 @@ async function shot(page, name) {
 
 ;(async () => {
   const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium', args: ['--no-sandbox'] })
-  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } })
+  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } })
+  const page = await context.newPage()
   page.on('pageerror', (e) => console.log('PAGEERROR', e.message))
   page.on('console', (m) => { if (m.type() === 'error' && !/CERT/.test(m.text())) console.log('CONSOLE', m.text()) })
 
@@ -60,8 +61,34 @@ async function shot(page, name) {
   const top2 = await page.locator('header').innerText()
   console.log('topbar demo:', top2.replace(/\n/g, ' | '))
   await shot(page, '07_dashboard_obra_demo')
-  const header = await page.evaluate(() => localStorage.getItem('presu_org_actual'))
-  console.log('X-Org-Id guardado:', header)
+  const header = await page.evaluate(() => sessionStorage.getItem('presu_org_actual'))
+  console.log('X-Org-Id de esta pestaña:', header)
+
+  // 5. Dos pestañas (Codex, PR #27): cambiar de empresa en una NO cambia los pedidos de la otra
+  const ctx = context
+  const tab1 = await ctx.newPage()
+  await tab1.goto(BASE + '/app/dashboard')
+  await tab1.getByLabel('Cambiar de empresa').waitFor({ timeout: 30000 })
+  await tab1.getByLabel('Cambiar de empresa').selectOption({ label: 'TERRAC SA' })
+  await tab1.waitForTimeout(1200)
+  const tab2 = await ctx.newPage()
+  await tab2.goto(BASE + '/app/dashboard')
+  await tab2.getByLabel('Cambiar de empresa').waitFor({ timeout: 30000 })
+  await tab2.getByLabel('Cambiar de empresa').selectOption({ label: 'Obra Demo' })
+  await tab2.waitForTimeout(1200)
+  console.log('pestaña 2 en:', await tab2.getByLabel('Cambiar de empresa').inputValue())
+  const enviados = []
+  tab1.on('request', (r) => { if (r.url().includes('/api/')) enviados.push(r.headers()['x-org-id']) })
+  await tab1.getByRole('link', { name: 'Catalogos' }).click()
+  await tab1.getByText('Maestro TERRAC - Materiales').waitFor({ timeout: 30000 })
+  const soloTerrac = enviados.length > 0 && enviados.every((h) => h === 'test-org-uuid')
+  console.log('pestaña 1 sigue pidiendo como TERRAC:', soloTerrac, enviados.slice(0, 3))
+  await tab1.reload()
+  await tab1.getByLabel('Cambiar de empresa').waitFor({ timeout: 30000 })
+  console.log('pestaña 1 tras recargar:', await tab1.getByLabel('Cambiar de empresa').inputValue(), '(debe seguir test-org-uuid)')
+  await tab1.screenshot({ path: path.join(shots, '08_dos_pestanas_tab1_terrac.png') })
+  await tab2.screenshot({ path: path.join(shots, '08_dos_pestanas_tab2_demo.png') })
+  if (!soloTerrac) { console.error('FALLA: una pestaña mandó pedidos con la empresa de la otra'); process.exitCode = 1 }
 
   await browser.close()
 })().catch((e) => { console.error(e); process.exit(1) })

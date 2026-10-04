@@ -14,6 +14,7 @@ import {
   AlertTriangle,
 } from 'lucide-react'
 import { budgetApi } from '../lib/api'
+import { useAuth } from '../contexts/AuthContext'
 import type { AIAnalysisResult, AISeccion, AIItem, AIItemToInsert } from '../types'
 import FileUpload from '../components/ui/FileUpload'
 
@@ -60,6 +61,7 @@ const ANALYZING_STEPS = [
 export default function AIPlans() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const { puedeEditar } = useAuth()
 
   // State
   const [analyzing, setAnalyzing] = useState(false)
@@ -216,6 +218,19 @@ export default function AIPlans() {
   }
 
   // ─── Render ───────────────────────────────────────────────────────────────
+
+  if (!puedeEditar) {
+    return (
+      <div className="p-6 fade-in">
+        <div className="flex items-center gap-2 text-[#2D8D68] text-[11px] font-bold tracking-wider mb-1">
+          <Layers size={14} /> INTELIGENCIA ARTIFICIAL
+        </div>
+        <div className="max-w-xl bg-white border rounded-xl shadow-sm px-6 py-5 text-sm text-gray-700">
+          Tu usuario solo puede mirar.
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="p-6 fade-in">
