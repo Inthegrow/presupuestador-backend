@@ -3,10 +3,11 @@ import Sidebar from './Sidebar'
 import TopBar from './TopBar'
 import { useAuth } from '../../contexts/AuthContext'
 import ElegirEmpresa from '../../pages/ElegirEmpresa'
+import ServidorDespertando from './ServidorDespertando'
 
 const AUTH_ENABLED = import.meta.env.VITE_AUTH_ENABLED === 'true'
 
-export default function AppLayout() {
+function AppLayoutContenido() {
   const { user, loading, org, needsOrgSelect, error, reload } = useAuth()
 
   if (loading) {
@@ -60,5 +61,15 @@ export default function AppLayout() {
         </main>
       </div>
     </div>
+  )
+}
+
+// The strip lives outside the content so it also shows while the session is loading
+export default function AppLayout() {
+  return (
+    <>
+      <ServidorDespertando />
+      <AppLayoutContenido />
+    </>
   )
 }

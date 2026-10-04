@@ -61,41 +61,75 @@ function authHeaders(): Record<string, string> {
   return headers
 }
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const res = await fetch(`${BASE_URL}${path}`, {
-    method,
-    headers: {
-      'Content-Type': 'application/json',
-      ...authHeaders(),
-    },
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  })
-  if (!res.ok) {
-    const text = await res.text()
-    throw new Error(`${res.status}: ${text}`)
-  }
-  return res.json() as Promise<T>
+// ─── Aviso de servidor lento ───────────────────────────────────────────────────
+// A request that takes more than 4 s fires 'api:lento'; when it ends, 'api:respondio'.
+// The counter of slow requests in flight keeps the banner from flickering.
+const LENTO_MS = 4000
+let pedidosLentos = 0
+
+export function hayPedidosLentos(): boolean {
+  return pedidosLentos > 0
 }
 
-async function postFile<T>(path: string, formData: FormData): Promise<T> {
-  const res = await fetch(`${BASE_URL}${path}`, {
-    method: 'POST',
-    headers: { ...authHeaders() },
-    body: formData,
-  })
-  if (!res.ok) {
-    const text = await res.text()
-    throw new Error(`${res.status}: ${text}`)
+async function conAviso<T>(run: () => Promise<T>): Promise<T> {
+  let lento = false
+  const timer = setTimeout(() => {
+    lento = true
+    pedidosLentos++
+    window.dispatchEvent(new CustomEvent('api:lento'))
+  }, LENTO_MS)
+  try {
+    return await run()
+  } finally {
+    clearTimeout(timer)
+    if (lento) {
+      pedidosLentos = Math.max(0, pedidosLentos - 1)
+      window.dispatchEvent(new CustomEvent('api:respondio'))
+    }
   }
-  return res.json() as Promise<T>
 }
 
-async function getBlob(path: string): Promise<Blob> {
-  const res = await fetch(`${BASE_URL}${path}`, {
-    headers: { ...authHeaders() },
+function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  return conAviso(async () => {
+    const res = await fetch(`${BASE_URL}${path}`, {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        ...authHeaders(),
+      },
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    })
+    if (!res.ok) {
+      const text = await res.text()
+      throw new Error(`${res.status}: ${text}`)
+    }
+    return res.json() as Promise<T>
   })
-  if (!res.ok) throw new Error(`${res.status}`)
-  return res.blob()
+}
+
+function postFile<T>(path: string, formData: FormData): Promise<T> {
+  return conAviso(async () => {
+    const res = await fetch(`${BASE_URL}${path}`, {
+      method: 'POST',
+      headers: { ...authHeaders() },
+      body: formData,
+    })
+    if (!res.ok) {
+      const text = await res.text()
+      throw new Error(`${res.status}: ${text}`)
+    }
+    return res.json() as Promise<T>
+  })
+}
+
+function getBlob(path: string): Promise<Blob> {
+  return conAviso(async () => {
+    const res = await fetch(`${BASE_URL}${path}`, {
+      headers: { ...authHeaders() },
+    })
+    if (!res.ok) throw new Error(`${res.status}`)
+    return res.blob()
+  })
 }
 
 function get<T>(path: string) {
@@ -368,6 +402,10 @@ export interface ObraCarga {
   total_excel: number
   resumen?: { directo_total: number; neto_total: number }
   memoria_guardada?: number
+  // Trabajos amarillos que entraron sin que Sol los confirmara
+  sin_confirmar?: { total: number; con_receta: number; sin_receta: number; claves: string[] }
+  // Segundos que tardó cada etapa del servidor
+  tiempos?: { analisis_s: number; items_s: number; recursos_s: number; cascada_s: number; total_s: number }
 }
 
 export interface ObraDiferenciaItem {
@@ -378,6 +416,9 @@ export interface ObraDiferenciaItem {
   app_neto: number
   excel_neto: number
   diferencia: number
+  app_directo: number
+  excel_directo: number
+  diferencia_directo: number
 }
 
 export interface ObraDiferenciaTrabajo {
@@ -396,6 +437,12 @@ export interface ObraDiferenciaTrabajo {
   excel_directo: number
   app_unitario: number | null
   excel_unitario: number | null
+  diferencia_directo: number
+  diferencia_directo_pct: number | null
+  margen_app_pct: number | null
+  margen_excel_pct: number | null
+  app_unitario_directo: number | null
+  excel_unitario_directo: number | null
   items: ObraDiferenciaItem[]
 }
 
@@ -411,8 +458,19 @@ export interface ObraDiferencias {
     diferencia_pct: number | null
     app_directo: number
     excel_directo: number
+    diferencia_directo: number
+    diferencia_directo_pct: number | null
+    margen_app_pct: number | null
+    margen_excel_pct: number | null
   }
-  resumen: { trabajos: number; mas_caros: number; mas_baratos: number; parecidos: number; sin_receta: number }
+  resumen: {
+    trabajos: number
+    mas_caros: number
+    mas_baratos: number
+    parecidos: number
+    sin_receta: number
+    directo: { mas_caros: number; mas_baratos: number; parecidos: number }
+  }
   trabajos: ObraDiferenciaTrabajo[]
 }
 

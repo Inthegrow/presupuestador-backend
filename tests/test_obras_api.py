@@ -93,6 +93,7 @@ ARISTAS = "ARISTAS DE YESO EN PAREDES | m"
 TELGOPOR = "TELGOPOR 50 MM + CONTRAPISO EN AZOTEA ACCESIBLE E: 8CM | m2"
 TENSORES = "TENSORES 20 CM X 40 CM. | m"
 OBRADOR = "OBRADOR | gl"
+MURO_CARGA = "MURO DE CARGA EN LADRILLO HUECO DEL 18 | m2"
 
 
 HALL = "CONTRAPISO EN HALL + RAMPAS. ESP.=10CM. | m2"
@@ -508,6 +509,48 @@ class TestCargar:
         assert res.status_code == 409
         assert "Ya existe" in res.text
 
+    def test_unconfirmed_tasks_and_times(self, client, db):
+        """Sol loads with yellows: the answer says how many went in unconfirmed (with the proposed
+        recipe or the Excel price) and their notes end in "Para confirmar."; the greens do not."""
+        _fix_eps(db)
+        wb = _workbook()
+        ws = wb["01_C&P"]
+        # A rule with a question nobody answered: yellow with its proposed recipe
+        row = ws.max_row + 1
+        for col, value in ((1, "4.3-6"), (2, "MURO DE CARGA EN LADRILLO HUECO DEL 18"), (3, "m²"), (4, 10),
+                           (5, 1), (10, 1), (14, 20), (26, 30)):
+            ws.cell(row, col, value)
+        tareas = _tareas(analizar(client, wb=wb).json())
+        assert tareas[MURO_CARGA]["estado"] == "amarillo"
+        assert tareas[MURO_CARGA]["receta"]["codigo"] == "5.1.4"
+
+        res = cargar(client, wb=wb)
+        assert res.status_code == 200, res.text
+        body = res.json()
+        # By the Excel's total, biggest first: OBRADOR 1500, ARISTAS 150, MURO DE CARGA 30
+        assert body["sin_confirmar"] == {"total": 3, "con_receta": 1, "sin_receta": 2,
+                                         "claves": [OBRADOR, ARISTAS, MURO_CARGA]}
+        items = {i["code"]: i for i in db.tables["budget_items"]}
+        for code in ("1.1", "4.2.2", "4.3.6"):
+            assert items[code]["notas"].endswith(" Para confirmar."), code
+        assert items["4.3.6"]["template_id"] == "tmpl-5.1.4"
+        for code in ("3.1.3", "4.2.1", "4.2.3", "4.2.4", "4.3.5", "4", "4.2"):
+            assert "Para confirmar" not in items[code]["notas"], code
+
+        assert set(body["tiempos"]) == {"analisis_s", "items_s", "recursos_s", "cascada_s", "total_s"}
+        assert all(isinstance(v, (int, float)) and v >= 0 for v in body["tiempos"].values())
+
+        # Confirmed on the screen: nothing left to confirm
+        res = cargar(client, nombre="OTRA", wb=wb, asignaciones={
+            OBRADOR: {"plantillas": [], "confirmada": True},
+            ARISTAS: {"plantillas": [], "confirmada": True},
+            MURO_CARGA: {"plantillas": [["5.1.4", 1]], "confirmada": True},
+        })
+        assert res.json()["sin_confirmar"] == {"total": 0, "con_receta": 0, "sin_receta": 0, "claves": []}
+        budget_id = res.json()["budget_id"]
+        assert not any("Para confirmar" in i["notas"] for i in db.tables["budget_items"]
+                       if i["budget_id"] == budget_id)
+
     def test_failure_leaves_nothing(self, client, db):
         with patch("app.routers.analysis._run_cascade", side_effect=RuntimeError("se cortó")):
             res = cargar(client, permitir=True)
@@ -744,9 +787,12 @@ class TestDiferencias:
             BUDGET_ID, "EDIFICIO GINKGO", "2026-10-03", "ginkgo.xlsx")
         # The hand-added item without Excel totals is left out
         assert body["total"] == {"app_neto": 3880.0, "excel_neto": 4000.0, "diferencia": -120.0,
-                                 "diferencia_pct": -3.0, "app_directo": 2150.0, "excel_directo": 2400.0}
+                                 "diferencia_pct": -3.0, "app_directo": 2150.0, "excel_directo": 2400.0,
+                                 "diferencia_directo": -250.0, "diferencia_directo_pct": -10.4,
+                                 "margen_app_pct": 80.5, "margen_excel_pct": 66.7}
         assert body["resumen"] == {"trabajos": 5, "mas_caros": 2, "mas_baratos": 1, "parecidos": 2,
-                                   "sin_receta": 4}
+                                   "sin_receta": 4,
+                                   "directo": {"mas_caros": 1, "mas_baratos": 1, "parecidos": 3}}
         # Biggest difference first (in absolute value)
         assert [t["descripcion"] for t in body["trabajos"]] == [
             "OBRADOR", "MURO HUECO 18", "AYUDA DE GREMIOS", "LIMPIEZA", "CERO"]
@@ -754,7 +800,9 @@ class TestDiferencias:
         muro = body["trabajos"][1]
         assert set(muro) == {"clave", "descripcion", "unidad", "veces", "cantidad_total", "receta", "sin_receta",
                              "app_neto", "excel_neto", "diferencia", "diferencia_pct", "app_directo",
-                             "excel_directo", "app_unitario", "excel_unitario", "items"}
+                             "excel_directo", "app_unitario", "excel_unitario", "items",
+                             "diferencia_directo", "diferencia_directo_pct", "margen_app_pct", "margen_excel_pct",
+                             "app_unitario_directo", "excel_unitario_directo"}
         assert muro["clave"] == "MURO HUECO 18 | m2"  # m² and m2 are the same task
         assert (muro["veces"], muro["cantidad_total"]) == (2, 150.0)
         assert (muro["receta"], muro["sin_receta"]) == ({"codigo": "5.1.4", "nombre": "Receta 5.1.4"}, False)
@@ -764,9 +812,11 @@ class TestDiferencias:
         assert (muro["app_unitario"], muro["excel_unitario"]) == (12.0, 10.0)
         assert muro["items"] == [
             {"id": "i-m1", "code": "4.2.1", "piso": "PRIMER PISO", "cantidad": 100.0, "app_neto": 1200.0,
-             "excel_neto": 1000.0, "diferencia": 200.0},
+             "excel_neto": 1000.0, "diferencia": 200.0, "app_directo": 900.0, "excel_directo": 800.0,
+             "diferencia_directo": 100.0},
             {"id": "i-m2", "code": "4.3.1", "piso": "SEGUNDO PISO", "cantidad": 50.0, "app_neto": 600.0,
-             "excel_neto": 500.0, "diferencia": 100.0},
+             "excel_neto": 500.0, "diferencia": 100.0, "app_directo": 450.0, "excel_directo": 400.0,
+             "diferencia_directo": 50.0},
         ]
 
         obrador, ayuda, cero = body["trabajos"][0], body["trabajos"][2], body["trabajos"][4]
@@ -774,6 +824,41 @@ class TestDiferencias:
         assert obrador["items"][0]["piso"] == "ALBAÑILERIA"  # its direct parent
         assert (ayuda["diferencia"], ayuda["diferencia_pct"]) == (50.0, None)  # the Excel said 0
         assert (cero["app_unitario"], cero["excel_unitario"], cero["diferencia_pct"]) == (None, None, None)
+
+    def test_direct_cost_and_margin(self, client, db):
+        """Sol puts a different markup on each task: comparing the direct cost shows the recipes,
+        and the margin says how much each one adds on top."""
+        _budget_with_excel(db)
+        trabajos = {t["descripcion"]: t for t in diferencias(client).json()["trabajos"]}
+        muro = trabajos["MURO HUECO 18"]
+        assert (muro["diferencia_directo"], muro["diferencia_directo_pct"]) == (150.0, 12.5)
+        assert (muro["margen_app_pct"], muro["margen_excel_pct"]) == (33.3, 25.0)
+        assert (muro["app_unitario_directo"], muro["excel_unitario_directo"]) == (9.0, 8.0)
+        obrador = trabajos["OBRADOR"]
+        assert (obrador["diferencia_directo"], obrador["diferencia_directo_pct"]) == (-400.0, -33.3)
+        assert (obrador["margen_app_pct"], obrador["margen_excel_pct"]) == (25.0, 25.0)
+        assert obrador["items"][0]["diferencia_directo"] == -400.0
+        # Without a direct cost there is no margin; nor a % over an Excel that says 0
+        limpieza = trabajos["LIMPIEZA"]
+        assert (limpieza["margen_app_pct"], limpieza["margen_excel_pct"]) == (None, None)
+        assert (limpieza["diferencia_directo"], limpieza["diferencia_directo_pct"]) == (0.0, None)
+        cero = trabajos["CERO"]
+        assert (cero["app_unitario_directo"], cero["excel_unitario_directo"]) == (None, None)
+
+        # The 5 % rule by direct cost: 4 % is "parecido", 6 % is not; an Excel at 0 with cost is "más caro"
+        items = {i["id"]: i for i in db.tables["budget_items"]}
+        items["i-lim"].update(directo_total=1040, excel_directo=1000)
+        items["i-ay"].update(directo_total=50, excel_directo=0)
+        body = diferencias(client).json()
+        assert body["resumen"]["directo"] == {"mas_caros": 2, "mas_baratos": 1, "parecidos": 2}
+        items["i-lim"]["directo_total"] = 1060
+        body = diferencias(client).json()
+        assert body["resumen"]["directo"] == {"mas_caros": 3, "mas_baratos": 1, "parecidos": 1}
+        # The final price summary and the order do not follow the direct cost
+        assert (body["resumen"]["mas_caros"], body["resumen"]["mas_baratos"], body["resumen"]["parecidos"]) == (
+            2, 1, 2)
+        assert [t["descripcion"] for t in body["trabajos"]] == [
+            "OBRADOR", "MURO HUECO 18", "AYUDA DE GREMIOS", "LIMPIEZA", "CERO"]
 
     def test_budget_loaded_before_saving_the_excel_totals(self, client, db):
         _budget_with_excel(db)

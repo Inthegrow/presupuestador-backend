@@ -15,6 +15,7 @@
    recalcula entero con la cascada de la app (redondeo de compra e indirectos).
    Si algo falla a mitad de camino, se borra el presupuesto: no queda a medias.
    Las recetas elegidas quedan en la memoria (obra_recetas_memoria) para la próxima obra.
+   Los trabajos amarillos que entran sin confirmar dicen "Para confirmar." en sus notas.
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 import warnings
 from datetime import date, datetime, timezone
 from io import BytesIO
@@ -453,7 +455,8 @@ def analyze(parsed: dict, templates: dict[str, dict], book: PriceBook, asignacio
 
     by_key: dict[str, list[dict]] = {}
     for item in items:
-        by_key.setdefault(task_key(item["descripcion"], item.get("unidad")), []).append(item)
+        item["clave"] = task_key(item["descripcion"], item.get("unidad"))  # its task, for the load
+        by_key.setdefault(item["clave"], []).append(item)
 
     tareas = []
     for key, its in by_key.items():
@@ -593,7 +596,12 @@ def _insert(db, table: str, rows: list[dict]) -> list[dict]:
     return out
 
 
-def _item_row(item: dict, budget_id: str, org_id: str, templates: dict[str, dict]) -> dict:
+PARA_CONFIRMAR = "Para confirmar."
+
+
+def _item_row(item: dict, budget_id: str, org_id: str, templates: dict[str, dict],
+              amarillas: set[str] | frozenset[str] = frozenset()) -> dict:
+    """``amarillas``: task keys loaded without confirming; their notes end in "Para confirmar."."""
     ex = item.get("excel") or {}
     es_item = item["nivel"] == "item"
     sin = es_item and not item.get("plantilla")
@@ -601,13 +609,16 @@ def _item_row(item: dict, budget_id: str, org_id: str, templates: dict[str, dict
     mat = float(ex.get("mat_unit", 0)) if sin else 0.0
     mo = float(ex.get("mo_unit", 0)) if sin else 0.0
     directo = round(mat * (qty or 0), 2) + round(mo * (qty or 0), 2)
+    notas = item_notes(item)
+    if es_item and item.get("clave") in amarillas:
+        notas = f"{notas} {PARA_CONFIRMAR}" if notas else PARA_CONFIRMAR
     return {
         "budget_id": budget_id, "org_id": org_id, "code": item["codigo"],
         "description": item["descripcion"], "unidad": item["unidad"], "cantidad": qty,
         "mat_unitario": mat, "mo_unitario": mo,
         "mat_total": round(mat * (qty or 0), 2), "mo_total": round(mo * (qty or 0), 2),
         "directo_total": directo, "indirecto_total": 0, "beneficio_total": 0, "neto_total": directo,
-        "notas": item_notes(item), "sort_order": item["orden"],
+        "notas": notas, "sort_order": item["orden"],
         "template_id": templates[item["plantilla"]]["id"] if item.get("plantilla") else None,
         "parametros": item.get("parametros") or {},
         # What the obra's Excel said (columns N and Z of 01_C&P), for "Ver diferencias con el Excel"
@@ -644,6 +655,14 @@ def _resource_rows(item: dict, item_id: str, org_id: str, templates: dict[str, d
 
 def _plural(n: int, one: str, many: str) -> str:
     return (one if n == 1 else many).format(n=n)
+
+
+def _sin_confirmar(tareas: list[dict]) -> dict:
+    """Yellow tasks loaded as they were: with the proposed recipe or with the Excel price."""
+    amarillas = sorted((t for t in tareas if t["estado"] == "amarillo"), key=lambda t: -t["total_excel"])
+    con_receta = sum(1 for t in amarillas if t["receta"] is not None)
+    return {"total": len(amarillas), "con_receta": con_receta, "sin_receta": len(amarillas) - con_receta,
+            "claves": [t["clave"] for t in amarillas]}
 
 
 def _save_memory(db, org_id: str, result: dict, elegidas: dict, memoria: dict[str, dict]) -> int:  # type: ignore[no-untyped-def]
@@ -684,6 +703,7 @@ async def cargar_obra(
     """Carga la obra como presupuesto nuevo y lo recalcula entero."""
     from app.routers.analysis import _run_cascade  # same recalculation as "Recalcular obra"
 
+    inicio = time.perf_counter()
     nombre = " ".join((nombre or "").split())
     if not nombre:
         raise HTTPException(400, "Poné un nombre para el presupuesto")
@@ -694,7 +714,9 @@ async def cargar_obra(
     book = PriceBook(db, org_id, today())
     elegidas = _asignaciones(asignaciones)
     memoria = _memoria(db, org_id)
+    t0 = time.perf_counter()
     result = analyze(parse_obra(wb), templates, book, elegidas, memoria, excel_prices(wb))
+    tiempos = {"analisis_s": time.perf_counter() - t0}
 
     rojos = [t for t in result["tareas"] if t["estado"] == "rojo"]
     duros = [t["clave"] for t in rojos if t["motivo_rojo"] != "precio"]
@@ -724,28 +746,36 @@ async def cargar_obra(
     }).execute().data[0]
     budget_id = budget["id"]
 
+    sin_confirmar = _sin_confirmar(result["tareas"])
+    amarillas = set(sin_confirmar["claves"])
     try:
+        t0 = time.perf_counter()
         ids: dict[int, str] = {}
         # Rubros, then pisos, then ítems: each level needs its parent's id
         for nivel in ("rubro", "subrubro", "item"):
             level = [i for i in plan["items"] if i["nivel"] == nivel]
             rows = []
             for i in level:
-                row = _item_row(i, budget_id, org_id, templates)
+                row = _item_row(i, budget_id, org_id, templates, amarillas)
                 row["parent_id"] = ids.get(i["parent"]) if i["parent"] is not None else None
                 rows.append(row)
             for saved in _insert(db, "budget_items", rows):
                 ids[saved["sort_order"]] = saved["id"]
+        tiempos["items_s"] = time.perf_counter() - t0
 
+        t0 = time.perf_counter()
         org_waste = load_org_config(db, org_id).get("desperdicio_pct")
         resources = []
         for i in plan["items"]:
             if i.get("recursos"):
                 resources += _resource_rows(i, ids[i["orden"]], org_id, templates, book, org_waste)
         _insert(db, "item_resources", resources)
+        tiempos["recursos_s"] = time.perf_counter() - t0
 
+        t0 = time.perf_counter()
         items = db.table("budget_items").select("*").eq("budget_id", budget_id).execute().data or []
         cascade = _run_cascade(db, org_id, budget, items, strict=True)
+        tiempos["cascada_s"] = time.perf_counter() - t0
     except Exception as exc:
         logger.exception("Carga de obra fallida; se borra el presupuesto %s", budget_id)
         db.table("budgets").delete().eq("id", budget_id).eq("org_id", org_id).execute()
@@ -753,6 +783,9 @@ async def cargar_obra(
 
     guardada = _save_memory(db, org_id, result, elegidas, memoria)
     loaded = [i for i in plan["items"] if i["nivel"] == "item"]
+    tiempos["total_s"] = time.perf_counter() - inicio
+    tiempos = {k: round(v, 1) for k, v in tiempos.items()}
+    logger.info("Carga de obra %s: %s", budget_id, tiempos)
     return {
         "budget_id": budget_id,
         "nombre": nombre,
@@ -763,6 +796,8 @@ async def cargar_obra(
         "total_excel": result["resumen"]["total_excel"],
         "resumen": cascade.get("summary"),
         "memoria_guardada": guardada,
+        "sin_confirmar": sin_confirmar,
+        "tiempos": tiempos,
     }
 
 
@@ -783,17 +818,29 @@ def _diff(app: float, excel: float) -> tuple[float, float | None]:
     return diferencia, (round(diferencia / excel * 100, 1) if excel else None)
 
 
+def _margin(neto: float, directo: float) -> float | None:
+    """Markup over the direct cost, in % with 1 decimal (neto / directo − 1); None without a direct cost."""
+    return round((neto / directo - 1) * 100, 1) if directo else None
+
+
 def _comparison(app_neto: float, excel_neto: float, app_directo: float, excel_directo: float) -> dict:
     diferencia, pct = _diff(app_neto, excel_neto)
+    diferencia_directo, pct_directo = _diff(app_directo, excel_directo)
     return {"app_neto": _money(app_neto), "excel_neto": _money(excel_neto), "diferencia": diferencia,
-            "diferencia_pct": pct, "app_directo": _money(app_directo), "excel_directo": _money(excel_directo)}
+            "diferencia_pct": pct, "app_directo": _money(app_directo), "excel_directo": _money(excel_directo),
+            "diferencia_directo": diferencia_directo, "diferencia_directo_pct": pct_directo,
+            "margen_app_pct": _margin(app_neto, app_directo), "margen_excel_pct": _margin(excel_neto, excel_directo)}
 
 
-def _how_different(t: dict) -> str:
-    """'mas_caros', 'mas_baratos' or 'parecidos' (the app against the Excel)."""
-    pct = t["diferencia_pct"]
+MODOS = {"neto": ("diferencia_pct", "app_neto"), "directo": ("diferencia_directo_pct", "app_directo")}
+
+
+def _how_different(t: dict, modo: str = "neto") -> str:
+    """'mas_caros', 'mas_baratos' or 'parecidos' (the app against the Excel), by final price or direct cost."""
+    pct_key, app_key = MODOS[modo]
+    pct = t[pct_key]
     if pct is None:  # the Excel says 0
-        return "mas_caros" if t["app_neto"] > 0 else "mas_baratos" if t["app_neto"] < 0 else "parecidos"
+        return "mas_caros" if t[app_key] > 0 else "mas_baratos" if t[app_key] < 0 else "parecidos"
     return "mas_caros" if pct > PARECIDO_PCT else "mas_baratos" if pct < -PARECIDO_PCT else "parecidos"
 
 
@@ -847,10 +894,13 @@ async def diferencias_con_excel(budget_id: UUID, user: dict = Depends(get_curren
         for i in its:
             parent = by_id.get(str(i.get("parent_id"))) if i.get("parent_id") else None
             app_neto, excel_neto = _amount(i.get("neto_total")), _amount(i.get("excel_neto"))
+            app_directo, excel_directo = _amount(i.get("directo_total")), _amount(i.get("excel_directo"))
             detalle.append({
                 "id": i["id"], "code": i.get("code"), "piso": parent.get("description") if parent else None,
                 "cantidad": _amount(i.get("cantidad")), "app_neto": _money(app_neto), "excel_neto": _money(excel_neto),
                 "diferencia": _diff(app_neto, excel_neto)[0],
+                "app_directo": _money(app_directo), "excel_directo": _money(excel_directo),
+                "diferencia_directo": _diff(app_directo, excel_directo)[0],
             })
         trabajos.append({
             "clave": clave, "descripcion": first.get("description"), "unidad": first.get("unidad"),
@@ -859,11 +909,14 @@ async def diferencias_con_excel(budget_id: UUID, user: dict = Depends(get_curren
             **comp,
             "app_unitario": _money(comp["app_neto"] / cantidad) if cantidad else None,
             "excel_unitario": _money(comp["excel_neto"] / cantidad) if cantidad else None,
+            "app_unitario_directo": _money(comp["app_directo"] / cantidad) if cantidad else None,
+            "excel_unitario_directo": _money(comp["excel_directo"] / cantidad) if cantidad else None,
             "items": detalle,
         })
     trabajos.sort(key=lambda t: -abs(t["diferencia"]))
 
     clases = [_how_different(t) for t in trabajos]
+    clases_directo = [_how_different(t, "directo") for t in trabajos]
     total = _comparison(*(sum(_amount(i.get(k)) for i in items)
                           for k in ("neto_total", "excel_neto", "directo_total", "excel_directo")))
     return {
@@ -878,6 +931,11 @@ async def diferencias_con_excel(budget_id: UUID, user: dict = Depends(get_curren
             "mas_baratos": clases.count("mas_baratos"),
             "parecidos": clases.count("parecidos"),
             "sin_receta": sum(1 for t in trabajos if t["sin_receta"]),
+            "directo": {
+                "mas_caros": clases_directo.count("mas_caros"),
+                "mas_baratos": clases_directo.count("mas_baratos"),
+                "parecidos": clases_directo.count("parecidos"),
+            },
         },
         "trabajos": trabajos,
     }

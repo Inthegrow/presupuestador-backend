@@ -14,13 +14,21 @@ de UX y entra a este archivo (sección 5, punto 0c) antes de programarse.
 | # | Paso | Quién | Estado |
 |---|---|---|---|
 | 1 | Mergear el PR #26 (handoff con las fallas de UX) | Carlos | ✅ 04/10 |
-| 2 | Render → Manual Deploy del PR #25. En la app, Catálogos → marcar los cuatro del Maestro como oficiales | Carlos | pendiente de confirmar |
-| 3 | PR #27 (login con SOLÉ): Codex audita → corregir → mergear → Manual Deploy. La app sigue abierta hasta el paso 5 | chat + Carlos | ✅ 04/10 (mergeado; Manual Deploy pendiente de confirmar) |
-| 4 | Las fallas de UX del punto 0c, un solo PR, probado con el Excel de Ginkgo (`PLAN_UX_CARGAR_OBRA.md`) | chat | PR #28 en auditoría |
+| 2 | Render → Manual Deploy del PR #25. En la app, Catálogos → marcar los cuatro del Maestro como oficiales | Carlos | ✅ 04/10 |
+| 3 | PR #27 (login con SOLÉ): Codex audita → corregir → mergear → Manual Deploy. La app sigue abierta hasta el paso 5 | chat + Carlos | ✅ 04/10 |
+| 4 | Las fallas de UX del punto 0c (1 a 7), un solo PR, probado con el Excel de Ginkgo (`PLAN_UX_CARGAR_OBRA.md`) | chat | ✅ 04/10 PR #28 mergeado y desplegado |
+| 4b | Segunda tanda de fallas de UX (8 a 14: borrador de carga, servidor despertando, "Cambiar", progreso, qué pasó con los amarillos, diferencias por costo directo y margen), un solo PR (`PLAN_UX_2_CARGAR_OBRA.md`) | chat | PR #29 en auditoría |
+| 4c | Excel sin precios: si el 01_C&P no trae costos, los trabajos sin receta van en rojo y no se ofrece "Ver diferencias" (punto 15 de 0c) | chat | después del 4b, PR chico |
 | 5 | Encender el login: SQL en DATA y en SOLÉ, invitaciones, `VITE_AUTH_ENABLED=true`, borrar `DEMO_ORG_ID` (sección 5 de `PLAN_LOGIN_SOLE.md`) | Carlos guiado por el chat | después del 4 |
 | 6 | Primera carga real de Ginkgo con Sol | Sol + Carlos | después del 5 |
 | 7 | Etapa B: estado de cada precio y frase de confianza | chat | después del 6 |
 | — | Limpieza: borrar las ramas viejas `claude/*` y `codex/*` ya mergeadas en GitHub | Carlos | cuando quiera |
+
+**Cuándo hace falta "Manual Deploy" en Render:** cuando el PR toca `app/`, `requirements.txt` o `migrations/`
+(el servidor). Si toca solo `frontend/`, Vercel lo publica solo. Cada PR lo dice en su descripción: "Render:
+Manual Deploy sí/no". El 04/10 el deploy del PR #28 falló a los 18 minutos sin tocar el código: pip probaba
+decenas de versiones de `realtime` (dependencia de `supabase`) porque no estaba fijada; desde el PR #29 las
+dependencias de supabase van fijadas en `requirements.txt`.
 
 Reglas para no volver a pisarse: el handoff lo edita solo el chat que programa, dentro del PR del trabajo;
 Carlos no abre otro chat de programación mientras haya un PR abierto; si abre uno de consulta, le pide que
@@ -166,6 +174,39 @@ abierta (modo demo), con el usuario demo como admin.
    de m³ de cascote por m² se puede responder sola con el espesor que dice el nombre del trabajo
    (8 cm = 0,08). (6) La receta propuesta para "membrana líquida" es pintura de paredes; una
    coincidencia floja tiene que mostrarse como duda, no como propuesta.
+   **(8) Pendiente (Carlos, 04/10):** si se recarga la página (Cmd+Shift+R) después de subir el Excel, se
+   pierde todo lo subido y lo decidido. La carga en curso tiene que quedar guardada en la app y al volver
+   preguntar "Seguir con Edificio Ginkgo (te faltan 6)" o descartar. Es el borrador de carga (Etapa C,
+   punto 12: tabla `obra_cargas` con el archivo y las decisiones). Principio 9 del handoff.
+   **(9) Pendiente:** Catálogos tardó más de 40 s en cargar. Es el arranque en frío de Render (plan free:
+   se apaga con inactividad y tarda ~50 s en despertar). Opciones: plan pago, o un aviso en la pantalla
+   "El servidor está despertando, unos segundos…" en vez de "Cargando catálogos…" mudo.
+   **(10) Pendiente:** al tocar "Cambiar" se abre el buscador de recetas sin explicación: Carlos no entendió
+   qué era. Sumar una línea arriba: "Elegí la receta correcta para este trabajo. Si ninguna sirve, usá el
+   precio del Excel." y que la opción "Usar el precio del Excel (sin receta)" diga para qué sirve.
+   **(11) Pendiente:** "Cargar presupuesto" tarda un buen rato (244 trabajos, ~1.100 materiales, inserts de
+   a 200) y el botón solo dice "Cargando…". Mostrar "Calculando 244 trabajos y 1.100 materiales…" (ya está
+   en DISENO_CARGAR_OBRA, pantalla 5) y medir dónde se va el tiempo (inserts vs. cascada).
+   **(12) Menor:** con el login apagado la barra dice "Empresa demo" en vez de TERRAC SA (es el nombre del
+   usuario demo). Se arregla solo al encender el login.
+   **(13) Pendiente:** al cargar con amarillos sin confirmar, el resultado no dice qué pasó con ellos y
+   Carlos creyó que "se eliminaron solos". El resultado tiene que decir: "37 trabajos quedaron sin
+   confirmar: N entraron con la receta propuesta y M con el precio del Excel. Podés revisarlos en el
+   presupuesto." (`/obras/cargar` ya sabe cuáles son: sumar `sin_confirmar` a la respuesta) y, en el
+   editor, poder filtrar esos ítems. La memoria de recetas guarda solo lo confirmado, y eso está bien.
+   **(14) Pendiente (Carlos, 04/10, captura de "Ver diferencias" de Ginkgo):** la pantalla compara precio
+   final contra precio final, y eso mezcla dos cosas. Sol aplica márgenes distintos por trabajo (del 12% al
+   51% sobre el costo directo, medido en el Excel de Ginkgo); la app aplica una sola cadena de markups
+   (59% con los valores por defecto). Prueba: los trabajos "Precio del Excel" (texturado, garden block)
+   tienen el mismo costo directo que el Excel y aun así dan +23% y +42%. Una parte grande del +20,2% total
+   es margen, no receta. Arreglo: conmutador "Costo directo (sin margen) / Precio final" (arranca en costo
+   directo) y una tarjeta "Margen" con los dos porcentajes. Las recetas para Emilia que sí se ven en costo:
+   cielorrasos de yeso (+122% y +54%), pintura asfáltica en azotea (+239%), carpeta (+57%), grueso interior
+   (+55%); "Bases aisladas" vale $0 en el Excel (Sol no lo cotizó).
+   **(15) Pendiente:** si el Excel de una obra nueva NO trae costos (columnas de costo y precio vacías), hoy
+   los trabajos sin receta se cargan en $0 sin avisar, el panel "Guardar los precios que trae el Excel" no
+   aparece y "Ver diferencias" compara contra ceros. Tiene que detectarse: trabajos sin receta en rojo
+   ("falta receta o precio"), sin panel de precios del Excel y sin ofrecer diferencias. PR chico, aparte.
 1. Migraciones **009** y **010** ya corridas en Supabase (verificado 03/10). PRs #20, #21 y #23 mergeados.
    El login (PR #22) está mergeado pero **no exige clave todavía**: ver "Antes de todo".
 2. Cargar en la app las recetas (Fase 3) y los catálogos (Fase 1) del Maestro actual, si aún no están.
