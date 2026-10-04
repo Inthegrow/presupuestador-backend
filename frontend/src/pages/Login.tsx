@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 
 const SOLE_LOGO = (
@@ -19,7 +19,7 @@ const SOLE_LOGO = (
 )
 
 export default function Login() {
-  const { signIn } = useAuth()
+  const { signIn, error: errorServidor, clearError } = useAuth()
   const navigate = useNavigate()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -29,11 +29,12 @@ export default function Login() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError('')
+    clearError()
     setLoading(true)
     const { error } = await signIn(email, password)
     setLoading(false)
     if (error) {
-      setError('Credenciales incorrectas. Verificá tu email y contraseña.')
+      setError('El mail o la clave no son correctos.')
     } else {
       navigate('/app/dashboard')
     }
@@ -62,15 +63,15 @@ export default function Login() {
             <h2 className="font-bold text-gray-900 text-lg mb-1">Iniciar sesión</h2>
             <p className="text-gray-500 text-sm mb-6">Ingresá con tu cuenta de organización</p>
 
-            {error && (
+            {(error || errorServidor) && (
               <div className="mb-4 bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-lg">
-                {error}
+                {error || errorServidor}
               </div>
             )}
 
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1.5">Email</label>
+                <label className="block text-xs font-semibold text-gray-700 mb-1.5">Mail</label>
                 <input
                   type="email"
                   required
@@ -81,7 +82,7 @@ export default function Login() {
                 />
               </div>
               <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1.5">Contraseña</label>
+                <label className="block text-xs font-semibold text-gray-700 mb-1.5">Clave</label>
                 <input
                   type="password"
                   required
@@ -90,6 +91,11 @@ export default function Login() {
                   placeholder="••••••••"
                   className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm outline-none focus:border-[#2D8D68] focus:ring-1 focus:ring-[#2D8D68] transition"
                 />
+              </div>
+              <div className="text-right -mt-2">
+                <Link to="/olvide-mi-clave" className="text-xs text-[#2D8D68] hover:text-[#1B5E4B] font-medium">
+                  Olvidé mi clave
+                </Link>
               </div>
               <button
                 type="submit"

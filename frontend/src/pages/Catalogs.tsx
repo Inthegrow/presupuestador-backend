@@ -4,6 +4,7 @@ import {
   Search, Trash2, Upload, X, Zap,
 } from 'lucide-react'
 import { budgetApi, catalogApi } from '../lib/api'
+import { useAuth } from '../contexts/AuthContext'
 import { fmtCurrency, fmtDate, todayIso } from '../lib/format'
 import type { Budget, CatalogEntry, PriceCatalog } from '../types'
 
@@ -444,6 +445,7 @@ function CatalogRow({
   onDeleted: (id: string) => void
   onChanged: (catalog: PriceCatalog) => void
 }) {
+  const { puedeEditar, esAdmin } = useAuth()
   const [open, setOpen] = useState(false)
   const [entries, setEntries] = useState<CatalogEntry[]>([])
   const [filtered, setFiltered] = useState<CatalogEntry[]>([])
@@ -607,23 +609,27 @@ function CatalogRow({
           >
             {catalog.oficial ? 'Oficial' : 'Solo consulta'}
           </span>
-          <button
-            onClick={handleToggleOficial}
-            disabled={changingOficial}
-            className="bg-white border text-gray-700 text-[11px] font-semibold px-2.5 py-1 rounded-lg hover:bg-gray-50 disabled:opacity-50"
-          >
-            {catalog.oficial ? 'Dejar solo para consulta' : 'Marcar como oficial'}
-          </button>
-          <button
-            onClick={handleDeleteCatalog}
-            disabled={deletingCatalog}
-            className="p-1.5 rounded-lg text-red-400 hover:text-red-600 hover:bg-red-50 transition-colors disabled:opacity-40"
-            title="Eliminar catálogo"
-          >
-            {deletingCatalog
-              ? <div className="w-3 h-3 border-2 border-red-400 border-t-transparent rounded-full animate-spin" />
-              : <Trash2 size={14} />}
-          </button>
+          {esAdmin && (
+            <button
+              onClick={handleToggleOficial}
+              disabled={changingOficial}
+              className="bg-white border text-gray-700 text-[11px] font-semibold px-2.5 py-1 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+            >
+              {catalog.oficial ? 'Dejar solo para consulta' : 'Marcar como oficial'}
+            </button>
+          )}
+          {esAdmin && (
+            <button
+              onClick={handleDeleteCatalog}
+              disabled={deletingCatalog}
+              className="p-1.5 rounded-lg text-red-400 hover:text-red-600 hover:bg-red-50 transition-colors disabled:opacity-40"
+              title="Eliminar catálogo"
+            >
+              {deletingCatalog
+                ? <div className="w-3 h-3 border-2 border-red-400 border-t-transparent rounded-full animate-spin" />
+                : <Trash2 size={14} />}
+            </button>
+          )}
           <div onClick={toggle}>
             {open ? <ChevronDown size={16} className="text-gray-400" /> : <ChevronRight size={16} className="text-gray-400" />}
           </div>
@@ -703,6 +709,7 @@ function CatalogRow({
                               {fmtDate(e.fecha_precio)}
                             </td>
                             <td className="px-3 py-1.5">
+                              {puedeEditar && (
                               <div className="flex items-center gap-1 justify-end">
                                 <button
                                   onClick={() => setEditingId(e.id)}
@@ -722,11 +729,12 @@ function CatalogRow({
                                     : <Trash2 size={11} />}
                                 </button>
                               </div>
+                              )}
                             </td>
                           </tr>
                         )
                       )}
-                      {addingEntry && (
+                      {addingEntry && puedeEditar && (
                         <AddEntryRow
                           catalogId={catalog.id}
                           onSaved={handleEntryAdded}
@@ -742,7 +750,7 @@ function CatalogRow({
                         ? `${filtered.length} resultado(s) de ${entries.length} entradas`
                         : `${entries.length} entradas`}
                     </span>
-                    {!addingEntry && (
+                    {!addingEntry && puedeEditar && (
                       <button
                         onClick={() => setAddingEntry(true)}
                         className="flex items-center gap-1 text-[#2D8D68] hover:text-[#1B5E4B] font-semibold text-[11px]"
@@ -755,7 +763,7 @@ function CatalogRow({
               ) : (
                 <div className="p-4 text-xs text-gray-400 italic flex items-center justify-between">
                   <span>{searchQ ? 'Sin resultados para la búsqueda.' : 'Sin entradas para este catálogo.'}</span>
-                  {!searchQ && !addingEntry && (
+                  {!searchQ && !addingEntry && puedeEditar && (
                     <button
                       onClick={() => setAddingEntry(true)}
                       className="flex items-center gap-1 text-[#2D8D68] hover:text-[#1B5E4B] font-semibold text-[11px]"
@@ -769,6 +777,7 @@ function CatalogRow({
           )}
 
           {/* Apply to budget */}
+          {puedeEditar && (
           <div className="border-t p-4 bg-[#E8F5EE]/50">
             <div className="flex items-center gap-2 mb-2">
               <Zap size={14} className="text-[#2D8D68]" />
@@ -813,6 +822,7 @@ function CatalogRow({
               </div>
             )}
           </div>
+          )}
         </div>
       )}
     </div>
@@ -822,6 +832,7 @@ function CatalogRow({
 // ─── Main page ─────────────────────────────────────────────────────────────────
 
 export default function Catalogs() {
+  const { puedeEditar } = useAuth()
   const [catalogs, setCatalogs] = useState<PriceCatalog[]>([])
   const [budgets, setBudgets] = useState<Budget[]>([])
   const [loading, setLoading] = useState(true)
@@ -879,6 +890,7 @@ export default function Catalogs() {
       </div>
 
       {/* Actions bar */}
+      {puedeEditar && (
       <div className="flex items-center gap-2 mb-4 max-w-3xl">
         <button
           onClick={() => { setShowUpload((prev) => !prev); setShowExcelUpload(false) }}
@@ -903,13 +915,14 @@ export default function Catalogs() {
           {showExcelUpload ? 'Cancelar' : 'Subir Excel (4 solapas)'}
         </button>
       </div>
+      )}
 
       <div className="max-w-3xl space-y-3">
         {/* Upload forms */}
-        {showUpload && (
+        {showUpload && puedeEditar && (
           <UploadForm onSuccess={handleUploaded} onCancel={() => setShowUpload(false)} />
         )}
-        {showExcelUpload && (
+        {showExcelUpload && puedeEditar && (
           <ExcelUploadForm onSuccess={handleExcelUploaded} onCancel={() => setShowExcelUpload(false)} />
         )}
 

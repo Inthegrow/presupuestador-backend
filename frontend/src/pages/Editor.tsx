@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Edit3, ChevronRight, Plus, CheckCircle, AlertCircle, X, Loader2, LayoutGrid, MousePointerClick, Command, RefreshCw } from 'lucide-react'
 import { budgetApi } from '../lib/api'
+import { useAuth } from '../contexts/AuthContext'
 import { fmtCurrency, fmtNumber } from '../lib/format'
 import type { Budget, TreeNode, BudgetItem } from '../types'
 import TreeView from '../components/ui/TreeView'
@@ -37,6 +38,7 @@ interface Toast {
 let toastIdCounter = 0
 
 export default function Editor() {
+  const { puedeEditar } = useAuth()
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const [budget, setBudget] = useState<Budget | null>(null)
@@ -487,13 +489,13 @@ export default function Editor() {
           <div className="relative">
             <button
               onClick={() => setShowStatusMenu((v) => !v)}
-              disabled={statusChanging}
+              disabled={statusChanging || !puedeEditar}
               className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-medium transition-all hover:opacity-80 disabled:opacity-60 ${STATUS_OPTIONS.find((s) => s.value === (budget?.status ?? 'draft'))?.badgeCls ?? 'bg-gray-100 text-gray-600 border-gray-200'}`}
             >
               {STATUS_OPTIONS.find((s) => s.value === (budget?.status ?? 'draft'))?.label ?? 'Borrador'}
-              <span className="text-[10px] opacity-60">▾</span>
+              {puedeEditar && <span className="text-[10px] opacity-60">▾</span>}
             </button>
-            {showStatusMenu && (
+            {showStatusMenu && puedeEditar && (
               <>
               <div className="fixed inset-0 z-20" onClick={() => setShowStatusMenu(false)} />
               <div className="absolute left-0 top-full mt-1 z-30 bg-white border border-gray-200 rounded-xl shadow-lg py-1 min-w-[140px]">
@@ -518,14 +520,16 @@ export default function Editor() {
               Recalculando...
             </span>
           )}
-          <button
-            onClick={handleRecalculate}
-            disabled={recalculating}
-            className="bg-white border text-gray-700 px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-gray-50 flex items-center gap-1.5 transition-colors disabled:opacity-50"
-          >
-            <RefreshCw size={13} className={recalculating ? 'animate-spin' : ''} />
-            {recalculating ? 'Recalculando...' : 'Recálculo completo'}
-          </button>
+          {puedeEditar && (
+            <button
+              onClick={handleRecalculate}
+              disabled={recalculating}
+              className="bg-white border text-gray-700 px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-gray-50 flex items-center gap-1.5 transition-colors disabled:opacity-50"
+            >
+              <RefreshCw size={13} className={recalculating ? 'animate-spin' : ''} />
+              {recalculating ? 'Recalculando...' : 'Recálculo completo'}
+            </button>
+          )}
           <button
             onClick={() => navigate(`/app/budgets/${id ?? '1'}/ai`)}
             className="bg-white border border-gray-200 text-gray-700 px-3.5 py-1.5 rounded-xl text-xs font-medium hover:bg-gray-50 hover:shadow-sm transition-all duration-200"
@@ -544,12 +548,14 @@ export default function Editor() {
           >
             Exportar
           </button>
-          <button
-            onClick={() => id && budgetApi.createVersion(id)}
-            className="bg-gradient-to-r from-[#2D8D68] to-[#1B5E4B] hover:from-[#1B5E4B] hover:to-[#143D34] text-white font-semibold px-5 py-1.5 rounded-xl text-xs transition-all duration-200 shadow-sm hover:shadow-md"
-          >
-            Guardar version
-          </button>
+          {puedeEditar && (
+            <button
+              onClick={() => id && budgetApi.createVersion(id)}
+              className="bg-gradient-to-r from-[#2D8D68] to-[#1B5E4B] hover:from-[#1B5E4B] hover:to-[#143D34] text-white font-semibold px-5 py-1.5 rounded-xl text-xs transition-all duration-200 shadow-sm hover:shadow-md"
+            >
+              Guardar version
+            </button>
+          )}
         </div>
       </div>
 
@@ -578,12 +584,14 @@ export default function Editor() {
           {/* Gradient header */}
           <div className="bg-gradient-to-r from-[#143D34] to-[#2D8D68] text-white px-4 py-3 flex justify-between items-center">
             <span className="font-semibold text-xs tracking-wide">Estructura de Obra</span>
-            <button
-              onClick={openSectionForm}
-              className="text-[#E0A33A] text-xs font-medium flex items-center gap-0.5 hover:text-yellow-200 transition-colors"
-            >
-              <Plus size={12} /> Seccion
-            </button>
+            {puedeEditar && (
+              <button
+                onClick={openSectionForm}
+                className="text-[#E0A33A] text-xs font-medium flex items-center gap-0.5 hover:text-yellow-200 transition-colors"
+              >
+                <Plus size={12} /> Seccion
+              </button>
+            )}
           </div>
 
           {/* Inline section creation form */}
@@ -641,8 +649,8 @@ export default function Editor() {
                 setSelectedNode(node)
                 setItems(getItemsForNode(node, allItems))
               }}
-              onEditSection={handleEditSection}
-              onDeleteSection={handleDeleteSection}
+              onEditSection={puedeEditar ? handleEditSection : undefined}
+              onDeleteSection={puedeEditar ? handleDeleteSection : undefined}
             />
           </div>
         </div>
@@ -663,7 +671,7 @@ export default function Editor() {
               </p>
             </div>
             <div className="flex items-center gap-2">
-              {selectedNode && (
+              {selectedNode && puedeEditar && (
                 <button
                   onClick={() => setShowAddForm((v) => !v)}
                   className="text-xs border border-[#2D8D68]/30 text-[#2D8D68] hover:bg-[#E8F5EE] px-3 py-1.5 rounded-xl font-medium transition-all duration-200 flex items-center gap-1 hover:shadow-sm"
@@ -677,7 +685,7 @@ export default function Editor() {
           <CostSummaryBar mat={mat} mo={mo} directo={directo} indirecto={indirecto} neto={neto} indirectoPct={indirectoPct ?? undefined} />
           <MarkupChainDisplay directo={directo} neto={neto} links={markupLinks} budgetId={id} />
 
-          {showAddForm && selectedNode && (
+          {showAddForm && selectedNode && puedeEditar && (
             <AddItemForm
               suggestedCode={suggestNextCode()}
               onSubmit={handleAddItem}
@@ -711,9 +719,9 @@ export default function Editor() {
           ) : (
             <DataTable
               items={items}
-              onEditItem={handleEditItem}
+              onEditItem={puedeEditar ? handleEditItem : undefined}
               onViewDetail={(itemId) => navigate(`/app/budgets/${id}/item/${itemId}`)}
-              onDeleteItem={async (itemId, desc) => {
+              onDeleteItem={!puedeEditar ? undefined : async (itemId, desc) => {
                 if (!id) return
                 try {
                   await budgetApi.deleteItem(id, itemId)

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import { Settings } from 'lucide-react'
 import { budgetApi } from '../lib/api'
+import { useAuth } from '../contexts/AuthContext'
 import type { CascadeResult, IndirectConfig } from '../types'
 
 const DEFAULT_CONFIG: IndirectConfig = {
@@ -85,6 +86,7 @@ function SectionDivider({ label }: { label: string }) {
 }
 
 export default function MarkupChain() {
+  const { puedeEditar, esAdmin } = useAuth()
   // The route is /app/settings/markups?budget=<id> (older links used :id)
   const params = useParams<{ id: string }>()
   const [searchParams] = useSearchParams()
@@ -324,12 +326,13 @@ export default function MarkupChain() {
 
             {/* Save */}
             <div className="mt-6 flex items-center justify-end gap-4">
-              {id && (
+              {id && esAdmin && (
                 <label className="flex items-center gap-2 text-xs text-gray-600">
                   <input type="checkbox" checked={alsoGeneral} onChange={(e) => setAlsoGeneral(e.target.checked)} />
                   Usar también como valores generales
                 </label>
               )}
+              {(id ? puedeEditar : esAdmin) && (
               <button
                 onClick={handleSave}
                 disabled={saving}
@@ -340,11 +343,13 @@ export default function MarkupChain() {
                 )}
                 {saved ? 'Guardado' : 'Guardar cambios'}
               </button>
+              )}
             </div>
           </div>
         </div>
 
         {/* Recalculate the whole budget */}
+        {puedeEditar && (
         <div className="mt-4 bg-white rounded-xl border border-gray-100 shadow-sm p-4">
           <div className="flex items-center justify-between gap-3">
             <div>
@@ -393,6 +398,7 @@ export default function MarkupChain() {
             </div>
           )}
         </div>
+        )}
 
         {/* Visual cascade summary */}
         <div className="mt-4 bg-gray-50 rounded-xl border border-gray-100 shadow-sm p-4">

@@ -16,6 +16,7 @@ import type {
   TemplateParam,
   TemplatePreviewResponse,
   TemplateResource,
+  Me,
 } from '../types'
 
 const BASE_URL = (import.meta.env.VITE_API_URL as string) || '/api'
@@ -24,9 +25,24 @@ function getToken(): string | null {
   return localStorage.getItem('sb-auth-token')
 }
 
-function authHeaders(): HeadersInit {
+// Id de la empresa activa (lo guarda AuthContext). Viaja en cada pedido como X-Org-Id.
+export const ORG_ACTUAL_KEY = 'presu_org_actual'
+
+function getOrgId(): string | null {
+  try {
+    return localStorage.getItem(ORG_ACTUAL_KEY)
+  } catch {
+    return null
+  }
+}
+
+function authHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {}
   const token = getToken()
-  return token ? { Authorization: `Bearer ${token}` } : {}
+  if (token) headers.Authorization = `Bearer ${token}`
+  const orgId = getOrgId()
+  if (orgId) headers['X-Org-Id'] = orgId
+  return headers
 }
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -77,6 +93,12 @@ function patch<T>(path: string, body?: unknown) {
 }
 function del<T>(path: string) {
   return request<T>('DELETE', path)
+}
+
+// ─── Usuario y empresas ────────────────────────────────────────────────────────
+
+export const meApi = {
+  get: () => get<Me>('/me'),
 }
 
 // ─── Budget API ────────────────────────────────────────────────────────────────

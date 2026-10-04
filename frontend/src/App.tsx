@@ -4,6 +4,8 @@ import AppLayout from './components/layout/AppLayout'
 
 // Pages
 import Login from './pages/Login'
+import OlvideMiClave from './pages/OlvideMiClave'
+import NuevaClave from './pages/NuevaClave'
 import Dashboard from './pages/Dashboard'
 import Editor from './pages/Editor'
 import ItemDetail from './pages/ItemDetail'
@@ -21,14 +23,16 @@ import Templates from './pages/Templates'
 
 export default function App() {
   return (
-    <AuthProvider>
-      <BrowserRouter>
+    <BrowserRouter>
+      <AuthProvider>
         <Routes>
           {/* Root → redirect to dashboard */}
           <Route path="/" element={<Navigate to="/app/dashboard" replace />} />
 
           {/* Auth */}
           <Route path="/login" element={<Login />} />
+          <Route path="/olvide-mi-clave" element={<OlvideMiClave />} />
+          <Route path="/nueva-clave" element={<NuevaClave />} />
 
           {/* App shell */}
           <Route path="/app" element={<AppLayout />}>
@@ -52,7 +56,7 @@ export default function App() {
           {/* 404 */}
           <Route path="*" element={<Navigate to="/app/dashboard" replace />} />
         </Routes>
-      </BrowserRouter>
-    </AuthProvider>
+      </AuthProvider>
+    </BrowserRouter>
   )
 }

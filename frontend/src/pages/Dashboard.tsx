@@ -5,6 +5,7 @@ import { budgetApi } from '../lib/api'
 import { fmtCurrency } from '../lib/format'
 import type { Budget, AnalysisResponse } from '../types'
 import BudgetCard from '../components/ui/BudgetCard'
+import { useAuth } from '../contexts/AuthContext'
 
 function timeAgo(dateStr: string): string {
   const date = new Date(dateStr)
@@ -22,6 +23,7 @@ function timeAgo(dateStr: string): string {
 }
 
 export default function Dashboard() {
+  const { puedeEditar } = useAuth()
   const [budgets, setBudgets] = useState<Budget[]>([])
   const [analyses, setAnalyses] = useState<Record<string, AnalysisResponse>>({})
   const [loading, setLoading] = useState(true)
@@ -94,12 +96,14 @@ export default function Dashboard() {
             {budgets.length} obras
           </span>
         </div>
-        <button
-          onClick={() => navigate('/app/new-project')}
-          className="bg-[#2D8D68] hover:bg-[#1B5E4B] text-white font-semibold px-4 py-2 rounded-lg text-xs flex items-center gap-1.5 transition-colors"
-        >
-          <Plus size={14} /> Nuevo presupuesto
-        </button>
+        {puedeEditar && (
+          <button
+            onClick={() => navigate('/app/new-project')}
+            className="bg-[#2D8D68] hover:bg-[#1B5E4B] text-white font-semibold px-4 py-2 rounded-lg text-xs flex items-center gap-1.5 transition-colors"
+          >
+            <Plus size={14} /> Nuevo presupuesto
+          </button>
+        )}
       </div>
 
       {/* KPI cards */}
@@ -162,12 +166,14 @@ export default function Dashboard() {
       {!loading && budgets.length === 0 && !error && (
         <div className="mb-6 text-center py-12 bg-white rounded-xl border border-gray-100 shadow-sm">
           <p className="text-gray-500 text-sm mb-2">No hay presupuestos todavía.</p>
-          <button
-            onClick={() => navigate('/app/new-project')}
-            className="bg-[#2D8D68] hover:bg-[#1B5E4B] text-white font-semibold px-4 py-2 rounded-lg text-xs transition-colors"
-          >
-            Importar Excel
-          </button>
+          {puedeEditar && (
+            <button
+              onClick={() => navigate('/app/new-project')}
+              className="bg-[#2D8D68] hover:bg-[#1B5E4B] text-white font-semibold px-4 py-2 rounded-lg text-xs transition-colors"
+            >
+              Importar Excel
+            </button>
+          )}
         </div>
       )}
       {!loading && budgets.length > 0 && filteredBudgets.length === 0 && (

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Library, ChevronDown, ChevronRight, Trash2, Plus, Pencil } from 'lucide-react'
 import { templateApi } from '../lib/api'
+import { useAuth } from '../contexts/AuthContext'
 import TemplateEditor from '../components/ui/TemplateEditor'
 import type { Template, TemplateParam, TemplateResource } from '../types'
 
@@ -62,6 +63,7 @@ function TemplateCard({
   onDelete: (id: string) => void
   onEdit: (t: Template) => void
 }) {
+  const { puedeEditar } = useAuth()
   const [open, setOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -123,6 +125,7 @@ function TemplateCard({
         </div>
 
         <div className="flex items-center gap-2 flex-shrink-0">
+          {puedeEditar && (<>
           <button
             onClick={(e) => { e.stopPropagation(); onEdit(template) }}
             className="text-xs px-2 py-1 rounded text-gray-400 hover:text-[#2D8D68] hover:bg-[#E8F5EE] flex items-center gap-1"
@@ -148,6 +151,7 @@ function TemplateCard({
             )}
             {confirmDelete && !deleting && <span>Confirmar</span>}
           </button>
+          </>)}
 
           {/* Expand icon */}
           {open
@@ -216,6 +220,7 @@ function TemplateCard({
 // ─── Templates page ────────────────────────────────────────────────────────────
 
 export default function Templates() {
+  const { puedeEditar } = useAuth()
   const [templates, setTemplates] = useState<Template[]>([])
   const [categories, setCategories] = useState<string[]>([])
   const [activeCategory, setActiveCategory] = useState<string>('Todos')
@@ -318,15 +323,17 @@ export default function Templates() {
           <TemplateCard key={t.id} template={t} onDelete={handleDelete} onEdit={setEditing} />
         ))}
 
-        <button
-          onClick={() => setEditing(null)}
-          className="w-full border-2 border-dashed border-gray-200 text-gray-500 hover:border-[#2D8D68] hover:text-[#2D8D68] py-3 rounded-xl font-semibold text-sm transition-colors flex items-center justify-center gap-2"
-        >
-          <Plus size={16} /> Nueva plantilla
-        </button>
+        {puedeEditar && (
+          <button
+            onClick={() => setEditing(null)}
+            className="w-full border-2 border-dashed border-gray-200 text-gray-500 hover:border-[#2D8D68] hover:text-[#2D8D68] py-3 rounded-xl font-semibold text-sm transition-colors flex items-center justify-center gap-2"
+          >
+            <Plus size={16} /> Nueva plantilla
+          </button>
+        )}
       </div>
 
-      {editing !== undefined && (
+      {editing !== undefined && puedeEditar && (
         <TemplateEditor template={editing} onSaved={handleSaved} onClose={() => setEditing(undefined)} />
       )}
     </div>
