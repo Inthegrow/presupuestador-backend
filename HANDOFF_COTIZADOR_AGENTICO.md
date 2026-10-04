@@ -181,6 +181,11 @@ abierta (modo demo), con el usuario demo como admin.
    en DISENO_CARGAR_OBRA, pantalla 5) y medir dónde se va el tiempo (inserts vs. cascada).
    **(12) Menor:** con el login apagado la barra dice "Empresa demo" en vez de TERRAC SA (es el nombre del
    usuario demo). Se arregla solo al encender el login.
+   **(13) Pendiente:** al cargar con amarillos sin confirmar, el resultado no dice qué pasó con ellos y
+   Carlos creyó que "se eliminaron solos". El resultado tiene que decir: "37 trabajos quedaron sin
+   confirmar: N entraron con la receta propuesta y M con el precio del Excel. Podés revisarlos en el
+   presupuesto." (`/obras/cargar` ya sabe cuáles son: sumar `sin_confirmar` a la respuesta) y, en el
+   editor, poder filtrar esos ítems. La memoria de recetas guarda solo lo confirmado, y eso está bien.
 1. Migraciones **009** y **010** ya corridas en Supabase (verificado 03/10). PRs #20, #21 y #23 mergeados.
    El login (PR #22) está mergeado pero **no exige clave todavía**: ver "Antes de todo".
 2. Cargar en la app las recetas (Fase 3) y los catálogos (Fase 1) del Maestro actual, si aún no están.
