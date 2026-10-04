@@ -56,3 +56,30 @@ export function todayIso(): string {
   const dd = String(now.getDate()).padStart(2, '0')
   return `${now.getFullYear()}-${mm}-${dd}`
 }
+
+/**
+ * Unit in words, for "Precio sin IVA por …".
+ * u → "unidad", m2 → "m²", ml → "metro", gl → "global"; anything else as is.
+ */
+export function unidadEnPalabras(u?: string | null): string {
+  const raw = (u || '').trim()
+  const key = raw.toLowerCase().replace('²', '2').replace('³', '3').replace(/\.$/, '')
+  switch (key) {
+    case '':
+    case 'u':
+    case 'un':
+    case 'unid':
+    case 'unidad':
+      return 'unidad'
+    case 'm2': return 'm²'
+    case 'm3': return 'm³'
+    case 'm':
+    case 'ml': return 'metro'
+    case 'kg': return 'kg'
+    case 'l':
+    case 'lt': return 'litro'
+    case 'bolsa': return 'bolsa'
+    case 'gl': return 'global'
+    default: return raw
+  }
+}

@@ -5,7 +5,7 @@ import FileUpload from '../components/ui/FileUpload'
 import { catalogApi, obraApi } from '../lib/api'
 import { useAuth } from '../contexts/AuthContext'
 import type { ObraAnalisis, ObraAsignaciones, ObraCarga, ObraPrecio, ObraPropuesta, ObraRecetaCatalogo, ObraTarea } from '../lib/api'
-import { fmtCurrency, fmtDate, todayIso } from '../lib/format'
+import { fmtCurrency, fmtDate, todayIso, unidadEnPalabras } from '../lib/format'
 import type { PriceCatalog } from '../types'
 
 function errorText(e: unknown): string {
@@ -115,6 +115,27 @@ function PrecioRow({
     }))
   }
 
+  function vaEnCero() {
+    run(() => guardarPrecio(p, {
+      precio: 0,
+      fecha: todayIso(),
+      descripcion: propuesta?.descripcion,
+      unidad: propuesta?.unidad,
+      catalogId,
+    }))
+  }
+
+  const botonCero = (
+    <button
+      disabled={busy || bloqueado || (p.problema === 'no_esta' && !catalogId)}
+      onClick={vaEnCero}
+      title="Este material no se cotiza: queda en $0 con fecha de hoy"
+      className="bg-white border text-gray-700 text-xs font-semibold px-3 py-1 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+    >
+      Va en $0
+    </button>
+  )
+
   return (
     <tr className="border-t align-top">
       <td className="py-2 pr-3">
@@ -176,9 +197,10 @@ function PrecioRow({
             <input
               value={precio}
               onChange={(e) => setPrecio(e.target.value)}
-              placeholder={`Precio sin IVA por ${p.unidad || 'unidad'}`}
+              placeholder={`Precio sin IVA por ${unidadEnPalabras(p.unidad)}`}
               className="border rounded-lg px-2 py-1 text-xs w-44"
             />
+            {botonCero}
             <button
               disabled={busy || bloqueado || !valido}
               onClick={guardar}
@@ -225,9 +247,10 @@ function PrecioRow({
             <input
               value={precio}
               onChange={(e) => setPrecio(e.target.value)}
-              placeholder={`Precio sin IVA por ${p.unidad || 'unidad'}`}
+              placeholder={`Precio sin IVA por ${unidadEnPalabras(p.unidad)}`}
               className="border rounded-lg px-2 py-1 text-xs w-44"
             />
+            {botonCero}
             <button
               disabled={busy || bloqueado || !valido || !catalogId}
               onClick={guardar}
@@ -465,7 +488,8 @@ export default function CargarObra() {
   const [permitir, setPermitir] = useState(false)
   const [carga, setCarga] = useState<ObraCarga | null>(null)
   const [filtro, setFiltro] = useState<Filtro>('revisar')
-  const [panelPrecios, setPanelPrecios] = useState(false)
+  // null = sin tocar: abierto solo si hay precios en rojo
+  const [panelPrecios, setPanelPrecios] = useState<boolean | null>(null)
   const [guardandoExcel, setGuardandoExcel] = useState<{ hecho: number; total: number } | null>(null)
   const [noGuardados, setNoGuardados] = useState<string[]>([])
   const panelRef = useRef<HTMLDivElement>(null)
@@ -500,7 +524,7 @@ export default function CargarObra() {
     setRevisando(false)
     setError('')
     setFiltro('revisar')
-    setPanelPrecios(false)
+    setPanelPrecios(null)
     setGuardandoExcel(null)
     setNoGuardados([])
   }
@@ -615,6 +639,7 @@ export default function CargarObra() {
   })
 
   const faltanPrecios = (analisis?.precios.length || 0) > 0
+  const panelAbierto = panelPrecios ?? rojosPrecio > 0
   const oficial = !!analisis?.catalogo_oficial
   const elegibles = oficial ? catalogs.filter((c) => c.oficial) : catalogs
   const propuestas = (analisis?.precios || []).filter((p) => p.propuesta && p.problema !== 'duplicado')
@@ -624,6 +649,16 @@ export default function CargarObra() {
     : amarillos > 0
       ? `Todo listo para cargar. Te quedan ${amarillos} para confirmar (podés cargar igual).`
       : 'Todo listo para cargar'
+
+  const preguntas = `${rojosOtros} ${rojosOtros === 1 ? 'pregunta' : 'preguntas'}`
+  // Se cuentan códigos sin precio (un mismo material puede frenar varios trabajos), no trabajos
+  const nPrecios = analisis?.precios.length ?? 0
+  const precios = `${nPrecios} ${nPrecios === 1 ? 'precio' : 'precios'}`
+  const fraseFalta = rojosOtros > 0
+    ? rojosPrecio > 0 ? `Te faltan ${preguntas} y ${precios}` : `Te faltan ${preguntas}`
+    : rojosPrecio > 0
+      ? `${nPrecios === 1 ? 'Falta' : 'Faltan'} ${precios}: ${nPrecios === 1 ? 'cargalo' : 'cargalos'} arriba, o marcá 'Cargar igual' y ${nPrecios === 1 ? 'ese material va' : 'esos materiales van'} en $0.`
+      : ''
 
   const paso = carga ? 3 : analisis ? 2 : 1
 
@@ -718,8 +753,13 @@ export default function CargarObra() {
               </div>
               <div className={`mt-3 text-sm font-semibold ${rojos ? 'text-red-600' : 'text-[#143D34]'}`}>{frase}</div>
               <div className="text-[11px] text-gray-500 mt-0.5">
-                {analisis.titulo} · lo que elijas acá queda guardado para la próxima obra.
+                Lo que elijas acá queda guardado para la próxima obra.
               </div>
+              {analisis.titulo_dudoso && (
+                <div className="mt-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                  El Excel dice '{analisis.titulo}'. ¿Es la obra correcta?
+                </div>
+              )}
             </div>
 
             <div className="flex flex-wrap gap-2">
@@ -740,31 +780,9 @@ export default function CargarObra() {
               ))}
             </div>
 
-            <div className="space-y-3">
-              {visibles.map((t) => (
-                <TareaCard
-                  key={t.clave}
-                  t={t}
-                  recetas={analisis.recetas}
-                  pendiente={pendientes[t.clave]}
-                  bloqueada={revisando}
-                  onConfirmar={() => confirmar(t)}
-                  onElegir={(rec) => elegir(t, rec)}
-                  onSinReceta={() => asignar(t.clave, [])}
-                  onValor={(codigo, v) => responder(t, codigo, v)}
-                  onCorregirPrecios={abrirPrecios}
-                />
-              ))}
-              {visibles.length === 0 && (
-                <div className="bg-[#E8F5EE] border border-green-200 text-[#143D34] text-sm px-4 py-3 rounded-lg flex items-center gap-2">
-                  <CheckCircle size={16} className="text-[#2D8D68]" /> No hay trabajos en esta lista.
-                </div>
-              )}
-            </div>
-
             <div ref={panelRef} className="bg-white border rounded-xl p-4">
               <button
-                onClick={() => setPanelPrecios(!panelPrecios)}
+                onClick={() => setPanelPrecios(!panelAbierto)}
                 className="w-full flex items-center justify-between"
               >
                 <div className="flex items-center gap-2 font-semibold text-sm text-gray-900">
@@ -773,9 +791,9 @@ export default function CargarObra() {
                     ? `Precios para corregir (${analisis.precios.length})`
                     : 'Todos los materiales tienen precio'}
                 </div>
-                {faltanPrecios && (panelPrecios || rojosPrecio > 0 ? <ChevronUp size={16} /> : <ChevronDown size={16} />)}
+                {faltanPrecios && (panelAbierto ? <ChevronUp size={16} /> : <ChevronDown size={16} />)}
               </button>
-              {faltanPrecios && (panelPrecios || rojosPrecio > 0) && (
+              {faltanPrecios && panelAbierto && (
                 <div className="mt-3">
                   <p className="text-xs text-gray-500 mb-3">
                     {oficial
@@ -816,6 +834,28 @@ export default function CargarObra() {
               )}
             </div>
 
+            <div className="space-y-3">
+              {visibles.map((t) => (
+                <TareaCard
+                  key={t.clave}
+                  t={t}
+                  recetas={analisis.recetas}
+                  pendiente={pendientes[t.clave]}
+                  bloqueada={revisando}
+                  onConfirmar={() => confirmar(t)}
+                  onElegir={(rec) => elegir(t, rec)}
+                  onSinReceta={() => asignar(t.clave, [])}
+                  onValor={(codigo, v) => responder(t, codigo, v)}
+                  onCorregirPrecios={abrirPrecios}
+                />
+              ))}
+              {visibles.length === 0 && (
+                <div className="bg-[#E8F5EE] border border-green-200 text-[#143D34] text-sm px-4 py-3 rounded-lg flex items-center gap-2">
+                  <CheckCircle size={16} className="text-[#2D8D68]" /> No hay trabajos en esta lista.
+                </div>
+              )}
+            </div>
+
             {analisis.correcciones_excel.length > 0 && (
               <div className="text-xs text-gray-500 bg-gray-50 border rounded-lg px-4 py-3">
                 <div className="font-semibold mb-1">Datos del Excel que se corrigen solos al cargar</div>
@@ -844,13 +884,18 @@ export default function CargarObra() {
                   {cargando ? 'Cargando…' : 'Cargar presupuesto'}
                 </button>
               </div>
-              {rojosOtros > 0 && (
-                <p className="text-xs text-red-600 mt-2">Resolvé los trabajos en rojo para poder cargar.</p>
+              {fraseFalta && (
+                <p className={`text-xs mt-2 ${rojosOtros > 0 ? 'text-red-600' : 'text-gray-600'}`}>{fraseFalta}</p>
               )}
-              {rojosOtros === 0 && rojosPrecio > 0 && (
-                <label className="flex items-center gap-2 text-xs text-gray-600 mt-3">
-                  <input type="checkbox" checked={permitir} onChange={(e) => setPermitir(e.target.checked)} />
-                  Cargar igual: estos códigos quedan en $0 y esos trabajos salen más baratos.
+              {rojosPrecio > 0 && (
+                <label className={`flex items-center gap-2 text-xs mt-3 ${rojosOtros > 0 ? 'text-gray-400' : 'text-gray-600'}`}>
+                  <input
+                    type="checkbox"
+                    checked={permitir && rojosOtros === 0}
+                    disabled={rojosOtros > 0}
+                    onChange={(e) => setPermitir(e.target.checked)}
+                  />
+                  Cargar igual: esos materiales quedan en $0 y los trabajos que los usan salen más baratos.
                 </label>
               )}
             </div>

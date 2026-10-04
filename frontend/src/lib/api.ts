@@ -294,7 +294,7 @@ export interface ObraReceta {
   nombre: string
   unidad?: string
   partes: { codigo: string; nombre: string; unidad?: string; factor: number }[]
-  origen: 'memoria' | 'regla' | 'sugerida' | 'manual'
+  origen: 'memoria' | 'regla' | 'manual'
   porque?: string
 }
 
@@ -307,6 +307,8 @@ export interface ObraPregunta {
   valor: number | null
   // Frase para mostrar la conversión como dato ya resuelto (null si falta el valor)
   dato: string | null
+  // De dónde salió el valor (null si todavía no hay)
+  origen_valor: 'nombre' | 'regla' | 'memoria' | 'mano' | null
 }
 
 export interface ObraTarea {
@@ -335,6 +337,8 @@ export interface ObraRecetaCatalogo {
 export interface ObraAnalisis {
   archivo: string
   titulo: string
+  // true si el título del Excel no se parece al nombre del archivo
+  titulo_dudoso: boolean
   fecha_precios: string
   catalogo_oficial: boolean
   resumen: {
