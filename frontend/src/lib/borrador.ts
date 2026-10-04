@@ -1,10 +1,20 @@
 // Draft of the "Cargar obra" screen, kept in the browser (IndexedDB) so a reload does not lose it.
+// One draft per owner (user + company): another login on the same browser never sees it.
 // Every call is wrapped in try/catch: if the browser refuses (private mode), the screen works as before.
 import type { ObraAsignaciones } from './api'
 
 const DB_NAME = 'presupuestador'
 const STORE = 'borradores'
-const KEY = 'cargar-obra'
+const PREFIJO = 'cargar-obra:'
+
+// Who the draft belongs to: the logged-in user inside the active company
+export function duenoBorrador(userId: string | null | undefined, orgId: string | null | undefined): string | null {
+  return userId && orgId ? `${userId}|${orgId}` : null
+}
+
+function clave(dueno: string): string {
+  return PREFIJO + dueno
+}
 
 export interface PendienteBorrador {
   codigo: string
@@ -61,30 +71,30 @@ function encolar(tarea: () => Promise<unknown>) {
   return cola
 }
 
-export async function guardarBorrador(b: Borrador): Promise<void> {
+export async function guardarBorrador(dueno: string, b: Borrador): Promise<void> {
   await encolar(async () => {
     try {
-      await conStore('readwrite', (s) => s.put(b, KEY))
+      await conStore('readwrite', (s) => s.put(b, clave(dueno)))
     } catch {
       /* no storage: the draft is simply not kept */
     }
   })
 }
 
-export async function borrarBorrador(): Promise<void> {
+export async function borrarBorrador(dueno: string): Promise<void> {
   await encolar(async () => {
     try {
-      await conStore('readwrite', (s) => s.delete(KEY))
+      await conStore('readwrite', (s) => s.delete(clave(dueno)))
     } catch {
       /* nothing to do */
     }
   })
 }
 
-export async function leerBorrador(): Promise<Borrador | null> {
+export async function leerBorrador(dueno: string): Promise<Borrador | null> {
   try {
     await cola
-    const b = await conStore<Borrador | undefined>('readonly', (s) => s.get(KEY))
+    const b = await conStore<Borrador | undefined>('readonly', (s) => s.get(clave(dueno)))
     if (!b || !(b.archivo instanceof Blob) || typeof b.nombreArchivo !== 'string') return null
     return {
       archivo: b.archivo,

@@ -136,6 +136,18 @@ async function subir(page) {
   check('tarjeta con el nombre del archivo', tarjetaBorrador.includes('ginkgo.xlsx'))
   check('tarjeta con "hace"', /hace (un momento|\d+ minutos?)/.test(tarjetaBorrador))
   await shot(page, '05b_borrador')
+  // The draft is stored per owner (user|company): another login never finds it
+  const clavesIdb = await page.evaluate(() => new Promise((resolve) => {
+    const req = indexedDB.open('presupuestador', 1)
+    req.onsuccess = () => {
+      const tx = req.result.transaction('borradores', 'readonly')
+      const all = tx.objectStore('borradores').getAllKeys()
+      all.onsuccess = () => resolve(all.result.map(String))
+      all.onerror = () => resolve([])
+    }
+    req.onerror = () => resolve([])
+  }))
+  check('el borrador se guarda por usuario y empresa', clavesIdb.length > 0 && clavesIdb.every((k) => /^cargar-obra:demo\|.+/.test(k)), JSON.stringify(clavesIdb))
   const pedidoSeguir = page.waitForRequest((r) => r.url().includes('/obras/analizar'), { timeout: 30000 })
   await page.getByRole('button', { name: 'Seguir', exact: true }).click()
   await pedidoSeguir

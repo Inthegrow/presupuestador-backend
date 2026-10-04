@@ -3,12 +3,14 @@ import { useNavigate } from 'react-router-dom'
 import { AlertTriangle, CheckCircle, ChevronDown, ChevronUp, ClipboardCheck, Search, Trash2 } from 'lucide-react'
 import FileUpload from '../components/ui/FileUpload'
 import { catalogApi, obraApi } from '../lib/api'
-import { borrarBorrador, guardarBorrador, leerBorrador } from '../lib/borrador'
+import { borrarBorrador, duenoBorrador, guardarBorrador, leerBorrador } from '../lib/borrador'
 import type { Borrador } from '../lib/borrador'
 import { useAuth } from '../contexts/AuthContext'
 import type { ObraAnalisis, ObraAsignaciones, ObraCarga, ObraPrecio, ObraPropuesta, ObraRecetaCatalogo, ObraTarea } from '../lib/api'
 import { fmtCurrency, fmtDate, todayIso, unidadEnPalabras } from '../lib/format'
 import type { PriceCatalog } from '../types'
+
+const AUTH_ENABLED = import.meta.env.VITE_AUTH_ENABLED === 'true'
 
 function errorText(e: unknown): string {
   const msg = e instanceof Error ? e.message : String(e)
@@ -511,7 +513,9 @@ function TareaCard({
 // ─── Página ───────────────────────────────────────────────────────────────────
 
 export default function CargarObra() {
-  const { puedeEditar } = useAuth()
+  const { puedeEditar, user, org } = useAuth()
+  // The draft belongs to this user in this company (null until both are known)
+  const dueno = duenoBorrador(user?.id ?? (AUTH_ENABLED ? null : 'demo'), org?.id)
   const navigate = useNavigate()
   const [file, setFile] = useState<File | null>(null)
   const [analisis, setAnalisis] = useState<ObraAnalisis | null>(null)
@@ -537,7 +541,10 @@ export default function CargarObra() {
   const lote = useRef(0)
 
   useEffect(() => { catalogApi.list().then(setCatalogs).catch(() => setCatalogs([])) }, [])
-  useEffect(() => { leerBorrador().then(setBorrador) }, [])
+  useEffect(() => {
+    setBorrador(null)
+    if (dueno) leerBorrador(dueno).then(setBorrador)
+  }, [dueno])
 
   // Seconds counter while the budget is being calculated
   useEffect(() => {
@@ -549,9 +556,9 @@ export default function CargarObra() {
 
   // Keep the work in progress in this browser (debounced 500 ms)
   useEffect(() => {
-    if (!file || !analisis || carga) return
+    if (!file || !analisis || carga || !dueno) return
     const t = setTimeout(() => {
-      void guardarBorrador({
+      void guardarBorrador(dueno, {
         archivo: file,
         nombreArchivo: file.name,
         nombre,
@@ -562,7 +569,7 @@ export default function CargarObra() {
       })
     }, 500)
     return () => clearTimeout(t)
-  }, [file, analisis, carga, nombre, asignaciones, pendientes, permitir])
+  }, [dueno, file, analisis, carga, nombre, asignaciones, pendientes, permitir])
 
   async function revisar(f: File | null = file, asig: ObraAsignaciones = asignaciones) {
     if (!f) return
@@ -620,14 +627,14 @@ export default function CargarObra() {
 
   function descartarBorrador() {
     setBorrador(null)
-    void borrarBorrador()
+    if (dueno) void borrarBorrador(dueno)
   }
 
   // "Quitar" on the uploaded file: start over and forget the draft
   function quitarArchivo() {
     reiniciar()
     setBorrador(null)
-    void borrarBorrador()
+    if (dueno) void borrarBorrador(dueno)
   }
 
   function asignar(clave: string, plantillas: [string, number][], confirmada = true) {
@@ -671,7 +678,7 @@ export default function CargarObra() {
       if (res.tiempos) console.info('Carga de obra: tiempos del servidor', res.tiempos)
       setCarga(res)
       setBorrador(null)
-      void borrarBorrador()
+      if (dueno) void borrarBorrador(dueno)
     } catch (e) {
       setError(errorText(e))
       revisar()
