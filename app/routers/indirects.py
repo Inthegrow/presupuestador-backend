@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from app.auth import get_current_user
+from app.auth import get_current_user, require_admin
 from app.budget_prices import general_indirects, load_org_config, save_org_config
 from app.db import get_data_db
 from app.schemas import IndirectConfigUpdate
@@ -33,7 +33,7 @@ async def get_general_indirects(user: dict = Depends(get_current_user)):
 @router.patch("/general")
 async def update_general_indirects(
     payload: IndirectConfigUpdate,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_admin),
 ):
     db = get_data_db()
     org_id = user["org_id"]

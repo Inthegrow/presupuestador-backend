@@ -1,9 +1,30 @@
 # Handoff: el cotizador agéntico de TERRAC
 
-> Para el próximo chat. Leer entero antes de tocar código. Fecha: 2026-10-01.
+> Para el próximo chat. Leer entero antes de tocar código. Fecha: 2026-10-01 (plan maestro: 2026-10-04).
 > Lo escribió la sesión que hizo los PRs #19 y #20, con Carlos.
 
 ---
+
+## 0. Plan maestro (04/10): un solo chat programa, un PR por vez
+
+Hubo tres chats a la vez y se pisaron en el handoff. Desde hoy: **un solo chat programa** (el que hizo los
+PRs #25 y #27). Los PR salen de a uno. Carlos prueba la app como Sol y anota las dudas; cada duda es un bug
+de UX y entra a este archivo (sección 5, punto 0c) antes de programarse.
+
+| # | Paso | Quién | Estado |
+|---|---|---|---|
+| 1 | Mergear el PR #26 (handoff con las fallas de UX) | Carlos | ✅ 04/10 |
+| 2 | Render → Manual Deploy del PR #25. En la app, Catálogos → marcar los cuatro del Maestro como oficiales | Carlos | pendiente de confirmar |
+| 3 | PR #27 (login con SOLÉ): Codex audita → corregir → mergear → Manual Deploy. La app sigue abierta hasta el paso 5 | chat + Carlos | en auditoría |
+| 4 | Las fallas de UX del punto 0c, un solo PR, probado con el Excel de Ginkgo | chat | después del #27 |
+| 5 | Encender el login: SQL en DATA y en SOLÉ, invitaciones, `VITE_AUTH_ENABLED=true`, borrar `DEMO_ORG_ID` (sección 5 de `PLAN_LOGIN_SOLE.md`) | Carlos guiado por el chat | después del 4 |
+| 6 | Primera carga real de Ginkgo con Sol | Sol + Carlos | después del 5 |
+| 7 | Etapa B: estado de cada precio y frase de confianza | chat | después del 6 |
+| — | Limpieza: borrar las ramas viejas `claude/*` y `codex/*` ya mergeadas en GitHub | Carlos | cuando quiera |
+
+Reglas para no volver a pisarse: el handoff lo edita solo el chat que programa, dentro del PR del trabajo;
+Carlos no abre otro chat de programación mientras haya un PR abierto; si abre uno de consulta, le pide que
+**no toque el repo**.
 
 ## 1. La ambición, en una frase
 
@@ -68,6 +89,16 @@ El PR #20 se mergeó el 2026-10-01. Falta correr en Supabase las migraciones 009
 ### Antes de todo: clave y usuarios, con la estructura multiempresa de SOLÉ
 Hoy cualquiera con el link entra y ve todo. Esto va **antes** de cargar obras reales de TERRAC.
 Decisión de Carlos: usar **la misma estructura multiempresa de SOLÉ**, no inventar una nueva.
+
+**Estado (04/10): programado en el PR #27** según `PLAN_LOGIN_SOLE.md`: `GET /me`, empresa activa en el
+header `X-Org-Id` (403 si no es miembro, 428 si tiene varias y no eligió), roles `admin`/`leader`/`member`
+en todas las rutas (`tests/test_auth.py` tiene la tabla ruta → rol y falla si alguien agrega una ruta sin rol),
+pantallas "Olvidé mi clave", "Creá tu clave" y "¿Con qué empresa entrás?", selector de empresa en la barra,
+botones ocultos para quien solo mira. Probado en el navegador con `scripts/e2e_login.cjs`
+(`FAKE_DOS_EMPRESAS=1 python3 scripts/serve_fake.py`). **Lo que falta es operativo** y está en la sección 5
+del plan: crear TERRAC en SOLÉ con el `org_id` de la base DATA, invitar a Sol/Emilia/Carlos, poner
+`VITE_AUTH_ENABLED=true` en Vercel y **borrar `DEMO_ORG_ID`** en Render. Hasta ese momento la app sigue
+abierta (modo demo), con el usuario demo como admin.
 
 1. **Login con usuario y clave** usando el Supabase de auth compartido con SOLÉ/EOS (`AUTH_SUPABASE_*`):
    tablas `organizations` y `memberships`. Cada usuario pertenece a una o más empresas (`org_id`).
@@ -207,15 +238,14 @@ Decisión de Carlos: usar **la misma estructura multiempresa de SOLÉ**, no inve
 
 ## 8. Primer mensaje sugerido para el próximo chat
 
-> Leé `HANDOFF_COTIZADOR_AGENTICO.md`, `DISENO_CARGAR_OBRA.md` y `PLAN_ETAPA_A_CIERRE.md` antes de tocar
-> nada. Arreglá primero las seis fallas de UX del punto 0c de la sección 5 (vistas en producción con Ginkgo). Estado: PRs #20 a #25 mergeados; migraciones 009, 010 y 011 corridas; Render desplegado a mano
-> (Auto-Deploy no anda); el Maestro marcado como oficial en Catálogos. Yo hago el rol de Sol.
+> Leé `HANDOFF_COTIZADOR_AGENTICO.md` (empezá por la sección 0, el plan maestro), `DISENO_CARGAR_OBRA.md`,
+> `PLAN_ETAPA_A_CIERRE.md` y `PLAN_LOGIN_SOLE.md` antes de tocar nada. Estado: PRs #20 a #27 mergeados;
+> migraciones 009, 010 y 011 corridas; Render desplegado a mano (Auto-Deploy no anda); el Maestro marcado
+> como oficial en Catálogos. Yo hago el rol de Sol. Sos el único chat que programa: un PR por vez.
 >
-> Orden de trabajo:
-> 1. **Login que exija clave** con la estructura multiempresa de SOLÉ (sección 5, "Antes de todo"). Las
->    tablas y roles de SOLÉ son: [Carlos los pega acá]. Selector de empresa arriba, "Olvidé mi clave".
-> 2. Lo que surja de mis cargas de Ginkgo haciendo de Sol (te paso la lista de dudas: cada una es un bug de UX).
-> 3. Etapa B: estado de cada precio (al día / viejo / muy viejo) y la frase de confianza arriba del total.
+> Orden de trabajo: seguí el plan maestro de la sección 0 desde el primer paso que no esté tildado.
+> Hoy eso es: (4) las fallas de UX del punto 0c de la sección 5, en un solo PR probado con el Excel de Ginkgo;
+> después (5) encender el login guiándome con la sección 5 de `PLAN_LOGIN_SOLE.md`.
 >
 > Forma de trabajar: vos armás el plan con el contrato (campos exactos), un subagente Opus hace el
 > servidor y uno Sonnet la pantalla. Probá en el navegador con el Excel de Ginkgo antes de abrir el PR

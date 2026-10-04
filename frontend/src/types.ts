@@ -326,3 +326,23 @@ export interface CascadeResult {
   redondeos: RoundingLine[]
   errores: string[]
 }
+
+// ─── Usuario, empresas y roles (GET /me) ───────────────────────────────────────
+
+export type Rol = 'admin' | 'leader' | 'member'
+
+export interface OrgResumen {
+  id: string
+  name: string
+  slug: string
+  role: Rol
+}
+
+export interface Me {
+  user_id: string
+  email: string
+  // Null cuando tiene varias empresas y todavía no eligió una
+  org_id: string | null
+  role: Rol | null
+  orgs: OrgResumen[]
+}

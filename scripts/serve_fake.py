@@ -5,6 +5,8 @@ Uso (desde la raíz del repo):
   cd frontend && VITE_AUTH_ENABLED=false npx vite --port 5179
   EXCEL_DIR=<la misma carpeta> NODE_PATH=<node_modules con playwright> node scripts/e2e_ginkgo.cjs
 Los dos Excel se bajan de Drive (ver HANDOFF, sección 7). La primera corrida tarda ~30 s y deja un caché JSON en EXCEL_DIR.
+El usuario falso es admin de TERRAC SA. Con FAKE_DOS_EMPRESAS=1 tiene dos empresas: TERRAC SA (leader) y
+"Obra Demo" vacía (admin); GET /me devuelve las dos y el header X-Org-Id decide (sin header: 428 "Elegí la empresa").
 """
 from __future__ import annotations
 
@@ -21,7 +23,9 @@ os.environ.setdefault("ALLOWED_ORIGINS", "http://localhost:5179,http://127.0.0.1
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import openpyxl  # noqa: E402
+from fastapi import Header  # noqa: E402
 
+from app.auth import get_user_session, resolve_org  # noqa: E402
 from app.maestro_import import TIPO_LABELS, parse_workbook  # noqa: E402
 from app.maestro_recipes import template_payload  # noqa: E402
 from tests.test_recipes_api import ORG, FakeDB, Query  # noqa: E402
@@ -105,6 +109,24 @@ def build_tables() -> dict:
     return tables
 
 
+DEMO_ORG = "00000000-0000-0000-0000-00000000de30"
+
+
+def fake_orgs() -> list[dict]:
+    """Companies of the fake user: TERRAC (admin), or TERRAC (leader) + an empty one (admin)."""
+    if os.environ.get("FAKE_DOS_EMPRESAS") == "1":
+        return [
+            {"id": ORG, "name": "TERRAC SA", "slug": "terrac", "role": "leader"},
+            {"id": DEMO_ORG, "name": "Obra Demo", "slug": "obra-demo", "role": "admin"},
+        ]
+    return [{"id": ORG, "name": "TERRAC SA", "slug": "terrac", "role": "admin"}]
+
+
+def fake_session(x_org_id: str | None = Header(None, alias="X-Org-Id")) -> dict:
+    """Logged-in user without a token; the company rule (header, 403, 428) is the real one."""
+    return resolve_org("sol", "sol@terrac.com", fake_orgs(), x_org_id)
+
+
 def main() -> None:
     tables = build_tables()
     print({k: len(v) for k, v in tables.items()})
@@ -118,10 +140,9 @@ def main() -> None:
         mod = importlib.import_module(f"app.routers.{m.name}")
         if hasattr(mod, "get_data_db"):
             mod.get_data_db = lambda: fake  # type: ignore[attr-defined]
-    from app.auth import get_current_user
     from app.main import create_app
     application = create_app()
-    application.dependency_overrides[get_current_user] = lambda: {"user_id": "sol", "org_id": ORG}
+    application.dependency_overrides[get_user_session] = fake_session
     import uvicorn
     uvicorn.run(application, host="127.0.0.1", port=8000, log_level="warning")
 

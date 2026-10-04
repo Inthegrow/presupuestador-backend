@@ -2,10 +2,12 @@ import { useState } from 'react'
 import { Upload, CheckCircle } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { budgetApi } from '../lib/api'
+import { useAuth } from '../contexts/AuthContext'
 import FileUpload from '../components/ui/FileUpload'
 
 export default function ImportExcel() {
   const navigate = useNavigate()
+  const { puedeEditar } = useAuth()
   const [file, setFile] = useState<File | null>(null)
   const [importing, setImporting] = useState(false)
   const [error, setError] = useState('')
@@ -39,6 +41,19 @@ export default function ImportExcel() {
     } finally {
       setImporting(false)
     }
+  }
+
+  if (!puedeEditar) {
+    return (
+      <div className="p-6 fade-in">
+        <div className="flex items-center gap-2 text-[#2D8D68] text-[11px] font-bold tracking-wider mb-1">
+          <Upload size={14} /> IMPORTACION
+        </div>
+        <div className="max-w-xl bg-white border rounded-xl shadow-sm px-6 py-5 text-sm text-gray-700">
+          Tu usuario solo puede mirar.
+        </div>
+      </div>
+    )
   }
 
   return (

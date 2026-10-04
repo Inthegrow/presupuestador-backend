@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Trash2 } from 'lucide-react'
+import { useAuth } from '../../contexts/AuthContext'
 import type { Budget } from '../../types'
 import { fmtCurrency } from '../../lib/format'
 import { budgetApi } from '../../lib/api'
@@ -44,6 +45,7 @@ interface Props {
 }
 
 export default function BudgetCard({ budget, directTotal, netoTotal, subtitle, tags, onDelete }: Props) {
+  const { esAdmin } = useAuth()
   const navigate = useNavigate()
   const status = budget.status?.toLowerCase() || 'borrador'
   const [deleteState, setDeleteState] = useState<DeleteState>('idle')
@@ -89,13 +91,15 @@ export default function BudgetCard({ budget, directTotal, netoTotal, subtitle, t
             <span className="text-[10px] text-gray-400">
               {budget.source_file ? '✓ Excel' : 'Manual'}
             </span>
-            <button
-              onClick={handleTrashClick}
-              className="text-gray-300 hover:text-red-400 transition-colors p-0.5"
-              title="Eliminar presupuesto"
-            >
-              <Trash2 size={13} />
-            </button>
+            {esAdmin && (
+              <button
+                onClick={handleTrashClick}
+                className="text-gray-300 hover:text-red-400 transition-colors p-0.5"
+                title="Eliminar presupuesto"
+              >
+                <Trash2 size={13} />
+              </button>
+            )}
           </div>
         </div>
 

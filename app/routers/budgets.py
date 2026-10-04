@@ -6,7 +6,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException
 
-from app.auth import get_current_user
+from app.auth import get_current_user, require_admin, require_editor
 from app.budget_prices import initial_indirects, today
 from app.calculations import (
     calc_budget_summary,
@@ -65,7 +65,7 @@ def _get_items(budget_id: str, org_id: str) -> list[dict]:
 
 
 @router.post("")
-async def create_budget(budget: BudgetCreate, user: dict = Depends(get_current_user)):
+async def create_budget(budget: BudgetCreate, user: dict = Depends(require_editor)):
     db = get_data_db()
     result = db.table("budgets").insert({
         "org_id": user["org_id"],
@@ -80,7 +80,7 @@ async def create_budget(budget: BudgetCreate, user: dict = Depends(get_current_u
 
 
 @router.post("/create-full")
-async def create_full_budget(payload: CreateFullBudget, user: dict = Depends(get_current_user)):
+async def create_full_budget(payload: CreateFullBudget, user: dict = Depends(require_editor)):
     """Create a complete budget with sections, items, and indirect config in one request."""
     db = get_data_db()
     org_id = user["org_id"]
@@ -191,7 +191,7 @@ async def get_budget(budget_id: UUID, user: dict = Depends(get_current_user)):
 async def update_budget(
     budget_id: UUID,
     payload: BudgetUpdate,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_editor),
 ):
     db = get_data_db()
     update_data = payload.model_dump(exclude_unset=True)
@@ -211,7 +211,7 @@ async def update_budget(
 
 
 @router.delete("/{budget_id}")
-async def delete_budget(budget_id: UUID, user: dict = Depends(get_current_user)):
+async def delete_budget(budget_id: UUID, user: dict = Depends(require_admin)):
     db = get_data_db()
     result = (
         db.table("budgets")
@@ -230,7 +230,7 @@ async def delete_budget(budget_id: UUID, user: dict = Depends(get_current_user))
 async def create_items(
     budget_id: UUID,
     items: list[BudgetItemCreate],
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_editor),
 ):
     db = get_data_db()
     to_insert = []
@@ -261,7 +261,7 @@ async def update_item(
     budget_id: UUID,
     item_id: UUID,
     payload: BudgetItemUpdate,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_editor),
 ):
     db = get_data_db()
     org_id = user["org_id"]
@@ -402,7 +402,7 @@ async def list_items(budget_id: UUID, user: dict = Depends(get_current_user)):
 async def delete_item(
     budget_id: UUID,
     item_id: UUID,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_editor),
 ):
     db = get_data_db()
     org_id = user["org_id"]
@@ -567,7 +567,7 @@ async def update_item_params(
     budget_id: UUID,
     item_id: UUID,
     payload: ItemParamsUpdate,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_editor),
 ):
     """Change the recipe parameters of one item (ej. espesor = 0.15) and recalculate it."""
     db = get_data_db()
@@ -609,7 +609,7 @@ async def create_resource(
     budget_id: UUID,
     item_id: UUID,
     payload: ResourceCreate,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_editor),
 ):
     """Add a single resource to an item and recalculate the item's unit prices."""
     db = get_data_db()
@@ -665,7 +665,7 @@ async def update_resource(
     item_id: UUID,
     resource_id: UUID,
     payload: ResourceUpdate,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_editor),
 ):
     """Update a resource and recalculate the item's unit prices."""
     db = get_data_db()
@@ -731,7 +731,7 @@ async def delete_resource(
     budget_id: UUID,
     item_id: UUID,
     resource_id: UUID,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_editor),
 ):
     """Delete a resource and recalculate the item's unit prices."""
     db = get_data_db()
@@ -773,7 +773,7 @@ async def bulk_create_resources(
     budget_id: UUID,
     item_id: UUID,
     payload: BulkResourceCreate,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_editor),
 ):
     """Create multiple resources at once and recalculate the item's unit prices once."""
     db = get_data_db()
@@ -834,7 +834,7 @@ async def bulk_create_resources(
 async def create_section(
     budget_id: UUID,
     payload: SectionCreate,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_editor),
 ):
     """Add a section to an existing budget."""
     db = get_data_db()
@@ -881,7 +881,7 @@ async def create_section(
 async def assign_catalog_to_budget(
     budget_id: UUID,
     catalog_id: UUID,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_editor),
 ):
     """Assign a price catalog to a budget: match resource codes and update prices."""
     db = get_data_db()
@@ -1071,7 +1071,7 @@ async def get_budget_full(budget_id: UUID, user: dict = Depends(get_current_user
 @router.post("/{budget_id}/recalculate")
 async def recalculate_budget(
     budget_id: UUID,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_editor),
 ):
     """Recalculate all item totals in a budget.
 
@@ -1114,7 +1114,7 @@ async def recalculate_budget(
 async def copy_budget(
     budget_id: UUID,
     payload: BudgetCopyRequest = Body(default=BudgetCopyRequest()),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_editor),
 ):
     """Create a complete copy of a budget including all items and resources."""
     db = get_data_db()

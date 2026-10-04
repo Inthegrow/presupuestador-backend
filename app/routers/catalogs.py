@@ -10,7 +10,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, UploadFile
 
-from app.auth import get_current_user
+from app.auth import get_current_user, require_admin, require_editor
 from app.catalog_prices import fecha_iso, history_row, price_changed, price_from_payload
 from app.db import get_data_db
 from app.schemas import CatalogTipo
@@ -64,7 +64,7 @@ async def upload_csv_catalog(
     file: UploadFile = File(...),
     tipo: CatalogTipo = Query(..., description="Tipo: material, mano_obra, equipo, subcontrato"),
     name: str = Query(None, description="Nombre del catalogo (default: nombre del archivo)"),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_editor),
 ):
     """Upload a CSV price list and create a catalog with entries.
 
@@ -255,7 +255,7 @@ def _parse_excel_rows(ws, warnings_list: list[str] | None = None) -> list[dict]:
 async def upload_excel_catalog(
     file: UploadFile = File(...),
     name: str = Query(None, description="Prefijo de nombre para los catalogos (default: nombre del archivo)"),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_editor),
 ):
     """Upload an Excel file (.xlsx/.xls) with up to 4 tabs and create one catalog per tab.
 
@@ -380,7 +380,7 @@ async def list_catalogs(user: dict = Depends(get_current_user)):
 async def update_catalog(
     catalog_id: UUID,
     data: dict = Body(...),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_admin),
 ):
     """Mark a catalog as oficial (the app prices with it) or only for reference.
 
@@ -497,7 +497,7 @@ async def search_catalog_entries(
 @router.delete("/{catalog_id}")
 async def delete_catalog(
     catalog_id: UUID,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_admin),
 ):
     """Delete a price catalog and all its entries."""
     db = get_data_db()
@@ -530,7 +530,7 @@ async def delete_catalog(
 async def create_catalog_entry(
     catalog_id: UUID,
     data: dict = Body(...),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_editor),
 ):
     """Create a new entry in a catalog."""
     db = get_data_db()
@@ -583,7 +583,7 @@ async def update_catalog_entry(
     catalog_id: UUID,
     entry_id: UUID,
     data: dict = Body(...),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_editor),
 ):
     """Update an existing catalog entry."""
     db = get_data_db()
@@ -681,7 +681,7 @@ async def get_entry_price_history(
 async def delete_catalog_entry(
     catalog_id: UUID,
     entry_id: UUID,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_editor),
 ):
     """Delete a single entry from a catalog."""
     db = get_data_db()
@@ -713,7 +713,7 @@ async def delete_catalog_entry(
 async def apply_catalog_to_budget(
     budget_id: UUID,
     catalog_id: UUID,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_editor),
 ):
     """Apply catalog prices to budget item_resources by matching codigo.
 

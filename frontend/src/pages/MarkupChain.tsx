@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import { Settings } from 'lucide-react'
 import { budgetApi } from '../lib/api'
+import { useAuth } from '../contexts/AuthContext'
 import type { CascadeResult, IndirectConfig } from '../types'
 
 const DEFAULT_CONFIG: IndirectConfig = {
@@ -40,10 +41,20 @@ const IMPUESTO_FIELDS: FieldDef[] = [
 function PctInput({
   value,
   onChange,
+  readOnly = false,
 }: {
   value: number
   onChange: (v: number) => void
+  readOnly?: boolean
 }) {
+  if (readOnly) {
+    return (
+      <div className="flex items-center gap-1">
+        <span className="w-16 text-right px-2 py-1 text-sm font-semibold text-gray-800 tabular-nums">{value}</span>
+        <span className="text-sm text-gray-500 font-medium">%</span>
+      </div>
+    )
+  }
   return (
     <div className="flex items-center gap-1">
       <input
@@ -85,10 +96,13 @@ function SectionDivider({ label }: { label: string }) {
 }
 
 export default function MarkupChain() {
+  const { puedeEditar, esAdmin } = useAuth()
   // The route is /app/settings/markups?budget=<id> (older links used :id)
   const params = useParams<{ id: string }>()
   const [searchParams] = useSearchParams()
   const id = params.id ?? searchParams.get('budget') ?? undefined
+  // Misma regla que el botón Guardar: con presupuesto edita quien carga; sin presupuesto (generales), solo admin
+  const puedeGuardar = id ? puedeEditar : esAdmin
   const [cfg, setCfg] = useState<IndirectConfig>(DEFAULT_CONFIG)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -229,6 +243,7 @@ export default function MarkupChain() {
                   <PctInput
                     value={(cfg[f.key] as number) ?? 0}
                     onChange={(v) => set(f.key, v)}
+                    readOnly={!puedeGuardar}
                   />
                 </div>
               ))}
@@ -249,6 +264,7 @@ export default function MarkupChain() {
               <PctInput
                 value={cfg.beneficio_pct ?? 25}
                 onChange={(v) => set('beneficio_pct', v)}
+                readOnly={!puedeGuardar}
               />
             </div>
 
@@ -266,6 +282,7 @@ export default function MarkupChain() {
                   <PctInput
                     value={(cfg[f.key] as number) ?? 0}
                     onChange={(v) => set(f.key, v)}
+                    readOnly={!puedeGuardar}
                   />
                 </div>
               ))}
@@ -281,6 +298,7 @@ export default function MarkupChain() {
               <PctInput
                 value={cfg.iva_pct ?? 21}
                 onChange={(v) => set('iva_pct', v)}
+                readOnly={!puedeGuardar}
               />
             </div>
 
@@ -293,12 +311,16 @@ export default function MarkupChain() {
                   <span className="ml-2 text-[11px] text-gray-400">(toda la empresa)</span>
                 </div>
                 <div className="flex items-center gap-1">
+                  {puedeGuardar ? (
                   <input
                     value={orgWaste}
                     placeholder="0"
                     onChange={(e) => setOrgWaste(e.target.value)}
                     className="w-16 text-right px-2 py-1 text-sm font-semibold border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-[#2D8D68] tabular-nums"
                   />
+                  ) : (
+                    <span className="w-16 text-right px-2 py-1 text-sm font-semibold text-gray-800 tabular-nums">{orgWaste || '—'}</span>
+                  )}
                   <span className="text-sm text-gray-500 font-medium">%</span>
                 </div>
               </div>
@@ -308,12 +330,16 @@ export default function MarkupChain() {
                   <span className="ml-2 text-[11px] text-gray-400">(vacío = hereda plantilla / general)</span>
                 </div>
                 <div className="flex items-center gap-1">
+                  {puedeGuardar ? (
                   <input
                     value={budgetWaste}
                     placeholder={orgWaste || '0'}
                     onChange={(e) => setBudgetWaste(e.target.value)}
                     className="w-16 text-right px-2 py-1 text-sm font-semibold border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-[#2D8D68] tabular-nums"
                   />
+                  ) : (
+                    <span className="w-16 text-right px-2 py-1 text-sm font-semibold text-gray-800 tabular-nums">{budgetWaste || '—'}</span>
+                  )}
                   <span className="text-sm text-gray-500 font-medium">%</span>
                 </div>
               </div>
@@ -324,12 +350,13 @@ export default function MarkupChain() {
 
             {/* Save */}
             <div className="mt-6 flex items-center justify-end gap-4">
-              {id && (
+              {id && esAdmin && (
                 <label className="flex items-center gap-2 text-xs text-gray-600">
                   <input type="checkbox" checked={alsoGeneral} onChange={(e) => setAlsoGeneral(e.target.checked)} />
                   Usar también como valores generales
                 </label>
               )}
+              {puedeGuardar && (
               <button
                 onClick={handleSave}
                 disabled={saving}
@@ -340,11 +367,13 @@ export default function MarkupChain() {
                 )}
                 {saved ? 'Guardado' : 'Guardar cambios'}
               </button>
+              )}
             </div>
           </div>
         </div>
 
         {/* Recalculate the whole budget */}
+        {puedeEditar && (
         <div className="mt-4 bg-white rounded-xl border border-gray-100 shadow-sm p-4">
           <div className="flex items-center justify-between gap-3">
             <div>
@@ -393,6 +422,7 @@ export default function MarkupChain() {
             </div>
           )}
         </div>
+        )}
 
         {/* Visual cascade summary */}
         <div className="mt-4 bg-gray-50 rounded-xl border border-gray-100 shadow-sm p-4">

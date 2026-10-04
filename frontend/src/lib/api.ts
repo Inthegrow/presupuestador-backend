@@ -16,6 +16,7 @@ import type {
   TemplateParam,
   TemplatePreviewResponse,
   TemplateResource,
+  Me,
 } from '../types'
 
 const BASE_URL = (import.meta.env.VITE_API_URL as string) || '/api'
@@ -24,9 +25,40 @@ function getToken(): string | null {
   return localStorage.getItem('sb-auth-token')
 }
 
-function authHeaders(): HeadersInit {
+// Empresa activa de ESTA pestaña. Viaja en cada pedido como X-Org-Id.
+// Vive en memoria y en sessionStorage (por pestaña): cambiar de empresa en otra pestaña
+// no puede hacer que esta guarde datos en una empresa distinta de la que muestra (Codex, PR #27).
+// La preferencia "última empresa elegida" por usuario sí va en localStorage, la maneja AuthContext.
+export const ORG_ACTUAL_KEY = 'presu_org_actual'
+let orgActual: string | null = null
+
+export function setOrgActual(id: string | null) {
+  orgActual = id
+  try {
+    if (id) sessionStorage.setItem(ORG_ACTUAL_KEY, id)
+    else sessionStorage.removeItem(ORG_ACTUAL_KEY)
+  } catch {
+    /* sin almacenamiento: queda en memoria */
+  }
+}
+
+export function getOrgActual(): string | null {
+  if (orgActual) return orgActual
+  try {
+    orgActual = sessionStorage.getItem(ORG_ACTUAL_KEY)
+  } catch {
+    orgActual = null
+  }
+  return orgActual
+}
+
+function authHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {}
   const token = getToken()
-  return token ? { Authorization: `Bearer ${token}` } : {}
+  if (token) headers.Authorization = `Bearer ${token}`
+  const orgId = getOrgActual()
+  if (orgId) headers['X-Org-Id'] = orgId
+  return headers
 }
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -77,6 +109,12 @@ function patch<T>(path: string, body?: unknown) {
 }
 function del<T>(path: string) {
   return request<T>('DELETE', path)
+}
+
+// ─── Usuario y empresas ────────────────────────────────────────────────────────
+
+export const meApi = {
+  get: () => get<Me>('/me'),
 }
 
 // ─── Budget API ────────────────────────────────────────────────────────────────

@@ -1,18 +1,53 @@
+"""Who is asking and for which company.
+
+Every request carries a Supabase JWT (Bearer) and, when the user belongs to more
+than one company, the chosen one in the ``X-Org-Id`` header. Memberships and
+companies live in the auth DB (SOLÉ: ``memberships`` + ``organizations``).
+
+Company rule (PLAN_LOGIN_SOLE 2.3):
+- header present → accepted only if the user is a member there (403 otherwise);
+- no header and a single company → that one;
+- no header and several companies → 428 "Elegí la empresa" (``GET /me`` is the
+  only route that answers anyway, with ``org_id``/``role`` in null).
+
+Roles are SOLÉ's: ``admin`` (everything), ``leader`` (loads and edits),
+``member`` (only looks). Routes declare the minimum with ``require_editor`` /
+``require_admin``; a user without a known role is never let through.
+"""
+
 from __future__ import annotations
 
+import copy
+import logging
 import os
+import time
 
 import jwt
-from fastapi import Depends, HTTPException
+from fastapi import Depends, Header, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jwt import PyJWKClient
 
 from app.config import get_settings
 from app.db import get_auth_db
 
+logger = logging.getLogger(__name__)
 security = HTTPBearer(auto_error=False)
 
 _jwks_client: PyJWKClient | None = None
+
+NO_MEMBERSHIP = "Tu usuario no pertenece a ninguna empresa. Pedile al administrador que te invite."
+NOT_YOUR_ORG = "Tu usuario no pertenece a esa empresa. Elegí otra."
+CHOOSE_ORG = "Elegí la empresa"
+READ_ONLY = "Tu usuario solo puede mirar."
+ADMIN_ONLY = "Esto lo puede hacer solo un administrador de la empresa."
+NO_PERMISSION = "Tu usuario no tiene permiso para hacer esto."
+
+ROLES = ("admin", "leader", "member")
+DEMO_ORG_NAME = "Empresa demo"
+
+# Memberships per user_id, kept 60 s so we don't hit SOLÉ on every request.
+MEMBERSHIP_TTL_SECONDS = 60.0
+_membership_cache: dict[str, tuple[float, list[dict]]] = {}
 
 
 def _get_jwks_client() -> PyJWKClient:
@@ -24,58 +59,179 @@ def _get_jwks_client() -> PyJWKClient:
     return _jwks_client
 
 
-def get_current_user(
-    credentials: HTTPAuthorizationCredentials | None = Depends(security),
-) -> dict:
-    """Validate Supabase JWT via auth DB and return {user_id, org_id}.
+def decode_token(token: str) -> dict:
+    """Validate a Supabase JWT and return its payload (raises jwt errors)."""
+    signing_key = _get_jwks_client().get_signing_key_from_jwt(token)
+    return jwt.decode(
+        token,
+        signing_key.key,
+        algorithms=["ES256", "HS256"],
+        audience="authenticated",
+    )
 
-    If DEMO_ORG_ID env var is set and no token is provided, returns demo user.
-    This allows browsing without login during development/demo.
+
+def clear_membership_cache() -> None:
+    """Forget every cached membership list (tests, or after a role change)."""
+    _membership_cache.clear()
+
+
+def _fetch_orgs(user_id: str) -> list[dict]:
+    """Read the user's memberships and their companies from the auth DB.
+
+    Two queries (memberships by user, organizations by id) instead of a join, so
+    the same code runs against PostgREST and the in-memory test DB.
+    Returns ``[{"id", "name", "slug", "role"}]`` sorted by company name.
     """
-    demo_org = os.environ.get("DEMO_ORG_ID")
+    auth_db = get_auth_db()
+    memberships = (
+        auth_db.table("memberships")
+        .select("org_id, role")
+        .eq("user_id", user_id)
+        .execute()
+    ).data or []
+    roles: dict[str, str | None] = {}
+    for m in memberships:
+        org_id = m.get("org_id")
+        if org_id:
+            roles[str(org_id)] = m.get("role")
+    if not roles:
+        return []
+    orgs = (
+        auth_db.table("organizations")
+        .select("id, name, slug")
+        .in_("id", list(roles))
+        .execute()
+    ).data or []
+    by_id = {str(o.get("id")): o for o in orgs}
+    out = []
+    for org_id, role in roles.items():
+        org = by_id.get(org_id) or {}
+        out.append({
+            "id": org_id,
+            "name": org.get("name") or "Empresa sin nombre",
+            "slug": org.get("slug"),
+            "role": role,
+        })
+    out.sort(key=lambda o: (str(o["name"]).lower(), o["id"]))
+    return out
 
-    # No token provided — use demo mode if configured
+
+def load_orgs(user_id: str) -> list[dict]:
+    """Memberships of ``user_id``, cached for ``MEMBERSHIP_TTL_SECONDS``.
+
+    An empty list is not cached: right after ``accept_my_invitations`` the next
+    request has to see the new company.
+    """
+    now = time.monotonic()
+    hit = _membership_cache.get(user_id)
+    if hit and now - hit[0] < MEMBERSHIP_TTL_SECONDS:
+        return copy.deepcopy(hit[1])
+    orgs = _fetch_orgs(user_id)
+    if orgs:
+        _membership_cache[user_id] = (now, orgs)
+    return copy.deepcopy(orgs)
+
+
+def resolve_org(user_id: str, email: str | None, orgs: list[dict], x_org_id: str | None) -> dict:
+    """Apply the company rule and build the user dict.
+
+    ``org_id``/``role`` stay None when the user has several companies and sent
+    no header; ``get_current_user`` turns that into a 428.
+    """
+    if not orgs:
+        raise HTTPException(403, NO_MEMBERSHIP)
+    chosen: dict | None = None
+    wanted = (x_org_id or "").strip()
+    if wanted:
+        chosen = next((o for o in orgs if o["id"] == wanted), None)
+        if chosen is None:
+            raise HTTPException(403, NOT_YOUR_ORG)
+    elif len(orgs) == 1:
+        chosen = orgs[0]
+    return {
+        "user_id": user_id,
+        "email": email,
+        "org_id": chosen["id"] if chosen else None,
+        "role": chosen["role"] if chosen else None,
+        "orgs": orgs,
+    }
+
+
+def get_user_session(
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    x_org_id: str | None = Header(None, alias="X-Org-Id"),
+) -> dict:
+    """Validate the JWT and return the user with all their companies.
+
+    Unlike ``get_current_user`` it does not fail when the company is still to
+    be chosen (only ``GET /me`` uses it directly).
+    If DEMO_ORG_ID is set and no token is sent, the user is an admin of that
+    single company (tests and ``scripts/serve_fake.py`` only; never in production).
+    """
     if credentials is None or not credentials.credentials:
+        demo_org = os.environ.get("DEMO_ORG_ID")
         if demo_org:
-            return {"user_id": "demo-user", "org_id": demo_org}
+            orgs = [{"id": demo_org, "name": DEMO_ORG_NAME, "slug": "demo", "role": "admin"}]
+            return resolve_org("demo-user", None, orgs, x_org_id)
         raise HTTPException(401, "Token requerido")
 
-    token = credentials.credentials
     try:
-        signing_key = _get_jwks_client().get_signing_key_from_jwt(token)
-        payload = jwt.decode(
-            token,
-            signing_key.key,
-            algorithms=["ES256", "HS256"],
-            audience="authenticated",
-        )
-        user_id = payload.get("sub")
-        if not user_id:
-            raise HTTPException(401, "Token sin sub")
-
-        # Auth DB (EOS) — resolve org_id from memberships
-        auth_db = get_auth_db()
-        membership = (
-            auth_db.table("memberships")
-            .select("org_id")
-            .eq("user_id", user_id)
-            .limit(1)
-            .execute()
-        )
-        if not membership.data:
-            raise HTTPException(403, "Usuario sin membresia activa")
-
-        org_id = membership.data[0].get("org_id")
-        if not org_id:
-            raise HTTPException(403, "Sin org_id")
-
-        return {"user_id": user_id, "org_id": org_id}
-
+        payload = decode_token(credentials.credentials)
     except jwt.ExpiredSignatureError:
         raise HTTPException(401, "Token expirado")
     except jwt.InvalidTokenError as e:
         raise HTTPException(401, f"Token invalido: {e}")
-    except HTTPException:
-        raise
     except Exception as e:
         raise HTTPException(500, f"Error de autenticacion: {e}")
+
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(401, "Token sin sub")
+
+    try:
+        orgs = load_orgs(user_id)
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("No se pudieron leer las membresías de %s", user_id)
+        raise HTTPException(500, "No pudimos leer tus empresas. Probá de nuevo en un rato.")
+
+    return resolve_org(user_id, payload.get("email"), orgs, x_org_id)
+
+
+def get_current_user(session: dict = Depends(get_user_session)) -> dict:
+    """The user with the company of this request already chosen.
+
+    Returns ``{"user_id", "email", "org_id", "role", "orgs": [{"id", "name", "slug", "role"}]}``.
+    428 "Elegí la empresa" when the user has several companies and sent no ``X-Org-Id``.
+    """
+    if not session.get("org_id"):
+        raise HTTPException(428, CHOOSE_ORG)
+    return session
+
+
+def require_role(*roles: str):
+    """Dependency that lets through only users whose role is in ``roles``.
+
+    Returns the user dict, so routes use it in place of ``get_current_user``.
+    A user without a role (or with an unknown one) gets 403: never open by default.
+    """
+    allowed = frozenset(roles)
+
+    def checker(user: dict = Depends(get_current_user)) -> dict:
+        role = user.get("role")
+        if role in allowed:
+            return user
+        if role == "member":
+            raise HTTPException(403, READ_ONLY)
+        if role in ROLES and allowed == {"admin"}:
+            raise HTTPException(403, ADMIN_ONLY)
+        raise HTTPException(403, NO_PERMISSION)
+
+    checker.__name__ = f"require_role_{'_'.join(roles)}"
+    checker.roles = allowed  # type: ignore[attr-defined]
+    return checker
+
+
+require_editor = require_role("admin", "leader")
+require_admin = require_role("admin")

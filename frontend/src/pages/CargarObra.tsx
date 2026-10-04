@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { AlertTriangle, CheckCircle, ChevronDown, ChevronUp, ClipboardCheck, Search, Trash2 } from 'lucide-react'
 import FileUpload from '../components/ui/FileUpload'
 import { catalogApi, obraApi } from '../lib/api'
+import { useAuth } from '../contexts/AuthContext'
 import type { ObraAnalisis, ObraAsignaciones, ObraCarga, ObraPrecio, ObraPropuesta, ObraRecetaCatalogo, ObraTarea } from '../lib/api'
 import { fmtCurrency, fmtDate, todayIso } from '../lib/format'
 import type { PriceCatalog } from '../types'
@@ -450,6 +451,7 @@ function TareaCard({
 // ─── Página ───────────────────────────────────────────────────────────────────
 
 export default function CargarObra() {
+  const { puedeEditar } = useAuth()
   const navigate = useNavigate()
   const [file, setFile] = useState<File | null>(null)
   const [analisis, setAnalisis] = useState<ObraAnalisis | null>(null)
@@ -624,6 +626,19 @@ export default function CargarObra() {
       : 'Todo listo para cargar'
 
   const paso = carga ? 3 : analisis ? 2 : 1
+
+  if (!puedeEditar) {
+    return (
+      <div className="p-6 fade-in">
+        <div className="flex items-center gap-2 text-[#2D8D68] text-[11px] font-bold tracking-wider mb-1">
+          <ClipboardCheck size={14} /> CARGAR OBRA
+        </div>
+        <div className="max-w-xl bg-white border rounded-xl shadow-sm px-6 py-5 text-sm text-gray-700">
+          Tu usuario solo puede mirar.
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="p-6 fade-in">

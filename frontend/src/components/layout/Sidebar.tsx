@@ -5,6 +5,7 @@ import {
   ArrowLeft, Library, ClipboardCheck,
 } from 'lucide-react'
 import { useAuth } from '../../contexts/AuthContext'
+import { rolEnPalabras } from '../../lib/roles'
 import { useEffect, useState } from 'react'
 import { budgetApi } from '../../lib/api'
 
@@ -57,7 +58,7 @@ function NavItem({
 }
 
 export default function Sidebar() {
-  const { user, signOut } = useAuth()
+  const { user, org, role, puedeEditar, signOut } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
 
@@ -82,7 +83,7 @@ export default function Sidebar() {
     navigate('/login')
   }
 
-  const orgName = (user?.user_metadata?.org_name as string) || 'TERRAC SA'
+  const orgName = org?.name ?? ''
   const initials = orgName.slice(0, 1).toUpperCase()
 
   return (
@@ -105,9 +106,13 @@ export default function Sidebar() {
       </div>
       <nav className="px-2 space-y-0.5 text-[13px]">
         <NavItem to="/app/dashboard" end icon={<LayoutGrid size={15} />} label="Mis Presupuestos" />
-        <NavItem to="/app/new-project" icon={<Plus size={15} />} label="+ Nuevo Presupuesto" />
-        <NavItem to="/app/cargar-obra" icon={<ClipboardCheck size={15} />} label="Cargar obra (con recetas)" />
-        <NavItem to="/app/import" icon={<Upload size={15} />} label="Importar Excel" />
+        {puedeEditar && (
+          <>
+            <NavItem to="/app/new-project" icon={<Plus size={15} />} label="+ Nuevo Presupuesto" />
+            <NavItem to="/app/cargar-obra" icon={<ClipboardCheck size={15} />} label="Cargar obra (con recetas)" />
+            <NavItem to="/app/import" icon={<Upload size={15} />} label="Importar Excel" />
+          </>
+        )}
       </nav>
 
       {/* PROYECTO ACTUAL — only when inside a budget */}
@@ -157,7 +162,9 @@ export default function Sidebar() {
         </div>
         <div className="flex-1 min-w-0">
           <div className="text-xs font-semibold text-gray-800 truncate">{orgName}</div>
-          <div className="text-[10px] text-[#2D8D68] font-medium">ADMIN</div>
+          <div className="text-[10px] text-gray-400 truncate">
+            {user?.email ? `${user.email.split('@')[0]} · ` : ''}{rolEnPalabras(role)}
+          </div>
         </div>
       </div>
       <button
