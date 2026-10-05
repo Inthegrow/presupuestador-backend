@@ -210,7 +210,7 @@ export const budgetApi = {
   copy: (id: string) => post<Budget>(`/budgets/${id}/copy`),
 
   // Excel import/export
-  importExcel: (formData: FormData) => postFile<{ budget_id: string; budget_name: string; items_inserted: number; resources_inserted: number; catalog_entries: number; date_codes_corrected: number }>('/budgets/import-excel', formData),
+  importExcel: (formData: FormData) => postFile<{ budget_id: string; budget_name: string; items_inserted: number; resources_inserted: number; catalog_entries: number; date_codes_corrected: number; catalog_id: string | null; catalog_reused: boolean; catalog_name: string | null; precios_actualizados: number; precios_nuevos: number }>('/budgets/import-excel', formData),
   exportExcel: (id: string) => getBlob(`/budgets/${id}/export/excel`),
   exportPdf: (id: string) => getBlob(`/budgets/${id}/export/pdf`),
 
