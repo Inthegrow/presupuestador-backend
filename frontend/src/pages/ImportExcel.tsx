@@ -66,7 +66,7 @@ export default function ImportExcel() {
         <h1 className="text-xl font-extrabold text-gray-900">IMPORTAR EXCEL</h1>
       </div>
       <p className="text-gray-500 text-sm mb-6 ml-4">
-        Arrastra tu Excel de presupuesto. El sistema detecta hojas, items, catalogos y recursos automaticamente.
+        Arrastra tu Excel de presupuesto. El sistema detecta hojas, items, listas de precios y recursos automaticamente.
       </p>
 
       <div className="max-w-3xl">
@@ -103,7 +103,7 @@ export default function ImportExcel() {
             <div className="bg-[#E8F5EE] rounded-lg p-3 border border-green-200 text-xs text-[#143D34] mb-4">
               El sistema va a:
               <ul className="mt-1 space-y-0.5 ml-3 list-disc">
-                <li>Detectar catalogos (00_Mat, 00_MO, 00_Eq, 00_Sub)</li>
+                <li>Detectar listas de precios (00_Mat, 00_MO, 00_Eq, 00_Sub)</li>
                 <li>Importar items desde hoja 01_C&P</li>
                 <li>Leer hojas de detalle → recursos por item</li>
                 <li>Corregir codigos-fecha automaticamente si los detecta</li>
@@ -159,7 +159,7 @@ export default function ImportExcel() {
               </div>
               <div className="bg-blue-50 rounded-lg p-3 text-center">
                 <div className="text-xl font-bold text-blue-600">{result.catalog_entries}</div>
-                <div className="text-[10px] text-gray-500">CATALOGOS</div>
+                <div className="text-[10px] text-gray-500">LISTAS DE PRECIOS</div>
               </div>
               {result.date_codes_corrected > 0 && (
                 <div className="bg-amber-50 rounded-lg p-3 text-center">
@@ -196,7 +196,7 @@ export default function ImportExcel() {
         <div className="mt-4 bg-[#E8F5EE] rounded-xl border border-green-200 p-4 text-xs text-[#143D34]">
           <p className="font-semibold mb-2">Formatos compatibles</p>
           <ul className="space-y-1 text-gray-600">
-            <li>Catalogos (00_Mat, 00_MO, 00_Eq, 00_Sub) → van a <strong>Catalogos de Precios</strong></li>
+            <li>Listas de precios (00_Mat, 00_MO, 00_Eq, 00_Sub) → van a <strong>Lista de precios</strong></li>
             <li>01_C&P → crea el <strong>arbol de items</strong> con costos</li>
             <li>Hojas detalle (1.1, 1.2, etc.) → crean los <strong>recursos por item</strong></li>
             <li>Codigos-fecha (Excel bug) → se <strong>corrigen automaticamente</strong></li>

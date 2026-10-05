@@ -35,11 +35,11 @@ function UploadForm({ onSuccess, onCancel }: { onSuccess: (catalog: PriceCatalog
     <div className="bg-white rounded-xl border border-[#2D8D68] p-4 mb-4 shadow-sm">
       <div className="flex items-center gap-2 mb-3">
         <Upload size={14} className="text-[#2D8D68]" />
-        <span className="text-sm font-semibold text-gray-800">Nuevo catálogo por CSV</span>
+        <span className="text-sm font-semibold text-gray-800">Nueva lista de precios por CSV</span>
       </div>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div>
-          <label className="block text-[11px] text-gray-500 mb-1 font-medium">Nombre del catálogo *</label>
+          <label className="block text-[11px] text-gray-500 mb-1 font-medium">Nombre de la lista *</label>
           <input
             type="text"
             value={name}
@@ -140,7 +140,7 @@ function ExcelUploadForm({ onSuccess, onCancel }: { onSuccess: (count: number) =
       </div>
       <p className="text-[11px] text-gray-500 mb-3">
         El archivo debe tener solapas llamadas: <strong>Materiales</strong>, <strong>Mano de obra</strong>, <strong>Equipos</strong>, <strong>Subcontratos</strong> (o variantes como Mat, MO, Eq, Sub).
-        Cada solapa crea un catálogo separado.
+        Cada solapa crea una lista separada.
       </p>
       <div className="flex items-end gap-3">
         <div className="flex-1">
@@ -179,7 +179,7 @@ function ExcelUploadForm({ onSuccess, onCancel }: { onSuccess: (count: number) =
       {result && (
         <div className="mt-3 bg-[#E8F5EE] border border-green-200 rounded-lg px-3 py-2">
           <div className="text-xs font-semibold text-[#143D34] mb-1">
-            {result.catalogs_created} catálogo{result.catalogs_created !== 1 ? 's' : ''} creado{result.catalogs_created !== 1 ? 's' : ''}
+            {result.catalogs_created} {result.catalogs_created !== 1 ? 'listas creadas' : 'lista creada'}
           </div>
           <div className="flex flex-wrap gap-2 text-[11px]">
             {Object.entries(result.entries).map(([tipo, count]) => (
@@ -509,13 +509,13 @@ function CatalogRow({
   }
 
   async function handleDeleteCatalog() {
-    if (!confirm(`¿Eliminar catálogo "${catalog.name}"? Esta acción no se puede deshacer.`)) return
+    if (!confirm(`¿Eliminar la lista "${catalog.name}"? Esta acción no se puede deshacer.`)) return
     setDeletingCatalog(true)
     try {
       await catalogApi.deleteCatalog(catalog.id)
       onDeleted(catalog.id)
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Error eliminando catálogo')
+      alert(err instanceof Error ? err.message : 'Error eliminando la lista')
     } finally {
       setDeletingCatalog(false)
     }
@@ -558,11 +558,11 @@ function CatalogRow({
       const result = await catalogApi.apply(selectedBudgetId, catalog.id)
       setApplyResult({
         success: true,
-        message: `Catálogo aplicado: ${result.items_matched} recursos actualizados, ${result.items_unmatched} sin coincidencia`,
+        message: `Lista aplicada: ${result.items_matched} recursos actualizados, ${result.items_unmatched} sin coincidencia`,
       })
       setTimeout(() => setApplyResult(null), 5000)
     } catch (err) {
-      setApplyResult({ success: false, message: err instanceof Error ? err.message : 'Error al aplicar catálogo' })
+      setApplyResult({ success: false, message: err instanceof Error ? err.message : 'Error al aplicar la lista' })
       setTimeout(() => setApplyResult(null), 5000)
     } finally {
       setApplying(false)
@@ -623,7 +623,7 @@ function CatalogRow({
               onClick={handleDeleteCatalog}
               disabled={deletingCatalog}
               className="p-1.5 rounded-lg text-red-400 hover:text-red-600 hover:bg-red-50 transition-colors disabled:opacity-40"
-              title="Eliminar catálogo"
+              title="Eliminar lista"
             >
               {deletingCatalog
                 ? <div className="w-3 h-3 border-2 border-red-400 border-t-transparent rounded-full animate-spin" />
@@ -762,7 +762,7 @@ function CatalogRow({
                 </>
               ) : (
                 <div className="p-4 text-xs text-gray-400 italic flex items-center justify-between">
-                  <span>{searchQ ? 'Sin resultados para la búsqueda.' : 'Sin entradas para este catálogo.'}</span>
+                  <span>{searchQ ? 'Sin resultados para la búsqueda.' : 'Sin entradas en esta lista.'}</span>
                   {!searchQ && !addingEntry && puedeEditar && (
                     <button
                       onClick={() => setAddingEntry(true)}
@@ -837,6 +837,7 @@ export default function Catalogs() {
   const [budgets, setBudgets] = useState<Budget[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [showUploads, setShowUploads] = useState(false)
   const [showUpload, setShowUpload] = useState(false)
   const [showExcelUpload, setShowExcelUpload] = useState(false)
 
@@ -848,7 +849,7 @@ export default function Catalogs() {
         setBudgets(buds)
       })
       .catch((err) => {
-        setError(err instanceof Error ? err.message : 'Error al cargar catálogos')
+        setError(err instanceof Error ? err.message : 'Error al cargar las listas de precios')
       })
       .finally(() => setLoading(false))
   }, [])
@@ -879,41 +880,58 @@ export default function Catalogs() {
   return (
     <div className="p-6 fade-in">
       <div className="flex items-center gap-2 text-[#2D8D68] text-[11px] font-bold tracking-wider mb-1">
-        <BookOpen size={14} /> GESTIÓN DE PRECIOS
+        <BookOpen size={14} /> PRECIOS
       </div>
-      <div className="flex items-center gap-3 mb-4">
+      <div className="flex items-center gap-3 mb-1">
         <div className="w-1 h-7 bg-[#2D8D68] rounded-full" />
-        <h1 className="text-xl font-extrabold text-gray-900">CATÁLOGOS DE PRECIOS</h1>
+        <h1 className="text-xl font-extrabold text-gray-900">LISTA DE PRECIOS</h1>
         <span className="bg-[#E8F5EE] text-[#1B5E4B] text-xs font-medium px-2 py-0.5 rounded-full">
-          {catalogs.length} catálogo{catalogs.length !== 1 ? 's' : ''}
+          {catalogs.length} {catalogs.length === 1 ? 'lista' : 'listas'}
         </span>
       </div>
+      <p className="text-sm text-gray-500 mb-4 pl-4 max-w-3xl">
+        Cada lista tiene el precio y la fecha de cada material. La app calcula con la lista <strong>oficial</strong>; las demás son solo para consultar.
+      </p>
 
-      {/* Actions bar */}
+      {/* Upload link: panels start collapsed */}
       {puedeEditar && (
-      <div className="flex items-center gap-2 mb-4 max-w-3xl">
+      <div className="mb-4 max-w-3xl">
         <button
-          onClick={() => { setShowUpload((prev) => !prev); setShowExcelUpload(false) }}
-          className={`flex items-center gap-1.5 text-xs font-semibold px-4 py-2 rounded-lg transition-colors ${
-            showUpload
-              ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              : 'bg-[#2D8D68] hover:bg-[#1B5E4B] text-white'
-          }`}
+          onClick={() => {
+            setShowUploads((prev) => !prev)
+            setShowUpload(false)
+            setShowExcelUpload(false)
+          }}
+          className="text-xs text-[#2D8D68] hover:text-[#1B5E4B] underline underline-offset-2"
         >
-          {showUpload ? <X size={13} /> : <Plus size={13} />}
-          {showUpload ? 'Cancelar' : 'Nuevo catálogo (CSV)'}
+          {showUploads ? 'Ocultar' : 'Subir una lista nueva'}
         </button>
-        <button
-          onClick={() => { setShowExcelUpload((prev) => !prev); setShowUpload(false) }}
-          className={`flex items-center gap-1.5 text-xs font-semibold px-4 py-2 rounded-lg border transition-colors ${
-            showExcelUpload
-              ? 'bg-gray-100 text-gray-700 hover:bg-gray-200 border-gray-300'
-              : 'border-[#2D8D68] text-[#2D8D68] hover:bg-[#E8F5EE]'
-          }`}
-        >
-          {showExcelUpload ? <X size={13} /> : <FileSpreadsheet size={13} />}
-          {showExcelUpload ? 'Cancelar' : 'Subir Excel (4 solapas)'}
-        </button>
+        {showUploads && (
+          <div className="flex items-center gap-2 mt-2">
+            <button
+              onClick={() => { setShowUpload((prev) => !prev); setShowExcelUpload(false) }}
+              className={`flex items-center gap-1.5 text-xs font-semibold px-4 py-2 rounded-lg transition-colors ${
+                showUpload
+                  ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  : 'bg-[#2D8D68] hover:bg-[#1B5E4B] text-white'
+              }`}
+            >
+              {showUpload ? <X size={13} /> : <Plus size={13} />}
+              {showUpload ? 'Cancelar' : 'Lista nueva (CSV)'}
+            </button>
+            <button
+              onClick={() => { setShowExcelUpload((prev) => !prev); setShowUpload(false) }}
+              className={`flex items-center gap-1.5 text-xs font-semibold px-4 py-2 rounded-lg border transition-colors ${
+                showExcelUpload
+                  ? 'bg-gray-100 text-gray-700 hover:bg-gray-200 border-gray-300'
+                  : 'border-[#2D8D68] text-[#2D8D68] hover:bg-[#E8F5EE]'
+              }`}
+            >
+              {showExcelUpload ? <X size={13} /> : <FileSpreadsheet size={13} />}
+              {showExcelUpload ? 'Cancelar' : 'Subir Excel (4 solapas)'}
+            </button>
+          </div>
+        )}
       </div>
       )}
 
@@ -929,25 +947,21 @@ export default function Catalogs() {
         {loading && (
           <div className="flex items-center gap-2 text-sm text-gray-400">
             <div className="w-4 h-4 border-2 border-[#2D8D68] border-t-transparent rounded-full animate-spin" />
-            Cargando catálogos...
+            Cargando listas de precios...
           </div>
         )}
 
         {error && (
           <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-700">
-            <p className="font-semibold mb-1">Error al cargar catálogos</p>
+            <p className="font-semibold mb-1">Error al cargar las listas de precios</p>
             <p className="text-xs">{error}</p>
           </div>
         )}
 
         {!loading && catalogs.length > 0 && !error && (
-          hayOficial ? (
-            <div className="bg-[#E8F5EE] border border-green-200 rounded-xl px-4 py-3 text-xs text-[#143D34]">
-              La app calcula con los catálogos oficiales. Los demás son solo para consultar.
-            </div>
-          ) : (
+          !hayOficial && (
             <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-xs text-amber-800">
-              Ningún catálogo es oficial: la app toma el precio más nuevo entre todos. Marcá como oficial el que mantenés; los otros quedan para consultar.
+              Ninguna lista es oficial: la app toma el precio más nuevo entre todas. Marcá como oficial la que mantenés; las otras quedan para consultar.
             </div>
           )
         )}
@@ -955,8 +969,8 @@ export default function Catalogs() {
         {!loading && catalogs.length === 0 && !error && (
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-8 text-center text-gray-400">
             <BookOpen size={32} className="mx-auto mb-3 text-gray-300" />
-            <p className="text-sm">No hay catálogos de precios todavía.</p>
-            <p className="text-xs mt-1">Sube un CSV para crear tu primer catálogo.</p>
+            <p className="text-sm">Todavía no hay listas de precios.</p>
+            <p className="text-xs mt-1">Subí un CSV para crear tu primera lista.</p>
           </div>
         )}
 

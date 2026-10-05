@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { LayoutGrid, Clock, TrendingUp, DollarSign, Plus, Search } from 'lucide-react'
+import { LayoutGrid, TrendingUp, DollarSign, Plus, Search } from 'lucide-react'
 import { budgetApi } from '../lib/api'
 import { fmtCurrency } from '../lib/format'
 import type { Budget, AnalysisResponse } from '../types'
@@ -79,7 +79,6 @@ export default function Dashboard() {
 
   const totalItems = Object.values(analyses).reduce((s, a) => s + (a.items_count ?? 0), 0)
   const totalNeto = Object.values(analyses).reduce((s, a) => s + (a.neto_total ?? 0), 0)
-  const pendingCount = budgets.filter((b) => b.status?.toLowerCase() === 'borrador').length
 
   return (
     <div className="p-6 fade-in">
@@ -88,7 +87,7 @@ export default function Dashboard() {
         <LayoutGrid size={14} />
         CENTRO DE PRESUPUESTOS
       </div>
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-1">
         <div className="flex items-center gap-3">
           <div className="w-1 h-8 bg-[#2D8D68] rounded-full" />
           <h1 className="text-2xl font-extrabold text-gray-900">MIS PRESUPUESTOS</h1>
@@ -98,21 +97,23 @@ export default function Dashboard() {
         </div>
         {puedeEditar && (
           <button
-            onClick={() => navigate('/app/new-project')}
+            onClick={() => navigate('/app/cargar-obra')}
             className="bg-[#2D8D68] hover:bg-[#1B5E4B] text-white font-semibold px-4 py-2 rounded-lg text-xs flex items-center gap-1.5 transition-colors"
           >
-            <Plus size={14} /> Nuevo presupuesto
+            <Plus size={14} /> Cargar obra
           </button>
         )}
       </div>
+      <p className="text-sm text-gray-500 mb-6 pl-4">
+        Las obras cargadas. Entrá a una para ver el detalle o compararla con el Excel.
+      </p>
 
       {/* KPI cards */}
       <div className="text-[10px] font-bold text-gray-400 tracking-wider mb-2">RESUMEN GENERAL</div>
-      <div className="grid grid-cols-4 gap-3 mb-6">
-        <KpiCard icon={<LayoutGrid size={16} strokeWidth={1.5} className="text-[#2D8D68]" />} bg="bg-[#E8F5EE]" value={String(budgets.length)} label="OBRAS ACTIVAS" />
-        <KpiCard icon={<Clock size={16} strokeWidth={1.5} className="text-orange-500" />} bg="bg-orange-50" value={String(pendingCount)} label="PENDIENTE REVISIÓN" valueClass="text-orange-600" />
-        <KpiCard icon={<TrendingUp size={16} strokeWidth={1.5} className="text-blue-600" />} bg="bg-blue-50" value={String(totalItems)} label="ÍTEMS TOTALES" valueClass="text-blue-600" />
-        <KpiCard icon={<DollarSign size={16} strokeWidth={1.5} className="text-[#2D8D68]" />} bg="bg-[#E8F5EE]" value={totalNeto > 0 ? fmtCurrency(totalNeto) : '$0'} label="NETO TOTAL CARTERA" />
+      <div className="grid grid-cols-3 gap-3 mb-6">
+        <KpiCard icon={<LayoutGrid size={16} strokeWidth={1.5} className="text-[#2D8D68]" />} bg="bg-[#E8F5EE]" value={String(budgets.length)} label="OBRAS" />
+        <KpiCard icon={<TrendingUp size={16} strokeWidth={1.5} className="text-blue-600" />} bg="bg-blue-50" value={String(totalItems)} label="TRABAJOS CARGADOS" valueClass="text-blue-600" />
+        <KpiCard icon={<DollarSign size={16} strokeWidth={1.5} className="text-[#2D8D68]" />} bg="bg-[#E8F5EE]" value={totalNeto > 0 ? fmtCurrency(totalNeto) : '$0'} label="TOTAL DE LA CARTERA" />
       </div>
 
       {/* Search and filter */}
@@ -168,10 +169,10 @@ export default function Dashboard() {
           <p className="text-gray-500 text-sm mb-2">No hay presupuestos todavía.</p>
           {puedeEditar && (
             <button
-              onClick={() => navigate('/app/new-project')}
+              onClick={() => navigate('/app/cargar-obra')}
               className="bg-[#2D8D68] hover:bg-[#1B5E4B] text-white font-semibold px-4 py-2 rounded-lg text-xs transition-colors"
             >
-              Importar Excel
+              Cargar obra
             </button>
           )}
         </div>
