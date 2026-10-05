@@ -304,11 +304,13 @@ function PrecioRow({
 // ─── Buscador de recetas ───────────────────────────────────────────────────────
 
 function RecetaBuscador({
-  recetas, sinPrecioExcel, onElegir, onSinReceta, onCerrar,
+  recetas, sinPrecioExcel, enCero, onElegir, onSinReceta, onCerrar,
 }: {
   recetas: ObraRecetaCatalogo[]
-  // The task has no price in the Excel: "use the Excel price" would load it at $0
+  // The whole Excel has no prices: "use the Excel price" would load everything at $0
   sinPrecioExcel: boolean
+  // This task's row says $0 in a priced Excel: Sol does not quote it, leaving it at $0 is valid
+  enCero: boolean
   onElegir: (r: ObraRecetaCatalogo) => void
   onSinReceta: () => void
   onCerrar: () => void
@@ -334,7 +336,7 @@ function RecetaBuscador({
         <button onClick={onCerrar} className="text-xs text-gray-500 hover:text-gray-800">Cerrar</button>
       </div>
       <p className="px-3 py-1.5 text-[11px] text-gray-500 border-b">
-        Elegí la receta correcta para este trabajo.{sinPrecioExcel ? '' : ' Si ninguna sirve, usá el precio del Excel.'}
+        Elegí la receta correcta para este trabajo.{sinPrecioExcel ? '' : enCero ? ' Si no lo cotizás, dejalo en $0.' : ' Si ninguna sirve, usá el precio del Excel.'}
       </p>
       <div className="max-h-64 overflow-y-auto">
         {!sinPrecioExcel && (
@@ -342,9 +344,13 @@ function RecetaBuscador({
             onClick={onSinReceta}
             className="w-full text-left px-3 py-2 text-[#143D34] bg-[#E8F5EE] hover:bg-[#d8eee2]"
           >
-            <span className="block text-sm font-medium">Usar el precio del Excel (sin receta)</span>
+            <span className="block text-sm font-medium">
+              {enCero ? 'Dejarlo en $0 como en el Excel (sin receta)' : 'Usar el precio del Excel (sin receta)'}
+            </span>
             <span className="block text-[11px] text-gray-500 font-normal">
-              Se carga con lo que cobró tu Excel; la app no desglosa materiales.
+              {enCero
+                ? 'Tu Excel no lo cotiza: la app no suma nada por este trabajo.'
+                : 'Se carga con lo que cobró tu Excel; la app no desglosa materiales.'}
             </span>
           </button>
         )}
@@ -514,7 +520,8 @@ function TareaCard({
       {buscando && (
         <RecetaBuscador
           recetas={recetas}
-          sinPrecioExcel={t.total_excel <= 0}
+          sinPrecioExcel={!excelConPrecios}
+          enCero={t.total_excel <= 0}
           onCerrar={() => setBuscando(false)}
           onSinReceta={() => { setBuscando(false); onSinReceta() }}
           onElegir={(r) => { setBuscando(false); onElegir(r) }}
