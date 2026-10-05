@@ -26,6 +26,7 @@ from app.auth import (
     CHOOSE_ORG,
     MODULE_KEY,
     NO_MEMBERSHIP,
+    MODULE_CHECK_FAILED,
     NO_MODULE,
     NOT_YOUR_ORG,
     READ_ONLY,
@@ -450,17 +451,25 @@ class TestModule:
         auth.clear_membership_cache()
         assert _org_ids(client, "carlos") == [ORG_B, ORG_A]
 
-    def test_unreadable_cfg_tables_do_not_filter(self, client, auth_db):
-        _module(auth_db, overrides={ORG_A: False, ORG_B: False})
+    @pytest.mark.parametrize("tabla", ["cfg_modules", "cfg_org_module_overrides", "cfg_plan_entitlements"])
+    def test_unreadable_cfg_tables_fail_closed(self, client, auth_db, tabla):
+        # Codex (PR #33): an outage must never open access to every company
+        _module(auth_db, overrides={ORG_A: True, ORG_B: False})
         original = auth_db.table
 
         def broken(name):
-            if name == "cfg_plan_entitlements":
-                raise RuntimeError("relation does not exist")
+            if name == tabla:
+                raise RuntimeError("connection reset")
             return original(name)
 
         auth_db.table = broken
-        assert _org_ids(client, "carlos") == [ORG_B, ORG_A]
+        r = client.get("/me", headers=_h("carlos"))
+        assert r.status_code == 503
+        assert r.json()["detail"] == MODULE_CHECK_FAILED
+        assert client.get("/budgets", headers=_h("carlos", ORG_B)).status_code == 503
+        # Not cached: when SOLÉ answers again, the filter is back
+        auth_db.table = original
+        assert _org_ids(client, "carlos") == [ORG_A]
 
     def test_override_per_company(self, client, auth_db):
         _module(auth_db, overrides={ORG_A: True, ORG_B: False}, plans={"trial": True})
