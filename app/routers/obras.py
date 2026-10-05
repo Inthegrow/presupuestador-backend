@@ -426,6 +426,10 @@ def analyze(parsed: dict, templates: dict[str, dict], book: PriceBook, asignacio
 
     ``excel`` = excel_prices(wb): the prices the obra's Excel already has, proposed
     for the codes the catalog cannot price.
+
+    "motivo_rojo" of a red task: "receta_inexistente", "pregunta", "sin_receta" (no recipe
+    and no price in the Excel) or "precio". "excel_con_precios" is False when no item of the
+    Excel has a cost (an obra that came only with quantities).
     """
     memoria = memoria or {}
     filas = [f for f in parsed["filas"] if f["nivel"] == "item"]
@@ -481,8 +485,11 @@ def analyze(parsed: dict, templates: dict[str, dict], book: PriceBook, asignacio
         avisos = _avisos(rule)
         faltantes = sorted({c for i in its for c in faltan_por_item.get(i["codigo"], ())},
                            key=lambda c: normalize_codigo(c) or "")
+        total_excel = round(sum(i["excel"]["neto"] for i in its), 2)
 
+        # Without a recipe the Excel price is used: with none (or $0) there is nothing to load
         motivo = ("receta_inexistente" if inexistente else "pregunta" if falta_conversion
+                  else "sin_receta" if receta is None and total_excel <= 0
                   else "precio" if faltantes else None)
         if motivo:
             estado = "rojo"
@@ -504,7 +511,7 @@ def analyze(parsed: dict, templates: dict[str, dict], book: PriceBook, asignacio
             "clave": key, "descripcion": first["descripcion"], "unidad": first.get("unidad"),
             "veces": len(its),
             "cantidad_total": round(sum(float(i["cantidad"] or 0) for i in its), 4),
-            "total_excel": round(sum(i["excel"]["neto"] for i in its), 2),
+            "total_excel": total_excel,
             "codigos": [i["codigo"] for i in its],
             "estado": estado, "motivo_rojo": motivo, "receta": receta, "sugerencias": sugerencias,
             "pregunta": pregunta, "avisos": avisos, "precios_faltantes": faltantes,
@@ -512,8 +519,11 @@ def analyze(parsed: dict, templates: dict[str, dict], book: PriceBook, asignacio
     tareas.sort(key=lambda t: (ESTADOS.index(t["estado"]), -t["total_excel"]))
 
     cuenta = {e: sum(1 for t in tareas if t["estado"] == e) for e in ESTADOS}
+    con_precios = any(f["excel"]["neto"] > 0 or f["excel"]["mat_unit"] + f["excel"]["mo_unit"] > 0
+                      for f in filas)
     return {
         "catalogo_oficial": book.hay_oficial,
+        "excel_con_precios": con_precios,
         "titulo": parsed["titulo"],
         "fecha_precios": book.fecha.isoformat(),
         "resumen": {
@@ -722,11 +732,15 @@ async def cargar_obra(
     duros = [t["clave"] for t in rojos if t["motivo_rojo"] != "precio"]
     plan = result["_plan"]
     if duros or plan["sin_factor"] or plan["plantillas_faltantes"]:
-        raise HTTPException(409, {
-            "mensaje": _plural(len(duros) or len(rojos), "Hay {n} trabajo en rojo: resolvelo antes de cargar",
-                               "Hay {n} trabajos en rojo: resolvelos antes de cargar"),
-            "rojos": duros or [t["clave"] for t in rojos],
-        })
+        sin_receta = bool(duros) and all(t["motivo_rojo"] == "sin_receta" for t in rojos if t["clave"] in duros)
+        if sin_receta:
+            mensaje = _plural(len(duros),
+                              "Hay {n} trabajo sin receta y sin precio en el Excel: elegí una receta antes de cargar",
+                              "Hay {n} trabajos sin receta y sin precio en el Excel: elegí una receta antes de cargar")
+        else:
+            mensaje = _plural(len(duros) or len(rojos), "Hay {n} trabajo en rojo: resolvelo antes de cargar",
+                              "Hay {n} trabajos en rojo: resolvelos antes de cargar")
+        raise HTTPException(409, {"mensaje": mensaje, "rojos": duros or [t["clave"] for t in rojos]})
     if rojos and not permitir_sin_precio:
         raise HTTPException(409, {
             "mensaje": _plural(len(result["precios"]),
@@ -805,6 +819,7 @@ async def cargar_obra(
 
 SIN_EXCEL = ('Este presupuesto no tiene guardados los totales del Excel. Cargá la obra de nuevo desde '
              '"Cargar obra" para poder compararla.')
+SIN_PRECIOS_EXCEL = "Este Excel no traía precios: no hay con qué comparar."
 PARECIDO_PCT = 5.0  # |diferencia| up to this % of the Excel counts as "parecido"
 
 
@@ -872,6 +887,9 @@ async def diferencias_con_excel(budget_id: UUID, user: dict = Depends(get_curren
     )
     if not items:
         raise HTTPException(409, SIN_EXCEL)
+    # An Excel that came only with quantities: comparing against zeros says nothing
+    if not any(_amount(i.get("excel_neto")) or _amount(i.get("excel_directo")) for i in items):
+        raise HTTPException(409, SIN_PRECIOS_EXCEL)
 
     grupos: dict[str, list[dict]] = {}
     for item in items:

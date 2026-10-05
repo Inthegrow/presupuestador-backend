@@ -97,10 +97,10 @@ export default function Dashboard() {
         </div>
         {puedeEditar && (
           <button
-            onClick={() => navigate('/app/cargar-obra')}
+            onClick={() => navigate('/app/new-project')}
             className="bg-[#2D8D68] hover:bg-[#1B5E4B] text-white font-semibold px-4 py-2 rounded-lg text-xs flex items-center gap-1.5 transition-colors"
           >
-            <Plus size={14} /> Cargar obra
+            <Plus size={14} /> Nuevo presupuesto
           </button>
         )}
       </div>
@@ -169,10 +169,10 @@ export default function Dashboard() {
           <p className="text-gray-500 text-sm mb-2">No hay presupuestos todavía.</p>
           {puedeEditar && (
             <button
-              onClick={() => navigate('/app/cargar-obra')}
+              onClick={() => navigate('/app/import')}
               className="bg-[#2D8D68] hover:bg-[#1B5E4B] text-white font-semibold px-4 py-2 rounded-lg text-xs transition-colors"
             >
-              Cargar obra
+              Importar Excel
             </button>
           )}
         </div>

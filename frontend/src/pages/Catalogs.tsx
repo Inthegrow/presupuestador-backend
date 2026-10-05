@@ -837,7 +837,7 @@ export default function Catalogs() {
   const [budgets, setBudgets] = useState<Budget[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [showUploads, setShowUploads] = useState(false)
+  const [showUploads, setShowUploads] = useState(true)
   const [showUpload, setShowUpload] = useState(false)
   const [showExcelUpload, setShowExcelUpload] = useState(false)
 

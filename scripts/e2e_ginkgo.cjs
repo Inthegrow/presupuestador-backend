@@ -45,9 +45,9 @@ async function subir(page) {
   const textoBarra = await barra.innerText()
   const textoMenu = await menu.innerText()
   check('la barra no tiene "VER 360"', !/VER 360/i.test(textoBarra))
-  check('el botón de la barra dice "CARGAR OBRA"', (await barra.getByRole('button', { name: 'CARGAR OBRA' }).count()) === 1, JSON.stringify(textoBarra))
-  check('el menú no tiene "Importar Excel"', !/Importar Excel/i.test(textoMenu))
-  check('el menú no tiene "Nuevo Presupuesto"', !/Nuevo Presupuesto/i.test(textoMenu))
+  check('el botón de la barra dice "NUEVO"', (await barra.getByRole('button', { name: 'NUEVO' }).count()) === 1, JSON.stringify(textoBarra))
+  check('el menú tiene "Importar Excel"', /Importar Excel/i.test(textoMenu))
+  check('el menú tiene "Nuevo Presupuesto"', /Nuevo Presupuesto/i.test(textoMenu))
   check('el menú dice "Cargar obra", "Lista de precios" y "Recetas"',
     /Cargar obra/.test(textoMenu) && /Lista de precios/.test(textoMenu) && /Recetas/.test(textoMenu) && !/Templates|Catalogos/.test(textoMenu),
     JSON.stringify(textoMenu))
@@ -55,7 +55,7 @@ async function subir(page) {
   // 1. Lista de precios: todo "solo consulta" al principio; marcamos el Maestro como oficial
   await page.goto(BASE + '/app/catalogs')
   check('la pantalla se llama "LISTA DE PRECIOS"', await page.getByRole('heading', { name: 'LISTA DE PRECIOS' }).isVisible())
-  check('los paneles de subida arrancan plegados', await page.getByRole('button', { name: 'Subir una lista nueva' }).isVisible() && (await page.getByText('Archivo CSV *').count()) === 0)
+  check('los botones para subir una lista están a la vista', await page.getByRole('button', { name: 'Ocultar' }).isVisible())
   await page.getByText('Maestro TERRAC - Materiales').waitFor()
   await shot(page, '01_catalogos_sin_oficial')
   const botones = page.getByRole('button', { name: 'Marcar como oficial' })

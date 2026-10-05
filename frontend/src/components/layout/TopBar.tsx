@@ -62,11 +62,11 @@ export default function TopBar() {
       <div className="flex items-center gap-3">
         {puedeEditar && (
           <button
-            onClick={() => navigate('/app/cargar-obra')}
+            onClick={() => navigate('/app/import')}
             className="bg-[#2D8D68] hover:bg-[#1B5E4B] text-white font-semibold px-4 py-1.5 rounded-lg text-xs flex items-center gap-1.5 transition-colors"
           >
             <Plus size={14} />
-            CARGAR OBRA
+            NUEVO
           </button>
         )}
         <div className="flex items-center gap-2">
