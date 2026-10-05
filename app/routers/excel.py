@@ -374,10 +374,10 @@ def _save_catalog(db, org_id: str, filename: str, entries: list[dict]) -> dict: 
     nuevas: list[dict] = []
     changes: list[tuple[dict, dict]] = []
     for entry in entries:
-        # Same code (and tipo when the code repeats); each row of the list is matched once
+        # Same code and same tipo: a material never takes the price of a mano de obra with
+        # its code. Each row of the list is matched once
         candidates = by_codigo.get(normalize_codigo(entry["codigo"]), [])
-        same_tipo = [e for e in candidates if e.get("tipo") == entry["tipo"]]
-        match = same_tipo[0] if same_tipo else (candidates[0] if len(candidates) == 1 else None)
+        match = next((e for e in candidates if e.get("tipo") == entry["tipo"]), None)
         if match is None:
             nuevas.append(entry)
             continue

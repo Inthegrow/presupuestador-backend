@@ -136,6 +136,22 @@ class TestImportExcelPriceList:
         rows = [(e["tipo"], e["precio_sin_iva"]) for e in db.tables["catalog_entries"]]
         assert sorted(rows) == [("mano_obra", 25), ("material", 10)]
 
+    def test_code_that_moves_to_another_sheet_is_a_new_entry(self, client, db):
+        # Material X-1 first; then the same file has X-1 only as mano de obra
+        upload(client, workbook([("X-1", "Material X", 100)]))
+        data = upload(client, workbook([], [("X-1", "Mano de obra X", 500)]))
+        assert (data["precios_actualizados"], data["precios_nuevos"]) == (0, 1)
+        rows = sorted((e["tipo"], e["precio_sin_iva"]) for e in db.tables["catalog_entries"])
+        assert rows == [("mano_obra", 500), ("material", 100)]
+
+    def test_code_that_moves_back_keeps_both_entries(self, client, db):
+        # The inverse: mano de obra X-1 first, then X-1 only as material
+        upload(client, workbook(None, [("X-1", "Mano de obra X", 500)]))
+        data = upload(client, workbook([("X-1", "Material X", 100)]))
+        assert (data["precios_actualizados"], data["precios_nuevos"]) == (0, 1)
+        rows = sorted((e["tipo"], e["precio_sin_iva"]) for e in db.tables["catalog_entries"])
+        assert rows == [("mano_obra", 500), ("material", 100)]
+
     def test_without_price_sheets_no_list(self, client, db):
         data = upload(client, workbook())
         assert db.tables["price_catalogs"] == [] and db.tables["catalog_entries"] == []
