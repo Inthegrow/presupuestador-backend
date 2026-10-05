@@ -338,6 +338,98 @@ class TestApply:
         assert apply(client).status_code == 404
 
 
+# ── Apply: prices with the common rule (oficial catalog, "precios al") ─────
+
+OFICIAL, CONSULTA = "cat-oficial", "cat-consulta"
+
+
+def priced_tables(entries, catalogs=None, history=None, precios_al=None):
+    """Only the H30 resource of the platea, priced by the given catalog entries."""
+    tmpl = copy.deepcopy(PLATEA)
+    tmpl["recursos"] = [r for r in tmpl["recursos"] if r["codigo"] == "H30"]
+    return base_tables(
+        budgets=[{"id": BUDGET, "org_id": ORG, "name": "Obra", "desperdicio_pct": None, "precios_al": precios_al}],
+        item_templates=[tmpl],
+        price_catalogs=catalogs if catalogs is not None else [
+            {"id": CONSULTA, "org_id": ORG, "name": "Las Heras", "oficial": False, "created_at": "2026-09-01"},
+            {"id": OFICIAL, "org_id": ORG, "name": "Maestro", "oficial": True, "created_at": "2026-01-01"},
+        ],
+        catalog_entries=[{"org_id": ORG, "codigo": "H30", "tipo": "material", **e} for e in entries],
+        catalog_price_history=history or [],
+    )
+
+
+def h30(db):
+    return resources_by_code(db)["H30"]
+
+
+class TestApplyPrices:
+    def test_oficial_beats_consulta(self, client, db):
+        # The reference entry comes first: the old lookup took it
+        db.tables = priced_tables([
+            {"id": "e-con", "catalog_id": CONSULTA, "precio_sin_iva": 900, "fecha_precio": "2026-09-01"},
+            {"id": "e-of", "catalog_id": OFICIAL, "precio_sin_iva": 1000, "fecha_precio": "2026-08-01"},
+        ])
+        assert apply(client).status_code == 200
+        res = h30(db)
+        assert res["precio_unitario"] == 1000
+        assert (res["catalog_entry_id"], res["precio_fecha"]) == ("e-of", "2026-08-01")
+
+    def test_price_in_force_at_precios_al(self, client, db):
+        db.tables = priced_tables(
+            [{"id": "e-of", "catalog_id": OFICIAL, "precio_sin_iva": 1200, "fecha_precio": "2026-09-01"}],
+            history=[
+                {"id": "h1", "entry_id": "e-of", "org_id": ORG, "precio_sin_iva": 1000,
+                 "fecha_precio": "2026-06-01", "created_at": "2026-06-01"},
+                {"id": "h2", "entry_id": "e-of", "org_id": ORG, "precio_sin_iva": 1200,
+                 "fecha_precio": "2026-09-01", "created_at": "2026-09-01"},
+            ],
+            precios_al="2026-07-01",
+        )
+        assert apply(client).status_code == 200
+        res = h30(db)
+        assert res["precio_unitario"] == 1000
+        assert (res["catalog_entry_id"], res["precio_fecha"]) == ("e-of", "2026-06-01")
+
+    def test_only_in_reference_catalog_has_no_price(self, client, db):
+        db.tables = priced_tables([
+            {"id": "e-con", "catalog_id": CONSULTA, "precio_sin_iva": 900, "fecha_precio": "2026-09-01"},
+            {"id": "e-otro", "catalog_id": OFICIAL, "codigo": "OTRO", "precio_sin_iva": 5, "fecha_precio": "2026-08-01"},
+        ])
+        assert apply(client).status_code == 200
+        res = h30(db)
+        assert (res["precio_unitario"], res["subtotal"]) == (0, 0)
+        assert res["catalog_entry_id"] is None and res["precio_fecha"] is None
+
+    def test_undated_zero_is_no_price(self, client, db):
+        db.tables = priced_tables([{"id": "e-of", "catalog_id": OFICIAL, "precio_sin_iva": 0, "fecha_precio": None}])
+        apply(client)
+        assert (h30(db)["precio_unitario"], h30(db)["catalog_entry_id"]) == (0, None)
+
+    def test_dated_zero_is_a_price(self, client, db):
+        db.tables = priced_tables([{"id": "e-of", "catalog_id": OFICIAL, "precio_sin_iva": 0,
+                                    "fecha_precio": "2026-08-01"}])
+        apply(client)
+        assert (h30(db)["precio_unitario"], h30(db)["catalog_entry_id"]) == (0, "e-of")
+
+    def test_without_oficial_newest_price_of_all(self, client, db):
+        # No oficial list and no "precios al": today's newest price among every list
+        db.tables = priced_tables(
+            [
+                {"id": "e-a", "catalog_id": "cat-a", "precio_sin_iva": 1000, "fecha_precio": "2026-03-01"},
+                {"id": "e-b", "catalog_id": "cat-b", "precio_sin_iva": 1100, "fecha_precio": "2026-05-01"},
+            ],
+            catalogs=[
+                {"id": "cat-a", "org_id": ORG, "name": "A", "created_at": "2026-02-01"},
+                {"id": "cat-b", "org_id": ORG, "name": "B", "created_at": "2026-01-01"},
+            ],
+        )
+        assert apply(client).status_code == 200
+        res = h30(db)
+        assert res["precio_unitario"] == 1100
+        assert (res["catalog_entry_id"], res["precio_fecha"]) == ("e-b", "2026-05-01")
+
+
 # ── Item parameters and quantity changes ──────────────────────────────────
 
 

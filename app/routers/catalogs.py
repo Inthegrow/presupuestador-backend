@@ -10,7 +10,7 @@ from uuid import UUID
 from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, UploadFile
 
 from app.auth import get_current_user, require_admin, require_editor
-from app.budget_prices import today
+from app.budget_prices import HISTORY_CHUNK, fetch_all, today
 from app.catalog_prices import fecha_iso, history_row, price_changed, price_from_payload
 from app.db import get_data_db
 from app.schemas import CatalogTipo
@@ -40,11 +40,64 @@ _FECHA_ALIASES = {"fecha_precio", "fecha", "fecha precio", "fecha_act", "actuali
 _PROVEEDOR_ALIASES = {"proveedor", "prov", "supplier"}
 
 
-def _record_history(db, entries: list[dict]) -> None:  # type: ignore[no-untyped-def]
+def record_history(db, entries: list[dict]) -> None:  # type: ignore[no-untyped-def]
     """Insert one catalog_price_history row per saved entry that has a price."""
     rows = [history_row(e) for e in entries if e.get("id") and e.get("precio_sin_iva") is not None]
     if rows:
         db.table("catalog_price_history").insert(rows).execute()
+
+
+def update_entries(db, org_id: str, changes: list[tuple[dict, dict]]) -> list[dict]:  # type: ignore[no-untyped-def]
+    """Save catalog entry updates with the price-date rule and the price history.
+
+    ``changes``: (current row with id, precio_sin_iva and fecha_precio; fields to set).
+    Returns the saved rows (the ones the database sent back).
+    """
+    saved: list[dict] = []
+    history: list[dict] = []
+    for old, update_data in changes:
+        update_data = dict(update_data)
+        confirma = "precio_sin_iva" in update_data and not old.get("fecha_precio")
+        if "fecha_precio" not in update_data and (price_changed(old, update_data) or confirma):
+            # New price without an explicit date: it is today's price (in Argentina, the date the
+            # prices are read at: a price saved at 22 h must be in force that same day). Saving the
+            # same value on an undated entry confirms it today too (an undated 0 is "sin precio";
+            # a dated 0 is "va en $0": budget_prices.is_price)
+            update_data["fecha_precio"] = today().isoformat()
+
+        result = (
+            db.table("catalog_entries")
+            .update(update_data)
+            .eq("id", str(old["id"]))
+            .eq("org_id", org_id)
+            .execute()
+        )
+        saved.extend(result.data or [])
+        if price_changed(old, update_data):
+            history.append({**old, **update_data, "id": str(old["id"]), "org_id": org_id})
+    record_history(db, history)
+    return saved
+
+
+def start_history(db, org_id: str, entries: list[dict]) -> None:  # type: ignore[no-untyped-def]
+    """Record the current price of entries that have no history yet (like migration 004).
+
+    Entries saved before every insert recorded its price (ej. old "Importar Excel" lists)
+    would otherwise lose their current price when it changes.
+    """
+    ids = [str(e["id"]) for e in entries if e.get("id") and e.get("precio_sin_iva") is not None]
+    known: set[str] = set()
+    for start in range(0, len(ids), HISTORY_CHUNK):
+        chunk = ids[start:start + HISTORY_CHUNK]
+        rows = fetch_all(
+            lambda chunk=chunk: db.table("catalog_price_history")
+            .select("entry_id")
+            .eq("org_id", org_id)
+            .in_("entry_id", chunk)
+            .order("id")
+        )
+        known.update(str(h["entry_id"]) for h in rows)
+    record_history(db, [{**e, "org_id": org_id} for e in entries if str(e.get("id")) not in known])
 
 
 def _fecha_or_warning(raw: object, where: str, warnings_list: list[str]) -> str | None:
@@ -151,7 +204,7 @@ async def upload_csv_catalog(
         for row in rows
     ]
     inserted = db.table("catalog_entries").insert(entries).execute()
-    _record_history(db, inserted.data or [])
+    record_history(db, inserted.data or [])
 
     return {
         "catalog_id": catalog_id,
@@ -334,7 +387,7 @@ async def upload_excel_catalog(
             for row in rows
         ]
         inserted = db.table("catalog_entries").insert(entries).execute()
-        _record_history(db, inserted.data or [])
+        record_history(db, inserted.data or [])
 
         catalogs_created += 1
         entries_summary[tipo] = entries_summary.get(tipo, 0) + len(entries)
@@ -572,7 +625,7 @@ async def create_catalog_entry(
     if not result.data:
         raise HTTPException(500, "Error al crear entrada")
 
-    _record_history(db, result.data)
+    record_history(db, result.data)
     return result.data[0]
 
 
@@ -619,27 +672,8 @@ async def update_catalog_entry(
     if not update_data:
         raise HTTPException(400, "No hay campos validos para actualizar")
 
-    old = entry.data
-    confirma = "precio_sin_iva" in update_data and not old.get("fecha_precio")
-    if "fecha_precio" not in update_data and (price_changed(old, update_data) or confirma):
-        # New price without an explicit date: it is today's price (in Argentina, the date the
-        # prices are read at: a price saved at 22 h must be in force that same day). Saving the
-        # same value on an undated entry confirms it today too (an undated 0 is "sin precio";
-        # a dated 0 is "va en $0": budget_prices.is_price)
-        update_data["fecha_precio"] = today().isoformat()
-
-    result = (
-        db.table("catalog_entries")
-        .update(update_data)
-        .eq("id", eid)
-        .eq("org_id", org_id)
-        .execute()
-    )
-
-    if price_changed(old, update_data):
-        _record_history(db, [{**old, **update_data, "id": eid, "org_id": org_id}])
-
-    return result.data[0] if result.data else {"updated": True}
+    saved = update_entries(db, org_id, [({**entry.data, "id": eid}, update_data)])
+    return saved[0] if saved else {"updated": True}
 
 
 # ── Price history of an entry ────────────────────────────────────────────────

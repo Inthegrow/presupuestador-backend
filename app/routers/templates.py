@@ -8,14 +8,18 @@ template has parameters with default values, waste is inherited
 from __future__ import annotations
 
 import json
+from datetime import date
 
 from fastapi import APIRouter, Body, Depends, HTTPException
 
 from app.auth import get_current_user, require_editor
+from app.budget_prices import today
 from app.calculations import calc_item_from_resources, calc_resource_subtotal
+from app.catalog_prices import parse_fecha
 from app.db import get_data_db
 from app.formulas import FormulaError
 from app.recipes import expand_resource, merge_params, param_defaults, validate_template
+from app.routers.obras import PriceBook
 from app.schemas import TemplateApply, TemplateCreate, TemplatePreview, TemplateUpdate
 
 router = APIRouter()
@@ -34,6 +38,14 @@ def _check_template(recursos: list[dict], parametros: list[dict]) -> None:
     errors = validate_template(recursos, parametros)
     if errors:
         raise HTTPException(422, errors)
+
+
+def _precios_al(budget: dict) -> date:
+    """Date the budget is priced at: its "precios al", or today when it has none."""
+    try:
+        return parse_fecha(budget.get("precios_al")) or today()
+    except ValueError:
+        return today()
 
 
 def org_waste_pct(db, org_id: str) -> float | None:
@@ -272,30 +284,20 @@ async def apply_template(
     except FormulaError as exc:
         raise HTTPException(422, [f"Fórmula de la plantilla: {exc}"]) from exc
 
+    # Same price rule as Cargar obra and "Actualizar precios": oficial catalog first,
+    # price in force at the budget's "precios al" date (today when it has none)
+    book = PriceBook(db, org_id, _precios_al(budget.data[0])) if any(r["codigo"] for r in rows) else None
     created = []
     for row in rows:
-        catalog_entry = None
-        precio = 0.0
-        if row["codigo"]:
-            ce = (
-                db.table("catalog_entries")
-                .select("id,precio_sin_iva,fecha_precio")
-                .eq("org_id", org_id)
-                .eq("codigo", row["codigo"])
-                .limit(1)
-                .execute()
-            )
-            if ce.data:
-                catalog_entry = ce.data[0]
-                precio = float(catalog_entry.get("precio_sin_iva") or 0)
-
+        entry, precio, fecha, problema = book.price(row) if book and row["codigo"] else (None, None, None, None)
+        con_precio = entry is not None and problema is None  # a dated $0 is a price too
         row.update({
             "item_id": item_id,
             "org_id": org_id,
-            "precio_unitario": precio,
-            "catalog_entry_id": catalog_entry["id"] if catalog_entry else None,
+            "precio_unitario": precio or 0,
+            "catalog_entry_id": entry["id"] if con_precio else None,
             # Fase 4: date of the price used
-            "precio_fecha": catalog_entry.get("fecha_precio") if catalog_entry else None,
+            "precio_fecha": fecha if con_precio else None,
         })
         calc_resource_subtotal(row)
         res = db.table("item_resources").insert(row).execute()

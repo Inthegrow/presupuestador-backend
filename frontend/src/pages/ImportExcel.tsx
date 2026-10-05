@@ -5,6 +5,15 @@ import { budgetApi } from '../lib/api'
 import { useAuth } from '../contexts/AuthContext'
 import FileUpload from '../components/ui/FileUpload'
 
+// Qué pasó con la lista de precios del Excel (nada si no traía hojas de precios)
+function listaResumen(r: { catalog_reused: boolean; catalog_name: string | null; precios_actualizados: number; precios_nuevos: number }) {
+  if (!r.catalog_name) return ''
+  if (!r.catalog_reused) return `Creé la lista ${r.catalog_name}`
+  const cambiados = r.precios_actualizados === 1 ? '1 precio cambiado' : `${r.precios_actualizados} precios cambiados`
+  const nuevos = r.precios_nuevos === 1 ? '1 nuevo' : `${r.precios_nuevos} nuevos`
+  return `Actualicé la lista ${r.catalog_name}: ${cambiados}, ${nuevos}`
+}
+
 export default function ImportExcel() {
   const navigate = useNavigate()
   const { puedeEditar } = useAuth()
@@ -18,6 +27,10 @@ export default function ImportExcel() {
     resources_inserted: number
     catalog_entries: number
     date_codes_corrected: number
+    catalog_reused: boolean
+    catalog_name: string | null
+    precios_actualizados: number
+    precios_nuevos: number
   } | null>(null)
 
   function handleFile(f: File) {
@@ -168,6 +181,10 @@ export default function ImportExcel() {
                 </div>
               )}
             </div>
+
+            {listaResumen(result) && (
+              <p className="text-sm text-gray-700 mb-5">{listaResumen(result)}</p>
+            )}
 
             <div className="flex gap-3">
               <button

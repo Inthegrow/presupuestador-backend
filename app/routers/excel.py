@@ -21,9 +21,11 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 
 from app.auth import get_current_user, require_editor
-from app.budget_prices import budget_config, initial_indirects, today
+from app.budget_prices import budget_config, fetch_all, initial_indirects, today
+from app.catalog_prices import normalize_codigo, price_changed
 from app.calculations import fraction_to_pct, pct_or_default
 from app.db import get_data_db
+from app.routers.catalogs import record_history, start_history, update_entries
 from app.tree import get_parent_candidates, normalize_item_code, safe_float
 
 router = APIRouter()
@@ -89,7 +91,7 @@ def _cell_str(df: pd.DataFrame, row: int, col: int) -> str:
 
 
 def _parse_catalogs(
-    df_dict: dict[str, pd.DataFrame], org_id: str, catalog_id: str,
+    df_dict: dict[str, pd.DataFrame], org_id: str, catalog_id: str | None = None,
 ) -> list[dict]:
     """Parse all catalog sheets into catalog_entries rows."""
     entries: list[dict] = []
@@ -318,6 +320,87 @@ def _parse_detail_sheets(
     return resources_by_code
 
 
+def _insert_entries(db, catalog_id: str, entries: list[dict]) -> None:  # type: ignore[no-untyped-def]
+    """Insert catalog entries in batches, each one starting its price history."""
+    for batch_start in range(0, len(entries), 100):
+        batch = [{**e, "catalog_id": catalog_id} for e in entries[batch_start:batch_start + 100]]
+        inserted = db.table("catalog_entries").insert(batch).execute()
+        record_history(db, inserted.data or [])
+
+
+def _save_catalog(db, org_id: str, filename: str, entries: list[dict]) -> dict:  # type: ignore[no-untyped-def]
+    """Save the price sheets of an imported Excel.
+
+    No price sheets: no list. A list imported before from the same file (same org) is
+    updated: changed prices go through the catalog rule (date + history), new codes are
+    added, codes the Excel no longer has are left alone. Otherwise a new list is created.
+    It is never marked oficial here.
+    """
+    out = {"catalog_id": None, "catalog_name": None, "catalog_reused": False,
+           "precios_actualizados": 0, "precios_nuevos": 0}
+    if not entries:
+        return out
+
+    previous = (
+        db.table("price_catalogs")
+        .select("*")
+        .eq("org_id", org_id)
+        .eq("source_file", filename)
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute()
+        .data or []
+    )
+    if not previous:
+        name = f"Catalogo - {filename}"
+        created = db.table("price_catalogs").insert({
+            "org_id": org_id,
+            "name": name,
+            "source_file": filename,
+        }).execute()
+        catalog_id = created.data[0]["id"]
+        _insert_entries(db, catalog_id, entries)
+        return {**out, "catalog_id": catalog_id, "catalog_name": name, "precios_nuevos": len(entries)}
+
+    catalog_id = str(previous[0]["id"])
+    current = fetch_all(
+        lambda: db.table("catalog_entries").select("*")
+        .eq("catalog_id", catalog_id).eq("org_id", org_id).order("id")
+    )
+    by_codigo: dict[str, list[dict]] = {}
+    for e in current:
+        by_codigo.setdefault(normalize_codigo(e.get("codigo")), []).append(e)
+
+    nuevas: list[dict] = []
+    changes: list[tuple[dict, dict]] = []
+    for entry in entries:
+        # Same code (and tipo when the code repeats); each row of the list is matched once
+        candidates = by_codigo.get(normalize_codigo(entry["codigo"]), [])
+        same_tipo = [e for e in candidates if e.get("tipo") == entry["tipo"]]
+        match = same_tipo[0] if same_tipo else (candidates[0] if len(candidates) == 1 else None)
+        if match is None:
+            nuevas.append(entry)
+            continue
+        candidates.remove(match)
+        precio = entry.get("precio_sin_iva")
+        # The Excel has no dates: an empty or 0 price is "sin precio" (is_price) and
+        # never replaces the price the list already has
+        if not precio or not price_changed(match, {"precio_sin_iva": precio}):
+            continue
+        update = {"precio_sin_iva": precio}
+        if entry.get("precio_con_iva") is not None:
+            update["precio_con_iva"] = entry["precio_con_iva"]
+        changes.append((match, update))
+
+    if changes:
+        # Lists saved before every price went to the history: keep their current price there
+        start_history(db, org_id, [old for old, _ in changes])
+        update_entries(db, org_id, changes)
+    _insert_entries(db, catalog_id, nuevas)
+    return {**out, "catalog_id": catalog_id, "catalog_name": previous[0].get("name"), "catalog_reused": True,
+            "precios_actualizados": len(changes), "precios_nuevos": len(nuevas)}
+
+
 # ── Endpoints ────────────────────────────────────────────────────────────────
 
 
@@ -336,21 +419,10 @@ async def import_excel(
     db = get_data_db()
     org_id = user["org_id"]
 
-    # 1. Create price catalog
-    catalog = db.table("price_catalogs").insert({
-        "org_id": org_id,
-        "name": f"Catalogo - {file.filename}",
-        "source_file": file.filename,
-    }).execute()
-    catalog_id = catalog.data[0]["id"]
-
-    # 2. Parse and insert catalog entries
-    entries = _parse_catalogs(df_dict, org_id, catalog_id)
-    if entries:
-        # Insert in batches of 100
-        for batch_start in range(0, len(entries), 100):
-            batch = entries[batch_start:batch_start + 100]
-            db.table("catalog_entries").insert(batch).execute()
+    # 1-2. Price sheets: update the list of this same file, or create one
+    entries = _parse_catalogs(df_dict, org_id)
+    catalog = _save_catalog(db, org_id, file.filename, entries)
+    catalog_id = catalog["catalog_id"]
 
     # 3. Create budget
     base_name = os.path.splitext(os.path.basename(file.filename))[0].strip()
@@ -426,6 +498,10 @@ async def import_excel(
         "message": "Excel importado",
         "catalog_id": catalog_id,
         "catalog_entries": len(entries),
+        "catalog_reused": catalog["catalog_reused"],
+        "catalog_name": catalog["catalog_name"],
+        "precios_actualizados": catalog["precios_actualizados"],
+        "precios_nuevos": catalog["precios_nuevos"],
         "budget_id": budget_id,
         "budget_name": budget_name,
         "items_inserted": items_inserted,
