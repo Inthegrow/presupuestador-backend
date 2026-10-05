@@ -19,10 +19,18 @@ de UX y entra a este archivo (sección 5, punto 0c) antes de programarse.
 | 4 | Las fallas de UX del punto 0c (1 a 7), un solo PR, probado con el Excel de Ginkgo (`PLAN_UX_CARGAR_OBRA.md`) | chat | ✅ 04/10 PR #28 mergeado y desplegado |
 | 4b | Segunda tanda de fallas de UX (8 a 14: borrador de carga, servidor despertando, "Cambiar", progreso, qué pasó con los amarillos, diferencias por costo directo y margen), un solo PR (`PLAN_UX_2_CARGAR_OBRA.md`) | chat | ✅ 04/10 PR #29 mergeado |
 | 4c | Excel sin precios: si el 01_C&P no trae costos, los trabajos sin receta van en rojo y no se ofrece "Ver diferencias" (punto 15 de 0c) | chat | después del 4b, PR chico |
-| 5 | Encender el login: SQL en DATA y en SOLÉ, invitaciones, `VITE_AUTH_ENABLED=true`, borrar `DEMO_ORG_ID` (sección 5 de `PLAN_LOGIN_SOLE.md`) | Carlos guiado por el chat | después del 4 |
+| 5 | Encender el login: datos movidos de IntherArq a Terrac, Carlos y Emilia sumados a Terrac en SOLÉ, `VITE_AUTH_ENABLED=true`, sin `DEMO_ORG_ID`, `AUTH_SUPABASE_KEY` = service_role de SOLÉ (sección 5 de `PLAN_LOGIN_SOLE.md`) | Carlos guiado por el chat | ✅ 05/10: la app pide clave y Carlos entró |
+| 5b | Módulo "Presupuestador" en SOLÉ (encendido solo para Terrac, botón en el menú, la app exige el módulo) | chat, dos PR (uno por repo) | después del 6 |
+| 5c | Seguridad: leer las empresas del usuario con su propia clave (sin la llave service_role de SOLÉ en Render) | chat | cuando haya hueco |
 | 6 | Primera carga real de Ginkgo con Sol | Sol + Carlos | después del 5 |
 | 7 | Etapa B: estado de cada precio y frase de confianza | chat | después del 6 |
 | — | Limpieza: borrar las ramas viejas `claude/*` y `codex/*` ya mergeadas en GitHub | Carlos | cuando quiera |
+
+**Lección del 05/10 (encendido de la clave):** `AUTH_SUPABASE_KEY` en Render tenía la llave pública (anon) de
+SOLÉ; con ella la tabla `memberships` devuelve vacío por las reglas de privacidad (RLS) y el servidor contestaba
+"Tu usuario no pertenece a ninguna empresa". Va la llave **service_role** del proyecto `yytuhddgqughemkevbni`.
+Terrac SA ya existía en SOLÉ (`ea998891-…`); los datos estaban bajo el id de IntherArq (`462b39aa-…`) y se
+movieron con `scripts/sql/01_mover_datos_a_terrac.sql`. Quién entra: todos los miembros de Terrac en SOLÉ.
 
 **Cuándo hace falta "Manual Deploy" en Render:** cuando el PR toca `app/`, `requirements.txt` o `migrations/`
 (el servidor). Si toca solo `frontend/`, Vercel lo publica solo. Cada PR lo dice en su descripción: "Render:
