@@ -1,6 +1,8 @@
 import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
+
+const AUTH_ENABLED = import.meta.env.VITE_AUTH_ENABLED === 'true'
 
 const SOLE_LOGO = (
   <svg width="48" height="48" viewBox="0 0 512 512" fill="none">
@@ -19,7 +21,7 @@ const SOLE_LOGO = (
 )
 
 export default function Login() {
-  const { signIn, error: errorServidor, clearError } = useAuth()
+  const { user, signIn, error: errorServidor, clearError } = useAuth()
   const navigate = useNavigate()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -36,8 +38,13 @@ export default function Login() {
     if (error) {
       setError('El mail o la clave no son correctos.')
     } else {
-      navigate('/app/dashboard')
+      navigate('/app/dashboard', { replace: true })
     }
+  }
+
+  // Already signed in (second visit from SOLÉ): straight in; AuthProvider kept ?org=
+  if (AUTH_ENABLED && user && !errorServidor) {
+    return <Navigate to="/app/dashboard" replace />
   }
 
   return (
@@ -61,7 +68,7 @@ export default function Login() {
           {/* Form */}
           <div className="px-8 py-6">
             <h2 className="font-bold text-gray-900 text-lg mb-1">Iniciar sesión</h2>
-            <p className="text-gray-500 text-sm mb-6">Ingresá con tu cuenta de organización</p>
+            <p className="text-gray-500 text-sm mb-6">Entrá con el mismo mail y clave de SOLÉ.</p>
 
             {(error || errorServidor) && (
               <div className="mb-4 bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-lg">
