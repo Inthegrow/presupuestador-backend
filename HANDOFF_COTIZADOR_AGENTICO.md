@@ -22,7 +22,7 @@ de UX y entra a este archivo (sección 5, punto 0c) antes de programarse.
 | 4e | Decisión de producto: se mantienen las tres formas de empezar (Cargar obra, Nuevo Presupuesto, Importar Excel) porque hay clientes que suben sus archivos de precios y calculan directo. Ningún chat las esconde ni las borra | Carlos | ✅ 05/10, PR #31 |
 | 4c | Excel sin precios: si el 01_C&P no trae costos, los trabajos sin receta van en rojo y no se ofrece "Ver diferencias"; un renglón en $0 dentro de un Excel con precios queda amarillo y lo dice (punto 15 de 0c, `PLAN_EXCEL_SIN_PRECIOS.md`) | chat | ✅ 05/10 PR #32 mergeado (Codex verde) y desplegado junto con el #31 |
 | 5 | Encender el login: datos movidos de IntherArq a Terrac, Carlos y Emilia sumados a Terrac en SOLÉ, `VITE_AUTH_ENABLED=true`, sin `DEMO_ORG_ID`, `AUTH_SUPABASE_KEY` = service_role de SOLÉ (sección 5 de `PLAN_LOGIN_SOLE.md`) | Carlos guiado por el chat | ✅ 05/10: la app pide clave y Carlos entró |
-| 5b | Módulo "Presupuestador" en SOLÉ (encendido solo para Terrac, botón en el menú, la app exige el módulo) | chat, dos PR (uno por repo) | después del 6 |
+| 5b | Módulo "Presupuestador" en SOLÉ (encendido solo para Terrac, botón en el menú, la app exige el módulo; `PLAN_MODULO_SOLE.md`) | chat, dos PR (uno por repo) | en curso |
 | 5c | Seguridad: leer las empresas del usuario con su propia clave (sin la llave service_role de SOLÉ en Render) | chat | cuando haya hueco |
 | 6 | Primera carga real de Ginkgo con Sol | Sol + Carlos | después del 5 |
 | 7 | Etapa B: estado de cada precio y frase de confianza | chat | después del 6 |
