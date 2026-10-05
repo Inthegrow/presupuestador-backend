@@ -962,7 +962,7 @@ class TestExcelSinPrecios:
         assert res.json()["detail"] == "Este Excel no traía precios: no hay con qué comparar."
 
     def test_excel_with_prices_and_a_task_at_zero(self, client, db):
-        """The usual Excel: nothing changes, except a task without recipe whose row says $0."""
+        """The usual Excel: nothing changes; a task without recipe whose row says $0 stays yellow."""
         wb = _workbook()
         ws = wb["01_C&P"]
         row = ws.max_row + 1
@@ -972,7 +972,9 @@ class TestExcelSinPrecios:
         body = analizar(client, wb=wb).json()
         assert body["excel_con_precios"] is True
         tareas = _tareas(body)
-        assert (tareas[LIMPIEZA]["estado"], tareas[LIMPIEZA]["motivo_rojo"]) == ("rojo", "sin_receta")
+        # Sol priced that row at $0 on purpose: yellow (confirmable), not red
+        assert (tareas[LIMPIEZA]["estado"], tareas[LIMPIEZA]["motivo_rojo"]) == ("amarillo", None)
+        assert tareas[LIMPIEZA]["total_excel"] == 0
         # The rest as in test_contract
         assert (tareas[OBRADOR]["estado"], tareas[OBRADOR]["motivo_rojo"]) == ("amarillo", None)
         assert (tareas[ARISTAS]["estado"], tareas[ARISTAS]["motivo_rojo"]) == ("amarillo", None)
@@ -980,16 +982,13 @@ class TestExcelSinPrecios:
         assert tareas[TENSORES]["estado"] == "verde"  # $0 in the Excel, but it has a recipe
         assert body["resumen"]["total_excel"] == 13850.0
 
+        # It loads like any other yellow: with the Excel price, which is $0 (Sol's decision)
         _fix_eps(db)
         res = cargar(client, wb=wb)
-        assert res.status_code == 409
-        assert res.json()["detail"] == {
-            "mensaje": "Hay 1 trabajo sin receta y sin precio en el Excel: elegí una receta antes de cargar",
-            "rojos": [LIMPIEZA]}
-        # Mixed with another kind of red: the usual message
-        res = cargar(client, wb=wb, asignaciones={ARISTAS: {"plantillas": [["5.1.4", None]]}})
-        assert res.json()["detail"]["mensaje"] == "Hay 2 trabajos en rojo: resolvelos antes de cargar"
-        assert db.tables["budgets"] == []
+        assert res.status_code == 200
+        limpieza = next(i for i in db.tables["budget_items"] if i["description"] == "LIMPIEZA FINAL DE OBRA")
+        assert (limpieza["neto_total"], limpieza["excel_neto"], limpieza["template_id"]) == (0, 0, None)
+        assert limpieza["notas"].endswith("Para confirmar.")
 
     def test_differences_with_some_excel_prices_still_compare(self, client, db):
         _budget_with_excel(db)

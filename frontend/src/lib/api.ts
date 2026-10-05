@@ -354,6 +354,8 @@ export interface ObraTarea {
   total_excel: number
   codigos: string[]
   estado: 'verde' | 'amarillo' | 'rojo'
+  // Why a red task is red (null when it is not red)
+  motivo_rojo?: 'receta_inexistente' | 'pregunta' | 'sin_receta' | 'precio' | null
   receta: ObraReceta | null
   sugerencias: { codigo: string; nombre: string; unidad?: string; porque?: string }[]
   pregunta: ObraPregunta | null
@@ -375,6 +377,8 @@ export interface ObraAnalisis {
   titulo_dudoso: boolean
   fecha_precios: string
   catalogo_oficial: boolean
+  // false when no item of the Excel has a cost (it came only with quantities)
+  excel_con_precios: boolean
   resumen: {
     rubros: number
     pisos: number
