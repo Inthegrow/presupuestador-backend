@@ -304,9 +304,13 @@ function PrecioRow({
 // ─── Buscador de recetas ───────────────────────────────────────────────────────
 
 function RecetaBuscador({
-  recetas, onElegir, onSinReceta, onCerrar,
+  recetas, sinPrecioExcel, enCero, onElegir, onSinReceta, onCerrar,
 }: {
   recetas: ObraRecetaCatalogo[]
+  // The whole Excel has no prices: "use the Excel price" would load everything at $0
+  sinPrecioExcel: boolean
+  // This task's row says $0 in a priced Excel: Sol does not quote it, leaving it at $0 is valid
+  enCero: boolean
   onElegir: (r: ObraRecetaCatalogo) => void
   onSinReceta: () => void
   onCerrar: () => void
@@ -332,18 +336,24 @@ function RecetaBuscador({
         <button onClick={onCerrar} className="text-xs text-gray-500 hover:text-gray-800">Cerrar</button>
       </div>
       <p className="px-3 py-1.5 text-[11px] text-gray-500 border-b">
-        Elegí la receta correcta para este trabajo. Si ninguna sirve, usá el precio del Excel.
+        Elegí la receta correcta para este trabajo.{sinPrecioExcel ? '' : enCero ? ' Si no lo cotizás, dejalo en $0.' : ' Si ninguna sirve, usá el precio del Excel.'}
       </p>
       <div className="max-h-64 overflow-y-auto">
-        <button
-          onClick={onSinReceta}
-          className="w-full text-left px-3 py-2 text-[#143D34] bg-[#E8F5EE] hover:bg-[#d8eee2]"
-        >
-          <span className="block text-sm font-medium">Usar el precio del Excel (sin receta)</span>
-          <span className="block text-[11px] text-gray-500 font-normal">
-            Se carga con lo que cobró tu Excel; la app no desglosa materiales.
-          </span>
-        </button>
+        {!sinPrecioExcel && (
+          <button
+            onClick={onSinReceta}
+            className="w-full text-left px-3 py-2 text-[#143D34] bg-[#E8F5EE] hover:bg-[#d8eee2]"
+          >
+            <span className="block text-sm font-medium">
+              {enCero ? 'Dejarlo en $0 como en el Excel (sin receta)' : 'Usar el precio del Excel (sin receta)'}
+            </span>
+            <span className="block text-[11px] text-gray-500 font-normal">
+              {enCero
+                ? 'Tu Excel no lo cotiza: la app no suma nada por este trabajo.'
+                : 'Se carga con lo que cobró tu Excel; la app no desglosa materiales.'}
+            </span>
+          </button>
+        )}
         {Object.entries(grupos).map(([cat, items]) => (
           <div key={cat}>
             <div className="px-3 pt-2 pb-1 text-[11px] font-bold text-gray-500 uppercase tracking-wide">{cat}</div>
@@ -375,10 +385,11 @@ const ESTILO = {
 }
 
 function TareaCard({
-  t, recetas, pendiente, bloqueada, onConfirmar, onElegir, onSinReceta, onValor, onCorregirPrecios,
+  t, recetas, excelConPrecios, pendiente, bloqueada, onConfirmar, onElegir, onSinReceta, onValor, onCorregirPrecios,
 }: {
   t: ObraTarea
   recetas: ObraRecetaCatalogo[]
+  excelConPrecios: boolean
   pendiente?: Pendiente
   bloqueada: boolean
   onConfirmar: () => void
@@ -402,11 +413,17 @@ function TareaCard({
   const estado = pendiente || (pregunta && pregunta.valor == null) ? 'rojo' : t.estado
   const est = ESTILO[estado]
   const receta = t.receta
+  // Red because it has no recipe and no price in the Excel: it can only be solved by picking a recipe
+  const sinRecetaNiPrecio = !pendiente && t.estado === 'rojo' && t.motivo_rojo === 'sin_receta'
   const nombreReceta = pendiente
     ? pendiente.nombre
     : receta
       ? receta.partes.length > 1 ? receta.partes.map((p) => p.nombre).join(' + ') : receta.nombre
-      : 'Sin receta: se usa el precio del Excel'
+      : sinRecetaNiPrecio
+        ? 'Sin receta, y este trabajo no tiene precio en el Excel. Elegí una receta.'
+        : t.total_excel <= 0
+          ? 'Sin receta y el Excel lo tiene en $0: si no lo cotizás, confirmá; si no, elegí una receta.'
+          : 'Sin receta: se usa el precio del Excel'
 
   function enviarValor() {
     const n = Number(valor.replace(',', '.'))
@@ -420,7 +437,7 @@ function TareaCard({
         <div className="flex-1 min-w-[220px]">
           <div className="text-sm font-medium text-gray-900">{t.descripcion}</div>
           <div className="text-[11px] text-gray-500 mt-0.5">
-            {t.veces} {t.veces === 1 ? 'vez' : 'veces'} · {fmtNum(t.cantidad_total)} {t.unidad || 's/u'} · Excel {fmtMillones(t.total_excel)}
+            {t.veces} {t.veces === 1 ? 'vez' : 'veces'} · {fmtNum(t.cantidad_total)} {t.unidad || 's/u'}{excelConPrecios ? ` · Excel ${fmtMillones(t.total_excel)}` : ''}
           </div>
         </div>
         <div className="flex-1 min-w-[220px]">
@@ -503,6 +520,8 @@ function TareaCard({
       {buscando && (
         <RecetaBuscador
           recetas={recetas}
+          sinPrecioExcel={!excelConPrecios}
+          enCero={t.total_excel <= 0}
           onCerrar={() => setBuscando(false)}
           onSinReceta={() => { setBuscando(false); onSinReceta() }}
           onElegir={(r) => { setBuscando(false); onElegir(r) }}
@@ -734,6 +753,9 @@ export default function CargarObra() {
     t.estado === 'rojo' && !hayPendiente(t) && !bloqueaPregunta(t) && t.precios_faltantes.length > 0
   const rojosPrecio = tareas.filter(rojoSoloPrecio).length
   const rojosOtros = tareas.filter((t) => esRojo(t) && !rojoSoloPrecio(t)).length
+  // Red with no recipe and no price in the Excel (not yet answered): counted as missing recipes
+  const rojosSinReceta = tareas.filter((t) => !hayPendiente(t) && t.estado === 'rojo' && t.motivo_rojo === 'sin_receta').length
+  const rojosPregunta = rojosOtros - rojosSinReceta
   const rojos = rojosPrecio + rojosOtros
   const amarillos = tareas.filter((t) => !esRojo(t) && t.estado === 'amarillo').length
   const verdes = tareas.filter((t) => !esRojo(t) && t.estado === 'verde').length
@@ -757,12 +779,18 @@ export default function CargarObra() {
       ? `Todo listo para cargar. Te quedan ${amarillos} para confirmar (podés cargar igual).`
       : 'Todo listo para cargar'
 
-  const preguntas = `${rojosOtros} ${rojosOtros === 1 ? 'pregunta' : 'preguntas'}`
   // Se cuentan códigos sin precio (un mismo material puede frenar varios trabajos), no trabajos
   const nPrecios = analisis?.precios.length ?? 0
   const precios = `${nPrecios} ${nPrecios === 1 ? 'precio' : 'precios'}`
+  const faltantes = [
+    rojosSinReceta > 0 && `${rojosSinReceta} ${rojosSinReceta === 1 ? 'receta' : 'recetas'}`,
+    rojosPregunta > 0 && `${rojosPregunta} ${rojosPregunta === 1 ? 'pregunta' : 'preguntas'}`,
+    rojosPrecio > 0 && precios,
+  ].filter((x): x is string => !!x)
+  // "Te falta 1 receta" only when there is a single missing thing
+  const unoSolo = faltantes.length === 1 && /^1 /.test(faltantes[0])
   const fraseFalta = rojosOtros > 0
-    ? rojosPrecio > 0 ? `Te faltan ${preguntas} y ${precios}` : `Te faltan ${preguntas}`
+    ? `${unoSolo ? 'Te falta' : 'Te faltan'} ${faltantes.length > 1 ? `${faltantes.slice(0, -1).join(', ')} y ${faltantes[faltantes.length - 1]}` : faltantes[0]}`
     : rojosPrecio > 0
       ? `${nPrecios === 1 ? 'Falta' : 'Faltan'} ${precios}: ${nPrecios === 1 ? 'cargalo' : 'cargalos'} arriba, o marcá 'Cargar igual' y ${nPrecios === 1 ? 'ese material va' : 'esos materiales van'} en $0.`
       : ''
@@ -891,6 +919,11 @@ export default function CargarObra() {
               <div className="text-[11px] text-gray-500 mt-0.5">
                 Lo que elijas acá queda guardado para la próxima obra.
               </div>
+              {!analisis.excel_con_precios && (
+                <div className="mt-2 text-xs text-sky-800 bg-sky-50 border border-sky-200 rounded-lg px-3 py-2">
+                  Este Excel no trae precios: la app calcula todo con las recetas y la lista de precios.
+                </div>
+              )}
               {analisis.titulo_dudoso && (
                 <div className="mt-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
                   El Excel dice '{analisis.titulo}'. ¿Es la obra correcta?
@@ -976,6 +1009,7 @@ export default function CargarObra() {
                   key={t.clave}
                   t={t}
                   recetas={analisis.recetas}
+                  excelConPrecios={analisis.excel_con_precios}
                   pendiente={pendientes[t.clave]}
                   bloqueada={revisando}
                   onConfirmar={() => confirmar(t)}
@@ -1059,10 +1093,12 @@ export default function CargarObra() {
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3 mb-5 max-w-lg">
-              <div className="bg-gray-50 rounded-lg p-3">
-                <div className="text-[11px] text-gray-500">Total del Excel</div>
-                <div className="text-lg font-bold text-gray-900">{fmtCurrency(carga.total_excel)}</div>
-              </div>
+              {carga.total_excel > 0 && (
+                <div className="bg-gray-50 rounded-lg p-3">
+                  <div className="text-[11px] text-gray-500">Total del Excel</div>
+                  <div className="text-lg font-bold text-gray-900">{fmtCurrency(carga.total_excel)}</div>
+                </div>
+              )}
               <div className="bg-[#E8F5EE] rounded-lg p-3">
                 <div className="text-[11px] text-gray-500">Total calculado por la app</div>
                 <div className="text-lg font-bold text-[#2D8D68]">{fmtCurrency(carga.resumen?.neto_total)}</div>
@@ -1088,12 +1124,14 @@ export default function CargarObra() {
               >
                 Cargar otra obra
               </button>
-              <button
-                onClick={() => navigate(`/app/budgets/${carga.budget_id}/diferencias`)}
-                className="bg-white border border-[#2D8D68] text-[#2D8D68] font-semibold px-5 py-2.5 rounded-lg text-sm hover:bg-[#E8F5EE]"
-              >
-                Ver diferencias con el Excel
-              </button>
+              {carga.total_excel > 0 && (
+                <button
+                  onClick={() => navigate(`/app/budgets/${carga.budget_id}/diferencias`)}
+                  className="bg-white border border-[#2D8D68] text-[#2D8D68] font-semibold px-5 py-2.5 rounded-lg text-sm hover:bg-[#E8F5EE]"
+                >
+                  Ver diferencias con el Excel
+                </button>
+              )}
               <button
                 onClick={() => navigate(`/app/budgets/${carga.budget_id}/editor`)}
                 className="bg-[#2D8D68] hover:bg-[#1B5E4B] text-white font-semibold px-5 py-2.5 rounded-lg text-sm"

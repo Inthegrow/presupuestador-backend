@@ -135,6 +135,17 @@ async function subir(page) {
     && await page.getByText('Se carga con lo que cobró tu Excel; la app no desglosa materiales.').isVisible())
   await page.getByRole('button', { name: 'Cerrar', exact: true }).first().click()
 
+  // 2d'. Un trabajo que Sol dejó en $0 (la estructura la hace un subcontratista) puede quedarse sin receta
+  const cero = page.locator('div.border-l-4').filter({ hasText: 'ESTRUCTURA EN HORMIGON ARMADO' }).first()
+  if (await cero.count()) {
+    check('la tarjeta en $0 lo dice', (await cero.innerText()).includes('el Excel lo tiene en $0'))
+    await cero.getByRole('button', { name: /Elegir receta|Cambiar/ }).first().click()
+    check('el buscador ofrece dejarlo en $0', await page.getByText('Dejarlo en $0 como en el Excel (sin receta)').isVisible())
+    await page.getByRole('button', { name: 'Cerrar', exact: true }).first().click()
+  } else {
+    check('hay una tarjeta en $0 para probar', false)
+  }
+
   // 2e. Confirmo un amarillo (queda en las asignaciones) y recargo: el borrador sigue en el navegador (3.2)
   const confirmar = page.getByRole('button', { name: 'Confirmar', exact: true })
   const hayConfirmar = (await confirmar.count()) > 0

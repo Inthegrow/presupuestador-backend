@@ -20,7 +20,7 @@ de UX y entra a este archivo (sección 5, punto 0c) antes de programarse.
 | 4b | Segunda tanda de fallas de UX (8 a 14: borrador de carga, servidor despertando, "Cambiar", progreso, qué pasó con los amarillos, diferencias por costo directo y margen), un solo PR (`PLAN_UX_2_CARGAR_OBRA.md`) | chat | ✅ 04/10 PR #29 mergeado |
 | 4d | Limpieza "una sola puerta": sacar del menú el asistente viejo e Importar Excel, borrar luna/VER 360/campanita, Templates → Recetas, Catálogos → Lista de precios, una frase por pantalla (`PLAN_LIMPIEZA_UNA_PUERTA.md`, fallas 16 a 23) | chat | ✅ 05/10 PR #30 mergeado. **Carlos no quería esconder las entradas viejas**: el PR #31 las devuelve (ver decisión abajo) |
 | 4e | Decisión de producto: se mantienen las tres formas de empezar (Cargar obra, Nuevo Presupuesto, Importar Excel) porque hay clientes que suben sus archivos de precios y calculan directo. Ningún chat las esconde ni las borra | Carlos | ✅ 05/10, PR #31 |
-| 4c | Excel sin precios: si el 01_C&P no trae costos, los trabajos sin receta van en rojo y no se ofrece "Ver diferencias" (punto 15 de 0c) | chat | después del 4b, PR chico |
+| 4c | Excel sin precios: si el 01_C&P no trae costos, los trabajos sin receta van en rojo y no se ofrece "Ver diferencias"; un renglón en $0 dentro de un Excel con precios queda amarillo y lo dice (punto 15 de 0c, `PLAN_EXCEL_SIN_PRECIOS.md`) | chat | PR #32 en auditoría (la mitad del servidor entró con el #31) |
 | 5 | Encender el login: datos movidos de IntherArq a Terrac, Carlos y Emilia sumados a Terrac en SOLÉ, `VITE_AUTH_ENABLED=true`, sin `DEMO_ORG_ID`, `AUTH_SUPABASE_KEY` = service_role de SOLÉ (sección 5 de `PLAN_LOGIN_SOLE.md`) | Carlos guiado por el chat | ✅ 05/10: la app pide clave y Carlos entró |
 | 5b | Módulo "Presupuestador" en SOLÉ (encendido solo para Terrac, botón en el menú, la app exige el módulo) | chat, dos PR (uno por repo) | después del 6 |
 | 5c | Seguridad: leer las empresas del usuario con su propia clave (sin la llave service_role de SOLÉ en Render) | chat | cuando haya hueco |
@@ -39,6 +39,10 @@ movieron con `scripts/sql/01_mover_datos_a_terrac.sql`. Quién entra: todos los 
 Manual Deploy sí/no". El 04/10 el deploy del PR #28 falló a los 18 minutos sin tocar el código: pip probaba
 decenas de versiones de `realtime` (dependencia de `supabase`) porque no estaba fijada; desde el PR #29 las
 dependencias de supabase van fijadas en `requirements.txt`.
+
+**Regla de ramas (05/10):** mientras haya un PR abierto, no se pushea a esa rama trabajo de otro tema: el merge se lo
+lleva. El servidor del Excel sin precios entró con el PR #31 por eso. Un PR por vez, y el siguiente arranca cuando
+el anterior está mergeado.
 
 Reglas para no volver a pisarse: el handoff lo edita solo el chat que programa, dentro del PR del trabajo;
 Carlos no abre otro chat de programación mientras haya un PR abierto; si abre uno de consulta, le pide que

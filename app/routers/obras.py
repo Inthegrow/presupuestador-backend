@@ -428,7 +428,7 @@ def analyze(parsed: dict, templates: dict[str, dict], book: PriceBook, asignacio
     for the codes the catalog cannot price.
 
     "motivo_rojo" of a red task: "receta_inexistente", "pregunta", "sin_receta" (no recipe
-    and no price in the Excel) or "precio". "excel_con_precios" is False when no item of the
+    in an Excel that carries no prices at all) or "precio". "excel_con_precios" is False when no item of the
     Excel has a cost (an obra that came only with quantities).
     """
     memoria = memoria or {}
@@ -436,6 +436,10 @@ def analyze(parsed: dict, templates: dict[str, dict], book: PriceBook, asignacio
     grupos: dict[str, list[dict]] = {}
     for f in filas:
         grupos.setdefault(task_key(f["descripcion"], f.get("unidad")), []).append(f)
+
+    # Does the obra's Excel carry prices at all? Without them, a task with no recipe has nothing to load.
+    con_precios = any(f["excel"]["neto"] > 0 or f["excel"]["mat_unit"] + f["excel"]["mo_unit"] > 0
+                      for f in filas)
 
     decisiones: dict[str, dict] = {}
     sugeridas: dict[str, list] = {}
@@ -487,9 +491,10 @@ def analyze(parsed: dict, templates: dict[str, dict], book: PriceBook, asignacio
                            key=lambda c: normalize_codigo(c) or "")
         total_excel = round(sum(i["excel"]["neto"] for i in its), 2)
 
-        # Without a recipe the Excel price is used: with none (or $0) there is nothing to load
+        # Without a recipe the Excel price is used. In an Excel with no prices at all there is
+        # nothing to load (red). A $0 row in a priced Excel is Sol's own decision: yellow, as before.
         motivo = ("receta_inexistente" if inexistente else "pregunta" if falta_conversion
-                  else "sin_receta" if receta is None and total_excel <= 0
+                  else "sin_receta" if receta is None and not con_precios
                   else "precio" if faltantes else None)
         if motivo:
             estado = "rojo"
@@ -519,8 +524,6 @@ def analyze(parsed: dict, templates: dict[str, dict], book: PriceBook, asignacio
     tareas.sort(key=lambda t: (ESTADOS.index(t["estado"]), -t["total_excel"]))
 
     cuenta = {e: sum(1 for t in tareas if t["estado"] == e) for e in ESTADOS}
-    con_precios = any(f["excel"]["neto"] > 0 or f["excel"]["mat_unit"] + f["excel"]["mo_unit"] > 0
-                      for f in filas)
     return {
         "catalogo_oficial": book.hay_oficial,
         "excel_con_precios": con_precios,
