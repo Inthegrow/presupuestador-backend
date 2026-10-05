@@ -22,11 +22,40 @@ de UX y entra a este archivo (sección 5, punto 0c) antes de programarse.
 | 4e | Decisión de producto: se mantienen las tres formas de empezar (Cargar obra, Nuevo Presupuesto, Importar Excel) porque hay clientes que suben sus archivos de precios y calculan directo. Ningún chat las esconde ni las borra | Carlos | ✅ 05/10, PR #31 |
 | 4c | Excel sin precios: si el 01_C&P no trae costos, los trabajos sin receta van en rojo y no se ofrece "Ver diferencias"; un renglón en $0 dentro de un Excel con precios queda amarillo y lo dice (punto 15 de 0c, `PLAN_EXCEL_SIN_PRECIOS.md`) | chat | ✅ 05/10 PR #32 mergeado (Codex verde) y desplegado junto con el #31 |
 | 5 | Encender el login: datos movidos de IntherArq a Terrac, Carlos y Emilia sumados a Terrac en SOLÉ, `VITE_AUTH_ENABLED=true`, sin `DEMO_ORG_ID`, `AUTH_SUPABASE_KEY` = service_role de SOLÉ (sección 5 de `PLAN_LOGIN_SOLE.md`) | Carlos guiado por el chat | ✅ 05/10: la app pide clave y Carlos entró |
-| 5b | Módulo "Presupuestador" en SOLÉ (encendido solo para Terrac, botón en el menú, la app exige el módulo; `PLAN_MODULO_SOLE.md`) | chat, dos PR (uno por repo) | PR #33 ✅ y #34 ✅ mergeados (el #34: si falla la lectura del módulo en SOLÉ, 503 en vez de abrir el acceso; falta Manual Deploy del #34). SOLÉ #1440 ✅ Codex VERDE / APROBADO y mergeado (05/10); falta la prueba visible de Carlos. El rojo heredado de `main` (test MCP) lo arregló #1441; #1442 cerrado por repetido. SQL ya corrido el 05/10 en staging y producción de SOLÉ (Terrac encendido; verificado) |
+| 5b | Módulo "Presupuestador" en SOLÉ (encendido solo para Terrac, botón en el menú, la app exige el módulo; `PLAN_MODULO_SOLE.md`) | chat, dos PR (uno por repo) | ✅ 05/10. PR #33 ✅ y #34 ✅ mergeados (el #34: si falla la lectura del módulo en SOLÉ, 503 en vez de abrir el acceso; desplegado). SOLÉ #1440 ✅ Codex VERDE / APROBADO y mergeado (05/10); Carlos probó el botón de SOLÉ y abre el presupuestador en Terrac ✅. El rojo heredado de `main` (test MCP) lo arregló #1441; #1442 cerrado por repetido. SQL ya corrido el 05/10 en staging y producción de SOLÉ (Terrac encendido; verificado) |
 | 5c | Seguridad: leer las empresas del usuario con su propia clave (sin la llave service_role de SOLÉ en Render) | chat | cuando haya hueco |
-| 6 | Primera carga real de Ginkgo con Sol | Sol + Carlos | después del 5 |
+| 5d | Pendientes chicos (ver lista "Pendientes al 05/10" abajo) | chat | cuando Carlos los ordene |
+| 6 | Primera carga real de Ginkgo con Sol | Sol + Carlos | **lo que sigue** (antes: decidir el margen, ver abajo) |
 | 7 | Etapa B: estado de cada precio y frase de confianza | chat | después del 6 |
 | — | Limpieza: borrar las ramas viejas `claude/*` y `codex/*` ya mergeadas en GitHub | Carlos | cuando quiera |
+
+**Pendientes al 05/10 (repaso completo pedido por Carlos):**
+
+*Decisiones de Carlos:*
+- **Margen.** Sol aplica en Ginkgo 34% promedio sobre el costo directo; la cadena de markups de la app da 59,5%. En
+  costo directo la app y el Excel dan casi lo mismo ($1,6B contra $1,6B); la diferencia del precio final es margen.
+  Decidir si la cadena de Terrac se ajusta a lo que usa Sol (Cadena de Markups) antes de la primera carga real.
+- **Rol consultor** para Carlos y Emilia en Terrac (en SOLÉ: `hidden_from_team`), para que no figuren como equipo.
+- **Capacitadores** (super_user de SOLÉ) no ven el Presupuestador: dárselo exige cambiar `set_super_user_grant`.
+
+*Recetas y datos (Emilia y Sol):* revisar en costo directo cielorrasos de yeso, pintura asfáltica en azotea,
+carpeta, grueso interior, yeso proyectado (la app da 26% menos) y bases aisladas ($0 en el Excel). Nombres de
+recetas que no se entienden solos ("DE CASCOTE"). Código `eps` en el Excel contra `EPS-500` en la lista.
+
+*Programación chica (5d):*
+- Importar Excel crea una lista de precios nueva ("Catalogo - archivo.xlsx") en cada importación: la Lista de
+  precios crece sola y confunde. Reusar la del mismo archivo o preguntar.
+- Aplicar una receta desde el editor no respeta la lista oficial (`app/routers/templates.py`, ~línea 281).
+- La guía de capacitación (artifact) quedó con nombres viejos: rehacer capturas con Recetas, Lista de precios,
+  borrador, conmutador de diferencias.
+- Filtro "Para confirmar" en el editor (hoy se buscan por la nota).
+- Entrar desde SOLÉ sin volver a poner la clave (función de SOLÉ con `generateLink`).
+- 5c: leer las empresas con la clave del usuario en vez de la llave service_role.
+- Borrador de carga en el servidor (seguir desde otra máquina).
+- Limpieza: ramas viejas `claude/*` y `codex/*` en GitHub (Carlos).
+
+*Etapas siguientes:* B (estado de cada precio y frase de confianza), C (agentes de recetas y precios, plano →
+cómputo, recargo por piso que pidió Carlos), D (certificación de avance).
 
 **Lección del 05/10 (encendido de la clave):** `AUTH_SUPABASE_KEY` en Render tenía la llave pública (anon) de
 SOLÉ; con ella la tabla `memberships` devuelve vacío por las reglas de privacidad (RLS) y el servidor contestaba
