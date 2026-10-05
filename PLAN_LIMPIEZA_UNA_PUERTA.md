@@ -1,5 +1,11 @@
 # Plan: una sola puerta de entrada (limpieza de las tres generaciones)
 
+> **Decisión de Carlos (05/10, después del merge del PR #30): las tres formas de empezar SE MANTIENEN.** Hay clientes
+> que van a subir sus archivos de precios y calcular directo en el presupuestador, sin recetas. El PR #31 devolvió
+> al menú "Nuevo Presupuesto" e "Importar Excel", el botón NUEVO y los botones de subida de listas. Lo que sí quedó
+> de este plan: Recetas, Lista de precios, las frases de ayuda y la barra sin adornos muertos. **Ningún chat vuelve a
+> esconder esas entradas.**
+
 > Fecha: 2026-10-05. Contrato para un solo PR, **solo pantalla** (`frontend/`), sin Manual Deploy. Origen: Carlos
 > entró con su clave el 05/10 e hizo de Sol: "la app está hecha un Frankenstein". Tiene razón: hay tres
 > generaciones apiladas (el asistente "Nuevo Presupuesto", "Importar Excel" y "Cargar obra"), tres nombres para
