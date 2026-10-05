@@ -12,8 +12,9 @@ Company rule (PLAN_LOGIN_SOLE 2.3):
 
 Module (PLAN_MODULO_SOLE 2.1): only companies with SOLÉ's "presupuestador"
 module turned on count (override of the company > its plan > off). While SOLÉ
-has no such module (row missing, tables missing or unreadable) nobody is
-filtered, so this can ship before SOLÉ's migration.
+has not registered the module (no row in ``cfg_modules``) nobody is filtered,
+so this could ship before SOLÉ's migration. Once it exists, a failed read of
+the ``cfg_*`` tables answers 503: an outage never opens access.
 
 Roles are SOLÉ's: ``admin`` (everything), ``leader`` (loads and edits),
 ``member`` (only looks). Routes declare the minimum with ``require_editor`` /
