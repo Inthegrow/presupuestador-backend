@@ -85,12 +85,12 @@ export default function Export() {
       id: 'client',
       icon: <Users size={28} strokeWidth={1.5} className="text-[#2D8D68]" />,
       title: 'Vista Cliente (Venta)',
-      subtitle: 'Solo netos, sin costos internos',
+      subtitle: 'Precio de venta por trabajo, sin costos internos',
       badge: 'UNIVERSAL',
       badgeStyle: 'bg-[#E8F5EE] text-[#166534]',
       action: async () => {
         if (!id) return
-        const blob = await budgetApi.exportPdf(id)
+        const blob = await budgetApi.exportPdf(id, 'cliente')
         await downloadBlob(blob, `${budgetName}_cliente.pdf`)
       },
     },

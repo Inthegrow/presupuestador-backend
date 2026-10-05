@@ -14,10 +14,11 @@ import json
 import os
 from datetime import datetime, timezone
 from io import BytesIO
+from typing import Literal
 from uuid import UUID
 
 import pandas as pd
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 
 from app.auth import get_current_user, require_editor
@@ -690,12 +691,78 @@ def _build_page_footer(canvas, doc):
     canvas.restoreState()
 
 
+def _pdf_header(budget_data: dict, pw: float, styles, with_description: bool = True) -> list:  # type: ignore[no-untyped-def]
+    """Header of both PDFs: band with the obra name, date and version, accent bar and description."""
+    from reportlab.lib import colors
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.units import cm
+    from reportlab.platypus import Paragraph, Spacer, Table, TableStyle
+
+    title_style = ParagraphStyle(
+        "BTitle", parent=styles["Title"],
+        fontSize=22, textColor=colors.white,
+        spaceAfter=4, fontName="Helvetica-Bold",
+    )
+    subtitle_style = ParagraphStyle(
+        "BSubtitle", parent=styles["Normal"],
+        fontSize=10, textColor=colors.HexColor("#D1FAE5"),
+        spaceAfter=0,
+    )
+    small_gray = ParagraphStyle(
+        "SmGray", parent=styles["Normal"],
+        fontSize=7, textColor=colors.HexColor("#6B7280"),
+    )
+
+    elements: list = []
+    budget_name = budget_data.get("name") or "Presupuesto"
+    budget_desc = budget_data.get("description") or ""
+    created_raw = budget_data.get("created_at", "") or ""
+    created_at = created_raw[:10] if created_raw else datetime.now().strftime("%Y-%m-%d")
+    version = budget_data.get("version") or "1"
+
+    # ── Header band ───────────────────────────────────────────────────────────
+    header_table = Table(
+        [[Paragraph(budget_name, title_style), Paragraph(f"Fecha: {created_at}  |  Versión {version}", subtitle_style)]],
+        colWidths=[pw * 0.7, pw * 0.3],
+    )
+    header_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor(_COLOR_HEADER)),
+        ("TOPPADDING", (0, 0), (-1, -1), 14),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 14),
+        ("LEFTPADDING", (0, 0), (0, -1), 16),
+        ("RIGHTPADDING", (-1, 0), (-1, -1), 16),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+    ]))
+    elements.append(header_table)
+
+    # Accent bar
+    accent_bar = Table([["  "]], colWidths=[pw])
+    accent_bar.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor(_COLOR_ACCENT)),
+        ("TOPPADDING", (0, 0), (-1, -1), 2),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+    ]))
+    elements.append(accent_bar)
+    elements.append(Spacer(1, 0.4 * cm))
+
+    if with_description and budget_desc:
+        elements.append(Paragraph(budget_desc, small_gray))
+        elements.append(Spacer(1, 0.3 * cm))
+    return elements
+
+
 @router.get("/{budget_id}/export/pdf")
 async def export_budget_pdf(
     budget_id: UUID,
+    vista: Literal["interna", "cliente"] = Query("interna"),
     user: dict = Depends(get_current_user),
 ):
-    """Export a budget to PDF with professional layout."""
+    """Export a budget to PDF with professional layout.
+
+    ``vista=cliente``: the PDF for the client, with the sale price of each work and
+    no internal costs (see client_pdf_data). Without it: the internal PDF.
+    """
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
@@ -741,6 +808,9 @@ async def export_budget_pdf(
     # Indirect % of this budget (no error if missing — use defaults)
     cfg = _apply_cfg_defaults(budget_config(db, org_id, budget_data))
 
+    if vista == "cliente":
+        return _client_pdf_response(budget_data, all_items, cfg)
+
     # ── Compute totals from leaf items (non-section rows) ────────────────────
     leaf_items = [i for i in all_items if i.get("notas") != "Seccion" and float(i.get("cantidad") or 0) > 0]
     # Also accept items that have directo_total > 0 even if cantidad is null (imported)
@@ -785,16 +855,6 @@ async def export_budget_pdf(
     C_ROW_ALT = colors.HexColor(_COLOR_ROW_ALT)
     C_TOTAL = colors.HexColor(_COLOR_TOTAL_ROW)
 
-    title_style = ParagraphStyle(
-        "BTitle", parent=styles["Title"],
-        fontSize=22, textColor=colors.white,
-        spaceAfter=4, fontName="Helvetica-Bold",
-    )
-    subtitle_style = ParagraphStyle(
-        "BSubtitle", parent=styles["Normal"],
-        fontSize=10, textColor=colors.HexColor("#D1FAE5"),
-        spaceAfter=0,
-    )
     section_label_style = ParagraphStyle(
         "SLabel", parent=styles["Normal"],
         fontSize=9, fontName="Helvetica-Bold",
@@ -827,41 +887,7 @@ async def export_budget_pdf(
     #  PAGE 1: COVER / SUMMARY
     # ══════════════════════════════════════════════════════════════════════════
 
-    budget_name = budget_data.get("name") or "Presupuesto"
-    budget_desc = budget_data.get("description") or ""
-    created_raw = budget_data.get("created_at", "") or ""
-    created_at = created_raw[:10] if created_raw else datetime.now().strftime("%Y-%m-%d")
-    version = budget_data.get("version") or "1"
-
-    # ── Header band ───────────────────────────────────────────────────────────
-    header_table = Table(
-        [[Paragraph(budget_name, title_style), Paragraph(f"Fecha: {created_at}  |  Versión {version}", subtitle_style)]],
-        colWidths=[pw * 0.7, pw * 0.3],
-    )
-    header_table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, -1), C_HEADER),
-        ("TOPPADDING", (0, 0), (-1, -1), 14),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 14),
-        ("LEFTPADDING", (0, 0), (0, -1), 16),
-        ("RIGHTPADDING", (-1, 0), (-1, -1), 16),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("ALIGN", (1, 0), (1, -1), "RIGHT"),
-    ]))
-    elements.append(header_table)
-
-    # Accent bar
-    accent_bar = Table([["  "]], colWidths=[pw])
-    accent_bar.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, -1), C_ACCENT),
-        ("TOPPADDING", (0, 0), (-1, -1), 2),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
-    ]))
-    elements.append(accent_bar)
-    elements.append(Spacer(1, 0.4 * cm))
-
-    if budget_desc:
-        elements.append(Paragraph(budget_desc, small_gray))
-        elements.append(Spacer(1, 0.3 * cm))
+    elements += _pdf_header(budget_data, pw, styles)
 
     # ── KPI boxes (4 columns) ─────────────────────────────────────────────────
     kpi_width = pw / 4
@@ -1240,4 +1266,241 @@ async def export_budget_pdf(
         output,
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+# ── PDF para el cliente ──────────────────────────────────────────────────────
+
+
+def _fmt_cantidad(value: object) -> str:
+    """1234.5 → '1.234,50' (Argentine format, 2 decimals)."""
+    try:
+        return f"{float(value):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    except (TypeError, ValueError):
+        return str(value or "—")
+
+
+def _top_section(item: dict, by_id: dict) -> tuple[dict | None, dict | None]:
+    """(rubro, piso) of an item: its top-level section and the section right above it, if different."""
+    chain: list[dict] = []
+    seen: set = set()
+    parent = by_id.get(item.get("parent_id"))
+    while parent is not None and parent.get("id") not in seen:
+        seen.add(parent.get("id"))
+        chain.append(parent)
+        parent = by_id.get(parent.get("parent_id"))
+    sections = [p for p in chain if p.get("notas") == "Seccion"]
+    if not sections:
+        return None, None
+    rubro = sections[-1]
+    piso = sections[0] if sections[0] is not rubro else None
+    return rubro, piso
+
+
+def client_pdf_data(all_items: list[dict], cfg: dict) -> dict:
+    """Rows of the client PDF: per rubro, each work with its sale price; then the totals.
+
+    Total sin IVA = NETO (sin IVA) of the cascade the internal PDF shows
+    (_cascade_from_config(directo_total, cfg)["neto"]). Each work's price is its direct
+    cost × (that neto ÷ direct total), in cents; the rounding difference goes to the most
+    expensive work, so the works add up exactly to the total. Total con IVA = total sin
+    IVA + IVA of the cascade. Nothing else of the cascade (direct cost, indirects,
+    profit, percentages) is returned.
+
+    Works are the same rows the internal PDF totals (not "Seccion", cantidad > 0; when
+    there is none, every non-section row). Rubros are the top-level "Seccion" rows, with
+    every work below them (also the ones under a piso); works without a rubro go in
+    "Otros trabajos" (or in a group without title when there is no rubro at all).
+    """
+    leaf_items = [i for i in all_items if i.get("notas") != "Seccion" and float(i.get("cantidad") or 0) > 0]
+    if not leaf_items:
+        leaf_items = [i for i in all_items if i.get("notas") != "Seccion"]
+
+    directo_total = sum(float(i.get("directo_total") or 0) for i in leaf_items)
+    cascade = _cascade_from_config(directo_total, cfg)
+    total_cents = round(cascade["neto"] * 100)
+    ratio = cascade["neto"] / directo_total if directo_total else 0.0
+
+    cents = [round(float(i.get("directo_total") or 0) * ratio * 100) for i in leaf_items]
+    if cents:
+        mas_caro = max(range(len(cents)), key=lambda k: cents[k])
+        cents[mas_caro] += total_cents - sum(cents)
+
+    by_id = {i.get("id"): i for i in all_items}
+    grupos: dict[object, dict] = {}
+    for item, precio_cents in zip(leaf_items, cents):
+        rubro, piso = _top_section(item, by_id)
+        key = rubro.get("id") if rubro else None
+        if key not in grupos:
+            titulo = None
+            if rubro:
+                code, desc = rubro.get("code") or "", rubro.get("description") or "—"
+                titulo = f"{code}  {desc}".strip() if code else desc
+            grupos[key] = {"titulo": titulo, "filas": [], "_cents": 0}
+        grupo = grupos[key]
+        cantidad = float(item.get("cantidad") or 0)
+        total = precio_cents / 100
+        grupo["filas"].append({
+            "code": item.get("code") or "",
+            "descripcion": item.get("description") or "—",
+            "unidad": item.get("unidad") or "",
+            "cantidad": cantidad,
+            "precio_unitario": round(total / cantidad, 2) if cantidad else total,
+            "total": total,
+            "piso": piso.get("description") if piso else None,
+        })
+        grupo["_cents"] += precio_cents
+
+    con_rubros = any(key is not None for key in grupos)
+    rubros = []
+    for grupo in grupos.values():
+        titulo = grupo["titulo"] or ("Otros trabajos" if con_rubros else None)
+        rubros.append({"titulo": titulo, "filas": grupo["filas"], "subtotal": grupo.pop("_cents") / 100})
+
+    total_sin_iva = total_cents / 100
+    iva = round(cascade["iva"], 2)
+    return {
+        "rubros": rubros,
+        "total_sin_iva": total_sin_iva,
+        "iva_pct": cascade["iva_pct"],
+        "iva": iva,
+        "total_con_iva": round(total_sin_iva + iva, 2),
+    }
+
+
+def _client_pdf_response(budget_data: dict, all_items: list[dict], cfg: dict) -> StreamingResponse:
+    """Client PDF: same header as the internal one, one table per rubro, totals with IVA."""
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+    from reportlab.lib.units import cm
+    from reportlab.platypus import KeepTogether, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+
+    data = client_pdf_data(all_items, cfg)
+
+    output = BytesIO()
+    page_size = A4
+    doc = SimpleDocTemplate(
+        output,
+        pagesize=page_size,
+        leftMargin=1.5 * cm,
+        rightMargin=1.5 * cm,
+        topMargin=1.8 * cm,
+        bottomMargin=1.8 * cm,
+        title=budget_data.get("name") or "Presupuesto",
+        author="Presupuestador SOLE",
+    )
+    styles = getSampleStyleSheet()
+    C_HEADER = colors.HexColor(_COLOR_HEADER)
+    C_ACCENT = colors.HexColor(_COLOR_ACCENT)
+    C_BORDER = colors.HexColor(_COLOR_BORDER)
+    C_ROW_ALT = colors.HexColor(_COLOR_ROW_ALT)
+    section_heading_style = ParagraphStyle(
+        "SHeading", parent=styles["Heading2"],
+        fontSize=12, fontName="Helvetica-Bold",
+        textColor=C_HEADER, spaceAfter=6, spaceBefore=14,
+    )
+    rubro_style = ParagraphStyle(
+        "Rubro", parent=styles["Heading3"],
+        fontSize=10, fontName="Helvetica-Bold",
+        textColor=colors.HexColor(_COLOR_SECTION_TEXT), spaceAfter=4, spaceBefore=10,
+    )
+    cell_style = ParagraphStyle("Cell", parent=styles["Normal"], fontSize=8, leading=10)
+    piso_style = ParagraphStyle("Piso", parent=styles["Normal"], fontSize=8, leading=10,
+                                fontName="Helvetica-Bold", textColor=colors.HexColor(_COLOR_SECTION_TEXT))
+    cell_bold_style = ParagraphStyle("CellBold", parent=styles["Normal"], fontSize=8, leading=10,
+                                     fontName="Helvetica-Bold")
+
+    pw = page_size[0] - 3 * cm
+    elements: list = _pdf_header(budget_data, pw, styles, with_description=False)
+    elements.append(Paragraph("Presupuesto", section_heading_style))
+
+    # Ítem | Trabajo | Unidad | Cantidad | Precio unitario | Total
+    col_w = [1.5 * cm, pw - 1.5 * cm - 1.4 * cm - 2.0 * cm - 2.8 * cm - 3.0 * cm, 1.4 * cm, 2.0 * cm, 2.8 * cm, 3.0 * cm]
+    header = ["Ítem", "Trabajo", "Unidad", "Cantidad", "Precio unitario", "Total"]
+
+    for rubro in data["rubros"]:
+        rows: list = [header]
+        piso_rows: list[int] = []
+        piso_actual = None
+        for fila in rubro["filas"]:
+            if fila["piso"] and fila["piso"] != piso_actual:
+                piso_actual = fila["piso"]
+                rows.append([Paragraph(piso_actual, piso_style), "", "", "", "", ""])
+                piso_rows.append(len(rows) - 1)
+            rows.append([
+                fila["code"],
+                Paragraph(fila["descripcion"], cell_style),
+                fila["unidad"],
+                _fmt_cantidad(fila["cantidad"]),
+                _fmt_ars(fila["precio_unitario"]),
+                _fmt_ars(fila["total"]),
+            ])
+        if rubro["titulo"]:
+            rows.append(["", Paragraph(f"Subtotal {rubro['titulo']}", cell_bold_style),
+                         "", "", "", _fmt_ars(rubro["subtotal"])])
+        table = Table(rows, colWidths=col_w, repeatRows=1)
+        ts = [
+            ("BACKGROUND", (0, 0), (-1, 0), C_HEADER),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 8),
+            ("ALIGN", (3, 0), (-1, -1), "RIGHT"),
+            ("ALIGN", (0, 0), (2, -1), "LEFT"),
+            ("GRID", (0, 0), (-1, -1), 0.3, C_BORDER),
+            ("TOPPADDING", (0, 0), (-1, -1), 3),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ("LEFTPADDING", (0, 0), (-1, -1), 4),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ]
+        if rubro["titulo"]:  # subtotal row
+            ts += [
+                ("BACKGROUND", (0, -1), (-1, -1), colors.HexColor("#F3F4F6")),
+                ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+                ("LINEABOVE", (0, -1), (-1, -1), 0.5, C_ACCENT),
+            ]
+        for i in range(1, len(rows) - (1 if rubro["titulo"] else 0), 2):
+            if i not in piso_rows:
+                ts.append(("BACKGROUND", (0, i), (-1, i), C_ROW_ALT))
+        for i in piso_rows:
+            ts.append(("BACKGROUND", (0, i), (-1, i), colors.HexColor(_COLOR_SECTION)))
+            ts.append(("SPAN", (0, i), (-1, i)))
+        table.setStyle(TableStyle(ts))
+        if rubro["titulo"]:
+            elements.append(KeepTogether([Paragraph(rubro["titulo"], rubro_style), table]))
+        else:
+            elements.append(Spacer(1, 0.3 * cm))
+            elements.append(table)
+
+    totales = [
+        ["Total sin IVA", _fmt_ars(data["total_sin_iva"])],
+        [f"IVA ({_fmt_pct(data['iva_pct'])})", _fmt_ars(data["iva"])],
+        ["Total con IVA", _fmt_ars(data["total_con_iva"])],
+    ]
+    tot_table = Table(totales, colWidths=[6 * cm, 4.5 * cm], hAlign="RIGHT")
+    tot_table.setStyle(TableStyle([
+        ("FONTSIZE", (0, 0), (-1, -1), 10),
+        ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+        ("GRID", (0, 0), (-1, -1), 0.4, C_BORDER),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+        ("LEFTPADDING", (0, 0), (-1, -1), 8),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+        ("BACKGROUND", (0, -1), (-1, -1), C_HEADER),
+        ("TEXTCOLOR", (0, -1), (-1, -1), colors.white),
+        ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+        ("FONTSIZE", (0, -1), (-1, -1), 11),
+    ]))
+    elements.append(Spacer(1, 0.6 * cm))
+    elements.append(KeepTogether([tot_table]))
+
+    doc.build(elements, onFirstPage=_build_page_footer, onLaterPages=_build_page_footer)
+    output.seek(0)
+
+    safe_name = (budget_data.get("name") or "presupuesto").replace(" ", "_").replace("/", "-")
+    return StreamingResponse(
+        output,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}_presupuesto_cliente.pdf"'},
     )

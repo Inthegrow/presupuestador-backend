@@ -480,7 +480,10 @@ class TestItemParams:
         r = client.patch(f"/budgets/{BUDGET}/items/{ITEM}/resources/{rid}", json={"lo_compra_cliente": True})
         assert r.status_code == 200, r.text
         assert resources_by_code(db)["H30"]["subtotal"] == 0
-        assert db.tables["budget_items"][0]["mat_total"] < 100
+        # The item only pays the other materials now
+        otros = sum(r["subtotal"] for r in db.tables["item_resources"]
+                    if r["tipo"] == "material" and r["codigo"] != "H30")
+        assert db.tables["budget_items"][0]["mat_total"] == pytest.approx(otros)
 
 
 # ── Cascade recalculation ─────────────────────────────────────────────────

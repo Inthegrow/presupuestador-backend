@@ -13,13 +13,18 @@ from datetime import date
 from fastapi import APIRouter, Body, Depends, HTTPException
 
 from app.auth import get_current_user, require_editor
-from app.budget_prices import today
-from app.calculations import calc_item_from_resources, calc_resource_subtotal
-from app.catalog_prices import parse_fecha
+from app.budget_prices import fetch_all, today
+from app.calculations import (
+    calc_item_from_resources,
+    calc_resource_subtotal,
+)
+from app.catalog_prices import normalize_codigo, parse_fecha
 from app.db import get_data_db
 from app.formulas import FormulaError
+from app.obra_import import _scale, _scale_rendimiento, espesor_m_from, match_recipe, unit_key
 from app.recipes import expand_resource, merge_params, param_defaults, validate_template
-from app.routers.obras import PriceBook
+from app.routers.analysis import _run_cascade
+from app.routers.obras import MOTIVOS, PriceBook
 from app.schemas import TemplateApply, TemplateCreate, TemplatePreview, TemplateUpdate
 
 router = APIRouter()
@@ -46,6 +51,78 @@ def _precios_al(budget: dict) -> date:
         return parse_fecha(budget.get("precios_al")) or today()
     except ValueError:
         return today()
+
+
+# ── Unit conversion when applying (same normalization as Cargar obra) ───────
+
+_UNIDAD_LEGIBLE = {"m2": "m²", "m3": "m³"}
+
+
+def _unidad_legible(unidad: object) -> str:
+    """'m2' / 'M2' / 'm²' → 'm²'; any other unit as it is written."""
+    return _UNIDAD_LEGIBLE.get(unit_key(unidad), str(unidad or "").strip())
+
+
+def factor_propuesto(descripcion: str, unidad_trabajo: object, template: dict) -> float | None:
+    """Units of the recipe per unit of the item to propose, or None.
+
+    m³ recipe on a m² item: the thickness in the name ("e=8cm" → 0.08). Otherwise, the
+    rule of Cargar obra (match_recipe) when it uses this recipe and was written for the
+    item's unit: its fixed factor, or its "factor_defecto" (0.10 for a contrapiso).
+    """
+    uf, ut = unit_key(template.get("unidad")), unit_key(unidad_trabajo)
+    if uf == "m3" and ut == "m2":
+        espesor = espesor_m_from(descripcion)
+        if espesor:
+            return espesor
+    rule = match_recipe(descripcion or "")
+    codigo = str(template.get("codigo") or "")
+    if not rule or not codigo:
+        return None
+    for code, factor in rule["plantillas"]:
+        if str(code) != codigo:
+            continue
+        # A fixed factor converts from the unit the rule was written for ("obra")
+        if factor is not None and rule.get("obra") and unit_key(rule["obra"]) == ut:
+            return float(factor)
+        return rule.get("factor_defecto")
+    return None
+
+
+def _num(value: object) -> float | None:
+    try:
+        return float(str(value).replace(",", ".")) if isinstance(value, str) else float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def scale_resource(resource: dict, factor: float) -> dict:
+    """Template resource in item units: Q → (Q*factor), like Cargar obra (expand_item).
+
+    The scaled formula / rendimiento is what item_resources keeps, so a later
+    recalculation (quantity change, parameters, cascade) gives the same result.
+    Old resources without a formula scale their per-unit quantity (they are never
+    re-evaluated).
+    """
+    if factor == 1:
+        return resource
+    scaled = dict(resource)
+    scaled["formula"] = _scale(resource.get("formula"), factor)
+    scaled["rendimiento"] = _scale_rendimiento(resource.get("rendimiento"), factor)
+    if resource.get("formula") in (None, "") and _num(resource.get("cantidad_por_unidad")) is not None:
+        scaled["cantidad_por_unidad"] = _num(resource["cantidad_por_unidad"]) * factor
+    if resource.get("rendimiento") in (None, "") and _num(resource.get("trabajadores_por_unidad")) is not None:
+        scaled["trabajadores_por_unidad"] = _num(resource["trabajadores_por_unidad"]) * factor
+    return scaled
+
+
+MOTIVO_NO_ESTA_OFICIAL = "No está en la lista oficial"
+
+
+def _motivo(problema: str, hay_oficial: bool) -> str:
+    if problema == "no_esta" and hay_oficial:
+        return MOTIVO_NO_ESTA_OFICIAL
+    return MOTIVOS.get(problema) or MOTIVO_NO_ESTA_OFICIAL
 
 
 def org_waste_pct(db, org_id: str) -> float | None:
@@ -265,6 +342,24 @@ async def apply_template(
     item = item_result.data[0]
     qty = float(item.get("cantidad") or 1)
 
+    # Units: the recipe's and the item's must match, or the conversion must be given
+    if body.factor is not None and body.factor <= 0:
+        raise HTTPException(422, ["El factor tiene que ser mayor que cero"])
+    uf, ut = unit_key(template.get("unidad")), unit_key(item.get("unidad"))
+    factor = 1.0
+    if uf and ut and uf != ut:
+        if body.factor is None:
+            unidad_formula, unidad_trabajo = _unidad_legible(template.get("unidad")), _unidad_legible(item.get("unidad"))
+            raise HTTPException(409, {
+                "codigo": "FALTA_CONVERSION",
+                "mensaje": (f"La fórmula está en {unidad_formula} y el trabajo en {unidad_trabajo}. "
+                            f"¿Cuántos {unidad_formula} hay en 1 {unidad_trabajo}?"),
+                "unidad_formula": unidad_formula,
+                "unidad_trabajo": unidad_trabajo,
+                "factor_propuesto": factor_propuesto(item.get("description") or "", item.get("unidad"), template),
+            })
+        factor = float(body.factor)
+
     recursos = _json_list(template.get("recursos"))
     parametros = _json_list(template.get("parametros"))
     params = merge_params(param_defaults(parametros), body.parametros)
@@ -275,7 +370,7 @@ async def apply_template(
     try:
         for r in recursos:
             row = expand_resource(
-                r, qty, params,
+                scale_resource(r, factor), qty, params,
                 presupuesto_pct=budget.data[0].get("desperdicio_pct"),
                 plantilla_pct=template.get("desperdicio_pct"),
                 organizacion_pct=org_pct,
@@ -287,10 +382,16 @@ async def apply_template(
     # Same price rule as Cargar obra and "Actualizar precios": oficial catalog first,
     # price in force at the budget's "precios al" date (today when it has none)
     book = PriceBook(db, org_id, _precios_al(budget.data[0])) if any(r["codigo"] for r in rows) else None
-    created = []
+    faltantes: dict[str, dict] = {}
     for row in rows:
         entry, precio, fecha, problema = book.price(row) if book and row["codigo"] else (None, None, None, None)
         con_precio = entry is not None and problema is None  # a dated $0 is a price too
+        if row["codigo"] and not con_precio and not row.get("lo_compra_cliente"):
+            faltantes.setdefault(normalize_codigo(row["codigo"]) or row["codigo"], {
+                "codigo": row["codigo"],
+                "descripcion": row.get("descripcion"),
+                "motivo": _motivo(problema, book.hay_oficial),
+            })
         row.update({
             "item_id": item_id,
             "org_id": org_id,
@@ -300,15 +401,26 @@ async def apply_template(
             "precio_fecha": fecha if con_precio else None,
         })
         calc_resource_subtotal(row)
-        res = db.table("item_resources").insert(row).execute()
-        if res.data:
-            created.append(res.data[0])
 
-    # Recalculate item from its new resources
+    # The recipe replaces what the item had (applying twice must not add it twice).
+    # All rows go in one insert; if it fails, the old resources are put back.
+    anteriores = (
+        db.table("item_resources").select("*").eq("item_id", item_id).eq("org_id", org_id).execute().data or []
+    )
+    db.table("item_resources").delete().eq("item_id", item_id).eq("org_id", org_id).execute()
+    try:
+        created = (db.table("item_resources").insert(rows).execute().data or []) if rows else []
+    except Exception:
+        if anteriores:
+            db.table("item_resources").insert(anteriores).execute()
+        raise
+
+    # Recalculate the item from its new resources (non-cost fields + a provisional total)
     all_resources = (
         db.table("item_resources")
         .select("*")
         .eq("item_id", item_id)
+        .eq("org_id", org_id)
         .execute()
     )
     updated_item = calc_item_from_resources(dict(item), all_resources.data or [])
@@ -317,9 +429,20 @@ async def apply_template(
         "parametros": params,
         "mat_unitario": updated_item["mat_unitario"],
         "mo_unitario": updated_item["mo_unitario"],
-        "mat_total": updated_item["mat_total"],
-        "mo_total": updated_item["mo_total"],
-        "directo_total": updated_item["directo_total"],
     }).eq("id", item_id).execute()
+    # Then the same full recalculation as "Recálculo completo" (inherited waste, purchase
+    # rounding over the whole budget, cascade indirects), so the item shows its final price
+    # right away and a later full recalculation does not move it
+    items = fetch_all(
+        lambda: db.table("budget_items").select("*")
+        .eq("budget_id", budget_id).eq("org_id", org_id).order("id")
+    )
+    _run_cascade(db, org_id, budget.data[0], items)
 
-    return {"resources_created": len(created), "item_updated": True, "parametros": params}
+    return {
+        "resources_created": len(created),
+        "item_updated": True,
+        "parametros": params,
+        "factor": factor,
+        "precios_faltantes": list(faltantes.values()),
+    }
