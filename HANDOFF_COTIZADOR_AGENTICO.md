@@ -46,8 +46,8 @@ recetas que no se entienden solos ("DE CASCOTE"). Código `eps` en el Excel cont
 - Importar Excel crea una lista de precios nueva ("Catalogo - archivo.xlsx") en cada importación: la Lista de
   precios crece sola y confunde. Reusar la del mismo archivo o preguntar.
 - Aplicar una receta desde el editor no respeta la lista oficial (`app/routers/templates.py`, ~línea 281).
-- La guía de capacitación (artifact) quedó con nombres viejos: rehacer capturas con Recetas, Lista de precios,
-  borrador, conmutador de diferencias.
+- ~~Guía de capacitación con nombres viejos~~ ✅ 05/10 rehecha con las pantallas actuales:
+  https://claude.ai/artifact/FjkfWMLXLpLU4EkgqMsZPN (la anterior, EGh8pm1RGGvBaZfhc9rWCj, quedó vieja).
 - Filtro "Para confirmar" en el editor (hoy se buscan por la nota).
 - Entrar desde SOLÉ sin volver a poner la clave (función de SOLÉ con `generateLink`).
 - 5c: leer las empresas con la clave del usuario en vez de la llave service_role.
