@@ -882,7 +882,7 @@ class TestDiferencias:
 # ── Excel sin precios ────────────────────────────────────────────────────────
 
 LIMPIEZA = "LIMPIEZA FINAL DE OBRA | gl"
-SIN_RECETA_Y_SIN_PRECIO = "Hay {n} trabajos sin receta y sin precio en el Excel: elegí una receta antes de cargar"
+SIN_RECETA_Y_SIN_PRECIO = "Hay {n} trabajos sin fórmula y sin precio en el Excel: elegí una fórmula antes de cargar"
 
 
 def _workbook_sin_precios():
@@ -945,7 +945,7 @@ class TestExcelSinPrecios:
         res = cargar(client, wb=_workbook_sin_precios(), asignaciones={ARISTAS: {"plantillas": [["6.9", 1]]}})
         assert res.status_code == 409
         assert res.json()["detail"] == {
-            "mensaje": "Hay 1 trabajo sin receta y sin precio en el Excel: elegí una receta antes de cargar",
+            "mensaje": "Hay 1 trabajo sin fórmula y sin precio en el Excel: elegí una fórmula antes de cargar",
             "rojos": [OBRADOR]}
 
         elegidas = {ARISTAS: {"plantillas": [["6.9", 1]]}, OBRADOR: {"plantillas": [["5.1.4", 1]]}}

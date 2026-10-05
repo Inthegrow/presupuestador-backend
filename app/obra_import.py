@@ -61,10 +61,10 @@ MAPEO: list[dict] = [
     {"patron": r"LADRILLO HUECO DEL 8\b", "plantillas": [("5.1.6", 1.0)]},
     {"patron": r"^YESO PROYECTADO", "plantillas": [("5.5.5", 1.0)]},
     {"patron": r"^REVOQUE EXTERIOR CON HIDROFUGO CON SILLETA", "plantillas": [("5.5.3", 1.0)],
-     "nota": "La silleta no está en la receta: el Excel de la obra cobra este ítem bastante más caro."},
+     "nota": "La silleta no está en la fórmula: el Excel de la obra cobra este ítem bastante más caro."},
     {"patron": r"^REVOQUE EXTERIOR CON HIDROFUGO", "plantillas": [("5.5.3", 1.0)]},
     {"patron": r"^REVOQUE (INTERIOR )?GRUESO FRATAZADO \+ HIDROFUGO", "plantillas": [("5.5.4", 1.0)],
-     "nota": "La receta de grueso interior no lleva hidrófugo."},
+     "nota": "La fórmula de grueso interior no lleva hidrófugo."},
     {"patron": r"^REVOQUE INTERIOR$", "plantillas": [("5.5.4", 1.0)],
      "nota": "¿Lleva también fino interior (5.5.2)?"},
     {"patron": r"^TELGOPOR 50 ?MM \+ CONTRAPISO", "plantillas": [("8.3", 1.0), ("5.2.3", None)], "obra": "m2",
@@ -75,7 +75,7 @@ MAPEO: list[dict] = [
     {"patron": r"^CONTRAPISO", "plantillas": [("5.2.3", None)], "obra": "m2",
      "espesor": True, "factor_defecto": 0.10},
     {"patron": r"^CARPETA", "plantillas": [("5.4.1", 1.0)],
-     "nota": "La receta no tiene espesor: es la misma para 3 y 4 cm."},
+     "nota": "La fórmula no tiene espesor: es la misma para 3 y 4 cm."},
     {"patron": r"REVESTIMIENTOS EN PISOS", "plantillas": [("7.1.1", 1.0)], "cliente": ["RP-PORC"],
      "nota": "No incluye el porcelanato: queda como material que compra el cliente."},
     {"patron": r"REVESTIMIENTOS EN PAREDES", "plantillas": [("7.1.5", 1.0)], "cliente": ["RP-PORC"],
@@ -107,9 +107,9 @@ CANDIDATOS: list[tuple[str, str]] = [
     (r"^VIGAS", "4.2.3 vigas, en m³: falta la sección de la viga"),
     (r"^ESCALERA", "4.2.6 escaleras (gl): no está claro si es por tramo o completa"),
     (r"^COLOCACION DE PUERTAS", "7.3.1 es solo el premarco, no la colocación"),
-    (r"^ARISTAS", "no hay receta de aristas de yeso"),
-    (r"TEXTURADO", "no hay receta de revestimiento texturado"),
-    (r"MEMBRANA LIQUIDA", "no hay receta de membrana líquida"),
+    (r"^ARISTAS", "no hay fórmula de aristas de yeso"),
+    (r"TEXTURADO", "no hay fórmula de revestimiento texturado"),
+    (r"MEMBRANA LIQUIDA", "no hay fórmula de membrana líquida"),
 ]
 
 
@@ -150,7 +150,7 @@ def candidate(descripcion: str) -> str:
     for patron, texto in CANDIDATOS:
         if re.search(patron, key):
             return texto
-    return "no hay receta parecida en el Maestro"
+    return "no hay fórmula parecida en el Maestro"
 
 
 # ── Sugerencias (sin receta en MAPEO): parecido de palabras ─────────────────
@@ -623,7 +623,7 @@ def rule_for(fila: dict, templates: dict[str, dict], asignaciones: dict | None =
         if not pares:
             return None
         same = auto and [c for c, _ in auto["plantillas"]] == [c for c, _, _ in pares]
-        rule = dict(auto) if same else {"patron": None, "nota": "Receta elegida a mano al cargar la obra."}
+        rule = dict(auto) if same else {"patron": None, "nota": "Fórmula elegida a mano al cargar la obra."}
 
     plantillas, falta, origenes = [], [], []
     for codigo, factor, automatica in pares:
@@ -694,12 +694,12 @@ def item_notes(item: dict) -> str:
     if item["nivel"] != "item":
         return "Seccion"
     if item.get("plantilla"):
-        parts.append("Receta del Maestro: " + " + ".join(item["plantillas"]) + ".")
+        parts.append("Fórmula del Maestro: " + " + ".join(item["plantillas"]) + ".")
         parts.append(f"Excel de la obra: {_money(ex.get('mat_unit', 0) + ex.get('mo_unit', 0))} directo por unidad.")
         if item.get("nota_cruce"):
             parts.append(item["nota_cruce"])
     else:
-        parts.append(f"Sin receta en el Maestro ({item.get('candidato')}): precio del Excel de la obra.")
+        parts.append(f"Sin fórmula en el Maestro ({item.get('candidato')}): precio del Excel de la obra.")
     parts += item.get("notas") or []
     return " ".join(parts)
 
@@ -776,11 +776,11 @@ def report_markdown(parsed: dict, plan: dict, source_file: str, precios: list[di
         f"- **{len(rubros)} rubros**, **{sum(1 for f in filas if f['nivel'] == 'subrubro')} subrubros** "
         f"(pisos o partes de la estructura) y **{len(items)} ítems**.",
         f"- Total neto del Excel: **{_money(total)}**.",
-        f"- **{len(con)} ítems con receta** del Maestro: el sistema calcula el precio con las cantidades.",
-        f"- **{len(sin)} ítems sin receta**: se cargan con el precio del Excel "
+        f"- **{len(con)} ítems con fórmula** del Maestro: el sistema calcula el precio con las cantidades.",
+        f"- **{len(sin)} ítems sin fórmula**: se cargan con el precio del Excel "
         f"({_money(total_sin)}, {100 * total_sin / total if total else 0:.0f}% del total).",
         "",
-        "| Rubro | Ítems | Con receta | Total neto Excel |",
+        "| Rubro | Ítems | Con fórmula | Total neto Excel |",
         "|---|---:|---:|---:|",
     ]
     for rb in rubros:
@@ -790,7 +790,7 @@ def report_markdown(parsed: dict, plan: dict, source_file: str, precios: list[di
 
     ceros = [i for i in con if not i["excel"]["neto"]]
     if ceros:
-        out += ["", f"Ojo: {len(ceros)} ítems con receta están en $0 en el Excel "
+        out += ["", f"Ojo: {len(ceros)} ítems con fórmula están en $0 en el Excel "
                 f"({', '.join(i['codigo'] for i in ceros)}): ahí la comparación no sirve."]
 
     if plan["plantillas_faltantes"]:
@@ -799,7 +799,7 @@ def report_markdown(parsed: dict, plan: dict, source_file: str, precios: list[di
     if precios:
         n_items = len({c for p in precios for c in p["items"]})
         out += ["", "## Recursos sin precio válido (la carga se frena)", "",
-                f"Según los catálogos del Maestro: **{len(precios)} códigos**, en **{n_items} ítems** con receta. "
+                f"Según los catálogos del Maestro: **{len(precios)} códigos**, en **{n_items} ítems** con fórmula. "
                 "El SQL se frena y lista estos códigos. Si se fuerza (`v_permitir_sin_precio := true`), "
                 "esos recursos quedan en $0 y esos ítems salen **más baratos que en la realidad**.", "",
                 "| Código | Motivo | Recursos | Ítems |", "|---|---|---:|---|"]
@@ -807,9 +807,9 @@ def report_markdown(parsed: dict, plan: dict, source_file: str, precios: list[di
             its = ", ".join(p["items"][:6]) + ("…" if len(p["items"]) > 6 else "")
             out.append(f"| `{p['codigo']}` | {p['motivo']} | {p['recursos']} | {its} ({len(p['items'])}) |")
 
-    out += ["", "## Ítems sin receta en el Maestro", "",
+    out += ["", "## Ítems sin fórmula en el Maestro", "",
             "Agrupados por tarea (la misma tarea se repite en varios pisos).", "",
-            "| Tarea | Veces | Total neto Excel | Receta más parecida |", "|---|---:|---:|---|"]
+            "| Tarea | Veces | Total neto Excel | Fórmula más parecida |", "|---|---:|---:|---|"]
     groups: dict[str, list[dict]] = {}
     for i in sin:
         groups.setdefault(plain(i["descripcion"]), []).append(i)
@@ -819,8 +819,8 @@ def report_markdown(parsed: dict, plan: dict, source_file: str, precios: list[di
         out.append(f"| {first['descripcion'][:80]} ({codes}) | {len(its)} | "
                    f"{_money(sum(i['excel']['neto'] for i in its))} | {first['candidato']} |")
 
-    out += ["", "## Ítems con receta", "",
-            "| Tarea | Veces | Receta | Qué revisar |", "|---|---:|---|---|"]
+    out += ["", "## Ítems con fórmula", "",
+            "| Tarea | Veces | Fórmula | Qué revisar |", "|---|---:|---|---|"]
     groups = {}
     for i in con:
         groups.setdefault(plain(i["descripcion"]) + "|" + "+".join(i["plantillas"]), []).append(i)

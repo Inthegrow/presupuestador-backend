@@ -525,12 +525,12 @@ export default function AIPlans() {
                                     {item.template_match ? (
                                       <span className="inline-flex items-center gap-1 text-[10px] font-medium text-green-700 bg-green-50 border border-green-200 px-2 py-0.5 rounded-full">
                                         <Link size={9} />
-                                        Receta: {item.template_match.nombre}
+                                        Fórmula: {item.template_match.nombre}
                                       </span>
                                     ) : (
                                       <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
                                         <AlertTriangle size={9} />
-                                        Sin receta — composicion estimada por IA
+                                        Sin fórmula — composicion estimada por IA
                                       </span>
                                     )}
                                   </div>

@@ -39,7 +39,7 @@ const sinRevisando = (page) => page.waitForFunction(() => !document.body.innerTe
   await shot(page, '01_analisis')
   const texto = await page.locator('body').innerText()
 
-  check('aviso "Este Excel no trae precios"', texto.includes('Este Excel no trae precios: la app calcula todo con las recetas y la lista de precios.'))
+  check('aviso "Este Excel no trae precios"', texto.includes('Este Excel no trae precios: la app calcula todo con las fórmulas y la lista de precios.'))
 
   // 2. Red cards: no recipe and no price in the Excel
   const tarjetas = page.locator('div.border-l-4').filter({ hasText: SIN_PRECIO })
@@ -57,24 +57,24 @@ const sinRevisando = (page) => page.waitForFunction(() => !document.body.innerTe
 
   // 3. Status sentence and load button
   const frase = texto.match(/Te falt(a|an) [^\n]*/)?.[0] ?? ''
-  check('la frase de estado menciona "recetas"', /recetas?/.test(frase), JSON.stringify(frase))
+  check('la frase de estado menciona "fórmulas"', /fórmulas?/.test(frase), JSON.stringify(frase))
   const cargar = page.getByRole('button', { name: 'Cargar presupuesto' })
   let bloqueado = await cargar.isDisabled()
   if (!bloqueado) {
     await cargar.click()
-    bloqueado = await page.getByText('sin receta y sin precio en el Excel').first().isVisible({ timeout: 30000 }).catch(() => false)
+    bloqueado = await page.getByText('sin fórmula y sin precio en el Excel').first().isVisible({ timeout: 30000 }).catch(() => false)
   }
-  check('"Cargar presupuesto" no deja cargar mientras falten recetas', bloqueado)
+  check('"Cargar presupuesto" no deja cargar mientras falten fórmulas', bloqueado)
 
-  // 4. A red card offers "Quizás sea" and "Elegir receta", but not "Confirmar"
+  // 4. A red card offers "Quizás sea" and "Elegir fórmula", but not "Confirmar"
   const roja = tarjetas.first()
   const descripcion = (await roja.locator('div.text-sm.font-medium').first().innerText()).trim()
-  check('la tarjeta roja tiene "Elegir receta"', (await roja.getByRole('button', { name: 'Elegir receta' }).count()) === 1)
+  check('la tarjeta roja tiene "Elegir fórmula"', (await roja.getByRole('button', { name: 'Elegir fórmula' }).count()) === 1)
   check('la tarjeta roja no tiene "Confirmar"', (await roja.getByRole('button', { name: 'Confirmar', exact: true }).count()) === 0)
   check('la tarjeta roja dice "Falta resolver"', (await roja.innerText()).includes('Falta resolver'))
 
   // 5. The recipe search does not offer the Excel price
-  await roja.getByRole('button', { name: 'Elegir receta' }).click()
+  await roja.getByRole('button', { name: 'Elegir fórmula' }).click()
   const buscador = roja.locator('div.max-h-64')
   await buscador.waitFor()
   await shot(page, '02_buscador')
@@ -84,7 +84,7 @@ const sinRevisando = (page) => page.waitForFunction(() => !document.body.innerTe
   // 6. Pick the first recipe: the card stops saying it has no price
   const antes = nRojas
   const primera = buscador.locator('button').first()
-  console.log('receta elegida:', (await primera.innerText()).replace(/\n/g, ' '))
+  console.log('fórmula elegida:', (await primera.innerText()).replace(/\n/g, ' '))
   await primera.click()
   await page.waitForTimeout(300)
   await sinRevisando(page)

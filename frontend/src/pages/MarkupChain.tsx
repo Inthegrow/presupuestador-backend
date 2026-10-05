@@ -327,7 +327,7 @@ export default function MarkupChain() {
               <div className="flex items-center justify-between">
                 <div>
                   <span className="text-sm text-gray-700">Este presupuesto</span>
-                  <span className="ml-2 text-[11px] text-gray-400">(vacío = hereda receta / general)</span>
+                  <span className="ml-2 text-[11px] text-gray-400">(vacío = hereda fórmula / general)</span>
                 </div>
                 <div className="flex items-center gap-1">
                   {puedeGuardar ? (
@@ -344,7 +344,7 @@ export default function MarkupChain() {
                 </div>
               </div>
               <p className="text-[11px] text-gray-400">
-                Orden: recurso → presupuesto → receta → general. Se aplica al recalcular la obra.
+                Orden: recurso → presupuesto → fórmula → general. Se aplica al recalcular la obra.
               </p>
             </div>
 

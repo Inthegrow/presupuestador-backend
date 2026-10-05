@@ -20,6 +20,7 @@ import Catalogs from './pages/Catalogs'
 import Versions from './pages/Versions'
 import DiferenciasExcel from './pages/DiferenciasExcel'
 import Templates from './pages/Templates'
+import Ayuda from './pages/Ayuda'
 
 export default function App() {
   return (
@@ -51,6 +52,7 @@ export default function App() {
             <Route path="settings/markups" element={<MarkupChain />} />
             <Route path="catalogs" element={<Catalogs />} />
             <Route path="templates" element={<Templates />} />
+            <Route path="ayuda" element={<Ayuda />} />
           </Route>
 
           {/* 404 */}

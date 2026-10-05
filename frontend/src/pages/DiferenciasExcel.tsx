@@ -298,7 +298,7 @@ export default function DiferenciasExcel() {
               </div>
               <p className="text-[11px] text-gray-500 mt-1.5">
                 {directo
-                  ? 'Acá se ven las recetas: lo que cuesta hacer cada trabajo, sin margen.'
+                  ? 'Acá se ven las fórmulas: lo que cuesta hacer cada trabajo, sin margen.'
                   : 'Lo que cobra cada uno, con su margen.'}
               </p>
             </div>
@@ -345,7 +345,7 @@ export default function DiferenciasExcel() {
                 ['caro', 'Más caros', cuenta.caro],
                 ['barato', 'Más baratos', cuenta.barato],
                 ['parecido', 'Parecidos', cuenta.parecido],
-                ['sin_receta', 'Sin receta', cuenta.sin_receta],
+                ['sin_receta', 'Sin fórmula', cuenta.sin_receta],
               ] as [Filtro, string, number][]).map(([k, txt, n]) => (
                 <button
                   key={k}
@@ -363,7 +363,7 @@ export default function DiferenciasExcel() {
                   <tr className="text-[10px] uppercase tracking-wide text-gray-400">
                     <th className="w-6" />
                     <th className="font-semibold py-2 pr-3">Trabajo</th>
-                    <th className="font-semibold py-2 pr-3">Receta</th>
+                    <th className="font-semibold py-2 pr-3">Fórmula</th>
                     <th className="font-semibold py-2 pr-3 text-right">{directo ? 'Excel (costo)' : 'Excel'}</th>
                     <th className="font-semibold py-2 pr-3 text-right">{directo ? 'App (costo)' : 'App'}</th>
                     <th className="font-semibold py-2 pr-3 text-right">Diferencia</th>

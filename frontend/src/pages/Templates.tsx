@@ -142,7 +142,7 @@ function TemplateCard({
                 ? 'bg-red-600 text-white hover:bg-red-700'
                 : 'text-gray-400 hover:text-red-600 hover:bg-red-50'
             } disabled:opacity-50`}
-            title={confirmDelete ? 'Confirmar eliminacion' : 'Eliminar receta'}
+            title={confirmDelete ? 'Confirmar eliminacion' : 'Eliminar fórmula'}
           >
             {deleting ? (
               <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
@@ -241,7 +241,7 @@ export default function Templates() {
     const categoria = activeCategory === 'Todos' ? undefined : activeCategory
     templateApi.list(categoria)
       .then((data) => setTemplates(data as Template[]))
-      .catch((err) => setError(err instanceof Error ? err.message : 'Error al cargar las recetas'))
+      .catch((err) => setError(err instanceof Error ? err.message : 'Error al cargar las fórmulas'))
       .finally(() => setLoading(false))
   }, [activeCategory])
 
@@ -264,9 +264,9 @@ export default function Templates() {
       </div>
       <div className="flex items-center gap-3 mb-1">
         <div className="w-1 h-7 bg-[#2D8D68] rounded-full" />
-        <h1 className="text-xl font-extrabold text-gray-900">RECETAS</h1>
+        <h1 className="text-xl font-extrabold text-gray-900">FÓRMULAS</h1>
         <span className="bg-[#E8F5EE] text-[#1B5E4B] text-xs font-medium px-2 py-0.5 rounded-full">
-          {templates.length} {templates.length === 1 ? 'receta' : 'recetas'}
+          {templates.length} {templates.length === 1 ? 'fórmula' : 'fórmulas'}
         </span>
       </div>
       <p className="text-sm text-gray-500 mb-6 pl-4">
@@ -296,14 +296,14 @@ export default function Templates() {
       {loading && (
         <div className="flex items-center gap-2 text-sm text-gray-400 mb-4">
           <div className="w-4 h-4 border-2 border-[#2D8D68] border-t-transparent rounded-full animate-spin" />
-          Cargando recetas...
+          Cargando fórmulas...
         </div>
       )}
 
       {/* Error */}
       {error && (
         <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-4 text-sm text-red-700">
-          <p className="font-semibold mb-1">Error al cargar las recetas</p>
+          <p className="font-semibold mb-1">Error al cargar las fórmulas</p>
           <p className="text-xs">{error}</p>
         </div>
       )}
@@ -313,11 +313,11 @@ export default function Templates() {
         {!loading && !error && templates.length === 0 && (
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-8 text-center text-gray-400">
             <Library size={32} className="mx-auto mb-3 text-gray-300" />
-            <p className="text-sm">No hay recetas cargadas.</p>
+            <p className="text-sm">No hay fórmulas cargadas.</p>
             <p className="text-xs mt-1">
               {activeCategory !== 'Todos'
-                ? `No hay recetas en la categoría "${activeCategory}".`
-                : 'Creá una con el botón "Nueva receta".'}
+                ? `No hay fórmulas en la categoría "${activeCategory}".`
+                : 'Creá una con el botón "Nueva fórmula".'}
             </p>
           </div>
         )}
@@ -331,7 +331,7 @@ export default function Templates() {
             onClick={() => setEditing(null)}
             className="w-full border-2 border-dashed border-gray-200 text-gray-500 hover:border-[#2D8D68] hover:text-[#2D8D68] py-3 rounded-xl font-semibold text-sm transition-colors flex items-center justify-center gap-2"
           >
-            <Plus size={16} /> Nueva receta
+            <Plus size={16} /> Nueva fórmula
           </button>
         )}
       </div>

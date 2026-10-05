@@ -65,7 +65,7 @@ const fmtARS = (v: number | null | undefined) => fmt.format(v ?? 0)
 
 const ORIGEN_LABEL: Record<string, string> = {
   presupuesto: 'presupuesto',
-  plantilla: 'receta',
+  plantilla: 'fórmula',
   organizacion: 'general',
 }
 
@@ -284,7 +284,7 @@ function ResourceRow({ resource, tipo, onSave, onDelete, startEditing, onEditDon
       <td className="px-3 py-1.5 text-gray-800">
         {resource.descripcion ?? '—'}
         {resource.formula && (
-          <span className="ml-1.5 font-mono text-[10px] text-gray-400" title="Fórmula (Q = cantidad del ítem)">= {resource.formula}</span>
+          <span className="ml-1.5 font-mono text-[10px] text-gray-400" title="Cantidad (Q = cantidad del ítem)">= {resource.formula}</span>
         )}
         {resource.rendimiento && (
           <span className="ml-1.5 font-mono text-[10px] text-gray-400" title="Días = Q / rendimiento">días = Q / {resource.rendimiento}</span>
@@ -743,7 +743,7 @@ function TemplateModal({ budgetId, itemId, onApplied, onClose }: TemplateModalPr
         setCategories(catList)
         if (catList.length > 0) setSelectedCat(catList[0])
       })
-      .catch(() => setError('Error cargando las recetas.'))
+      .catch(() => setError('Error cargando las fórmulas.'))
       .finally(() => setLoading(false))
   }, [])
 
@@ -759,7 +759,7 @@ function TemplateModal({ budgetId, itemId, onApplied, onClose }: TemplateModalPr
       onApplied()
       onClose()
     } catch {
-      setError('Error al aplicar la receta. Intentá de nuevo.')
+      setError('Error al aplicar la fórmula. Intentá de nuevo.')
       setApplying(null)
     }
   }
@@ -771,7 +771,7 @@ function TemplateModal({ budgetId, itemId, onApplied, onClose }: TemplateModalPr
         <div className="bg-[#E8F5EE] px-5 py-4 flex items-center justify-between border-b border-[#C3E5D3] flex-shrink-0">
           <div className="flex items-center gap-2">
             <Library size={16} className="text-[#2D8D68]" />
-            <span className="font-bold text-[#143D34] text-base">Recetas</span>
+            <span className="font-bold text-[#143D34] text-base">Fórmulas</span>
           </div>
           <button
             onClick={onClose}
@@ -805,12 +805,12 @@ function TemplateModal({ budgetId, itemId, onApplied, onClose }: TemplateModalPr
           {loading && (
             <div className="flex items-center gap-2 text-sm text-gray-400 py-6 justify-center">
               <div className="w-4 h-4 border-2 border-[#2D8D68] border-t-transparent rounded-full animate-spin" />
-              Cargando recetas...
+              Cargando fórmulas...
             </div>
           )}
           {!loading && filtered.length === 0 && (
             <div className="text-center text-sm text-gray-400 italic py-8">
-              No hay recetas en esta categoría.
+              No hay fórmulas en esta categoría.
             </div>
           )}
           {!loading && filtered.map((tmpl) => {
@@ -1027,7 +1027,7 @@ export default function ItemDetail() {
             className="flex items-center gap-1.5 text-xs bg-[#2D8D68] hover:bg-[#1E6B4E] text-white px-3 py-1.5 rounded-lg font-medium transition-colors"
           >
             <Library size={13} />
-            Cargar receta
+            Cargar fórmula
           </button>
           )}
         </div>

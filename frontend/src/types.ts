@@ -42,7 +42,7 @@ export interface BudgetItem {
   notas_calculo?: string
   sort_order: number
   children?: BudgetItem[]
-  // Recetas (Fase 2)
+  // Fórmulas (Fase 2)
   template_id?: string | null
   parametros?: Record<string, number>
 }
@@ -66,7 +66,7 @@ export interface ItemResource {
   cargas_sociales_pct: number
   // Catalog link
   catalog_entry_id: string | null
-  // Recetas (Fase 2)
+  // Fórmulas (Fase 2)
   formula?: string | null
   rendimiento?: string | null
   desperdicio_origen?: 'recurso' | 'presupuesto' | 'plantilla' | 'organizacion' | null
@@ -240,7 +240,7 @@ export interface AIItemToInsert {
   }
 }
 
-// ─── Item templates (recetas) ─────────────────────────────────────────────────
+// ─── Item templates (fórmulas) ─────────────────────────────────────────────────
 
 export interface TemplateParam {
   clave: string

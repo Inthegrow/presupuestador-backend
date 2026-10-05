@@ -234,7 +234,7 @@ export default function TemplateEditor({
               </button>
             </div>
             <p className="text-[11px] text-gray-400 mb-2">
-              Valores por defecto. Se pueden cambiar en cada presupuesto. Úsalos en las fórmulas por su nombre.
+              Valores por defecto. Se pueden cambiar en cada presupuesto. Úsalos en la cantidad por su nombre.
             </p>
             {params.length === 0 && <p className="text-xs text-gray-400 italic">Sin parámetros.</p>}
             <div className="space-y-1.5">
@@ -269,7 +269,7 @@ export default function TemplateEditor({
               </button>
             </div>
             <p className="text-[11px] text-gray-400 mb-2">
-              Fórmula: <span className="font-mono">Q</span> es la cantidad del ítem. Se permiten números,
+              Cantidad: <span className="font-mono">Q</span> es la cantidad del ítem. Se permiten números,
               <span className="font-mono"> + - * / ( )</span> y parámetros. Mano de obra: días = Q / rendimiento.
               Desperdicio vacío = hereda.
             </p>
@@ -281,7 +281,7 @@ export default function TemplateEditor({
                     <th className="px-2 py-1.5 text-left font-medium">Código</th>
                     <th className="px-2 py-1.5 text-left font-medium">Descripción</th>
                     <th className="px-2 py-1.5 text-left font-medium">Unidad</th>
-                    <th className="px-2 py-1.5 text-left font-medium">Fórmula / Rendimiento</th>
+                    <th className="px-2 py-1.5 text-left font-medium">Cantidad / Rendimiento</th>
                     <th className="px-2 py-1.5 text-right font-medium">Desp. %</th>
                     <th className="px-2 py-1.5 text-center font-medium" title="Lo compra el cliente">Cliente</th>
                     <th className="px-2 py-1.5 text-center font-medium" title="Redondear a unidad de compra">Redondeo</th>

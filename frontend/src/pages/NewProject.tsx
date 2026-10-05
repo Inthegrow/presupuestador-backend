@@ -1147,7 +1147,7 @@ function StepEstructura({
             active={structureOption === 'template'}
             onClick={() => setStructureOption('template')}
             icon={<ClipboardList size={20} />}
-            title="Receta de obra"
+            title="Fórmula de obra"
             description="Tareas tipicas de obra"
           />
           <OptionCard
@@ -1177,7 +1177,7 @@ function StepEstructura({
         {templateTasks.length > 0 && structureOption !== 'template' && (
           <div className="mb-4 bg-[#E8F5EE] rounded-lg px-4 py-2.5 border border-green-200 flex items-center gap-2 text-sm text-[#143D34]">
             <ClipboardList size={14} className="text-[#2D8D68]" />
-            <span className="font-medium">{templateTasks.length} ítems de receta</span>
+            <span className="font-medium">{templateTasks.length} ítems de fórmula</span>
             <span className="text-gray-500">se van a combinar con esta fuente.</span>
           </div>
         )}
@@ -1541,7 +1541,7 @@ function AIReviewPanel({
             La IA genero {items.length} items.{' '}
             {withTemplate.length > 0 && (
               <span className="text-green-200 font-medium">
-                {withTemplate.length} coinciden con tus recetas.{' '}
+                {withTemplate.length} coinciden con tus fórmulas.{' '}
               </span>
             )}
             Revisa y ajusta antes de crear el presupuesto.
@@ -1627,12 +1627,12 @@ function AIReviewPanel({
                   {item.template_match ? (
                     <span className="inline-flex items-center gap-1 text-[10px] font-medium text-green-700 bg-green-50 border border-green-200 px-2 py-0.5 rounded-full">
                       <Link size={9} />
-                      Receta: {item.template_match.nombre}
+                      Fórmula: {item.template_match.nombre}
                     </span>
                   ) : (
                     <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
                       <AlertTriangle size={9} />
-                      Sin receta — se usara composicion estimada por IA
+                      Sin fórmula — se usara composicion estimada por IA
                     </span>
                   )}
                 </div>

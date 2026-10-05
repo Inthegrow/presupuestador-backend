@@ -203,7 +203,7 @@ def test_composite_and_client_material(plan: dict) -> None:
 def test_items_without_recipe(plan: dict) -> None:
     codes = [i["codigo"] for i in plan["sin_receta"]]
     assert codes == ["1.1", "4.2.2"]
-    assert "Sin receta" in item_notes(_item(plan, "1.1"))
+    assert "Sin fórmula" in item_notes(_item(plan, "1.1"))
     assert plan["plantillas_faltantes"] == []
 
 
@@ -216,7 +216,7 @@ def test_missing_template_goes_without_recipe(parsed: dict) -> None:
 
 def test_report(parsed: dict, plan: dict) -> None:
     md = report_markdown(parsed, plan, "obra.xlsx")
-    assert "## Ítems sin receta en el Maestro" in md
+    assert "## Ítems sin fórmula en el Maestro" in md
     assert "ARISTAS DE YESO" in md
     assert "3.1.3" in md  # con receta pero en $0 en el Excel
 

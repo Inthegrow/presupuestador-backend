@@ -54,9 +54,9 @@ function fraseSinConfirmar(sc: { total: number; con_receta: number; sin_receta: 
   const uno = sc.total === 1
   const cabeza = `${sc.total} ${uno ? 'trabajo entró' : 'trabajos entraron'} sin confirmar`
   let detalle: string
-  if (sc.sin_receta === 0) detalle = uno ? 'con la receta propuesta' : 'todos con la receta propuesta'
+  if (sc.sin_receta === 0) detalle = uno ? 'con la fórmula propuesta' : 'todos con la fórmula propuesta'
   else if (sc.con_receta === 0) detalle = uno ? 'con el precio del Excel' : 'todos con el precio del Excel'
-  else detalle = `${sc.con_receta} con la receta propuesta y ${sc.sin_receta} con el precio del Excel`
+  else detalle = `${sc.con_receta} con la fórmula propuesta y ${sc.sin_receta} con el precio del Excel`
   return { cabeza: `${cabeza}: ${detalle}.`, revisar: uno ? 'Podés revisarlo en el presupuesto: en las notas dice ' : 'Podés revisarlos en el presupuesto: en las notas dicen ' }
 }
 
@@ -301,7 +301,7 @@ function PrecioRow({
   )
 }
 
-// ─── Buscador de recetas ───────────────────────────────────────────────────────
+// ─── Buscador de fórmulas ───────────────────────────────────────────────────────
 
 function RecetaBuscador({
   recetas, sinPrecioExcel, enCero, onElegir, onSinReceta, onCerrar,
@@ -336,7 +336,7 @@ function RecetaBuscador({
         <button onClick={onCerrar} className="text-xs text-gray-500 hover:text-gray-800">Cerrar</button>
       </div>
       <p className="px-3 py-1.5 text-[11px] text-gray-500 border-b">
-        Elegí la receta correcta para este trabajo.{sinPrecioExcel ? '' : enCero ? ' Si no lo cotizás, dejalo en $0.' : ' Si ninguna sirve, usá el precio del Excel.'}
+        Elegí la fórmula correcta para este trabajo.{sinPrecioExcel ? '' : enCero ? ' Si no lo cotizás, dejalo en $0.' : ' Si ninguna sirve, usá el precio del Excel.'}
       </p>
       <div className="max-h-64 overflow-y-auto">
         {!sinPrecioExcel && (
@@ -345,7 +345,7 @@ function RecetaBuscador({
             className="w-full text-left px-3 py-2 text-[#143D34] bg-[#E8F5EE] hover:bg-[#d8eee2]"
           >
             <span className="block text-sm font-medium">
-              {enCero ? 'Dejarlo en $0 como en el Excel (sin receta)' : 'Usar el precio del Excel (sin receta)'}
+              {enCero ? 'Dejarlo en $0 como en el Excel (sin fórmula)' : 'Usar el precio del Excel (sin fórmula)'}
             </span>
             <span className="block text-[11px] text-gray-500 font-normal">
               {enCero
@@ -400,7 +400,7 @@ function TareaCard({
 }) {
   const [buscando, setBuscando] = useState(false)
   const preguntaServidor = t.pregunta
-  // Si Sol eligió una receta con otra unidad, la pregunta se muestra acá hasta que escriba el número
+  // Si Sol eligió una fórmula con otra unidad, la pregunta se muestra acá hasta que escriba el número
   const pregunta = pendiente
     ? { texto: `¿Cuántos ${pendiente.unidad} hay en 1 ${t.unidad || 'unidad'}?`, receta: pendiente.codigo, unidad_receta: pendiente.unidad, valor: null as number | null, dato: null as string | null }
     : preguntaServidor
@@ -420,10 +420,10 @@ function TareaCard({
     : receta
       ? receta.partes.length > 1 ? receta.partes.map((p) => p.nombre).join(' + ') : receta.nombre
       : sinRecetaNiPrecio
-        ? 'Sin receta, y este trabajo no tiene precio en el Excel. Elegí una receta.'
+        ? 'Sin fórmula, y este trabajo no tiene precio en el Excel. Elegí una fórmula.'
         : t.total_excel <= 0
-          ? 'Sin receta y el Excel lo tiene en $0: si no lo cotizás, confirmá; si no, elegí una receta.'
-          : 'Sin receta: se usa el precio del Excel'
+          ? 'Sin fórmula y el Excel lo tiene en $0: si no lo cotizás, confirmá; si no, elegí una fórmula.'
+          : 'Sin fórmula: se usa el precio del Excel'
 
   function enviarValor() {
     const n = Number(valor.replace(',', '.'))
@@ -472,7 +472,7 @@ function TareaCard({
             onClick={() => setBuscando(!buscando)}
             className="bg-white border text-gray-700 text-xs font-semibold px-3 py-1.5 rounded-lg hover:bg-gray-50"
           >
-            {receta || pendiente ? 'Cambiar' : 'Elegir receta'}
+            {receta || pendiente ? 'Cambiar' : 'Elegir fórmula'}
           </button>
         </div>
       </div>
@@ -666,7 +666,7 @@ export default function CargarObra() {
   }
 
   // La conversión que escribió Sol vale solo para esa parte: las otras partes de una
-  // receta combinada (ej. placas EPS + contrapiso) se conservan como estaban
+  // fórmula combinada (ej. placas EPS + contrapiso) se conservan como estaban
   function responder(t: ObraTarea, codigo: string, valor: number) {
     const pendiente = pendientes[t.clave]
     const partes: [string, number][] = pendiente
@@ -783,11 +783,11 @@ export default function CargarObra() {
   const nPrecios = analisis?.precios.length ?? 0
   const precios = `${nPrecios} ${nPrecios === 1 ? 'precio' : 'precios'}`
   const faltantes = [
-    rojosSinReceta > 0 && `${rojosSinReceta} ${rojosSinReceta === 1 ? 'receta' : 'recetas'}`,
+    rojosSinReceta > 0 && `${rojosSinReceta} ${rojosSinReceta === 1 ? 'fórmula' : 'fórmulas'}`,
     rojosPregunta > 0 && `${rojosPregunta} ${rojosPregunta === 1 ? 'pregunta' : 'preguntas'}`,
     rojosPrecio > 0 && precios,
   ].filter((x): x is string => !!x)
-  // "Te falta 1 receta" only when there is a single missing thing
+  // "Te falta 1 fórmula" only when there is a single missing thing
   const unoSolo = faltantes.length === 1 && /^1 /.test(faltantes[0])
   const fraseFalta = rojosOtros > 0
     ? `${unoSolo ? 'Te falta' : 'Te faltan'} ${faltantes.length > 1 ? `${faltantes.slice(0, -1).join(', ')} y ${faltantes[faltantes.length - 1]}` : faltantes[0]}`
@@ -820,7 +820,7 @@ export default function CargarObra() {
         <h1 className="text-xl font-extrabold text-gray-900">CARGAR UNA OBRA</h1>
       </div>
       <p className="text-gray-500 text-sm mb-4 ml-4">
-        Subí el cómputo de la obra (hoja 01_C&amp;P): la app le pone las recetas y los precios.
+        Subí el cómputo de la obra (hoja 01_C&amp;P): la app le pone las fórmulas y los precios.
       </p>
 
       <div className="max-w-5xl space-y-5">
@@ -921,7 +921,7 @@ export default function CargarObra() {
               </div>
               {!analisis.excel_con_precios && (
                 <div className="mt-2 text-xs text-sky-800 bg-sky-50 border border-sky-200 rounded-lg px-3 py-2">
-                  Este Excel no trae precios: la app calcula todo con las recetas y la lista de precios.
+                  Este Excel no trae precios: la app calcula todo con las fórmulas y la lista de precios.
                 </div>
               )}
               {analisis.titulo_dudoso && (
@@ -1087,7 +1087,7 @@ export default function CargarObra() {
               <div>
                 <h3 className="font-bold text-gray-900 text-lg">{carga.nombre}</h3>
                 <p className="text-xs text-gray-500">
-                  Cargado y calculado: {carga.items} trabajos, {carga.con_receta} con receta.
+                  Cargado y calculado: {carga.items} trabajos, {carga.con_receta} con fórmula.
                   {carga.memoria_guardada ? ' La próxima obra se acuerda de lo que elegiste.' : ''}
                 </p>
               </div>
