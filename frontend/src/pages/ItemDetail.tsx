@@ -51,7 +51,7 @@ const SOURCE_CONFIG: Record<string, { label: string; icon: typeof Pencil; color:
   manual_edit: { label: 'Edicion manual', icon: Pencil, color: 'text-blue-600' },
   ai_suggestion: { label: 'Sugerencia IA', icon: Cpu, color: 'text-purple-600' },
   excel_import: { label: 'Importacion Excel', icon: Upload, color: 'text-green-600' },
-  catalog_update: { label: 'Catalogo de precios', icon: BookOpen, color: 'text-orange-600' },
+  catalog_update: { label: 'Lista de precios', icon: BookOpen, color: 'text-orange-600' },
 }
 
 const fmt = new Intl.NumberFormat('es-AR', {
@@ -65,7 +65,7 @@ const fmtARS = (v: number | null | undefined) => fmt.format(v ?? 0)
 
 const ORIGEN_LABEL: Record<string, string> = {
   presupuesto: 'presupuesto',
-  plantilla: 'plantilla',
+  plantilla: 'receta',
   organizacion: 'general',
 }
 
@@ -743,7 +743,7 @@ function TemplateModal({ budgetId, itemId, onApplied, onClose }: TemplateModalPr
         setCategories(catList)
         if (catList.length > 0) setSelectedCat(catList[0])
       })
-      .catch(() => setError('Error cargando templates.'))
+      .catch(() => setError('Error cargando las recetas.'))
       .finally(() => setLoading(false))
   }, [])
 
@@ -759,7 +759,7 @@ function TemplateModal({ budgetId, itemId, onApplied, onClose }: TemplateModalPr
       onApplied()
       onClose()
     } catch {
-      setError('Error al aplicar el template. Intenta de nuevo.')
+      setError('Error al aplicar la receta. Intentá de nuevo.')
       setApplying(null)
     }
   }
@@ -771,7 +771,7 @@ function TemplateModal({ budgetId, itemId, onApplied, onClose }: TemplateModalPr
         <div className="bg-[#E8F5EE] px-5 py-4 flex items-center justify-between border-b border-[#C3E5D3] flex-shrink-0">
           <div className="flex items-center gap-2">
             <Library size={16} className="text-[#2D8D68]" />
-            <span className="font-bold text-[#143D34] text-base">Biblioteca de Templates</span>
+            <span className="font-bold text-[#143D34] text-base">Recetas</span>
           </div>
           <button
             onClick={onClose}
@@ -805,12 +805,12 @@ function TemplateModal({ budgetId, itemId, onApplied, onClose }: TemplateModalPr
           {loading && (
             <div className="flex items-center gap-2 text-sm text-gray-400 py-6 justify-center">
               <div className="w-4 h-4 border-2 border-[#2D8D68] border-t-transparent rounded-full animate-spin" />
-              Cargando templates...
+              Cargando recetas...
             </div>
           )}
           {!loading && filtered.length === 0 && (
             <div className="text-center text-sm text-gray-400 italic py-8">
-              No hay templates en esta categoría.
+              No hay recetas en esta categoría.
             </div>
           )}
           {!loading && filtered.map((tmpl) => {
@@ -1027,7 +1027,7 @@ export default function ItemDetail() {
             className="flex items-center gap-1.5 text-xs bg-[#2D8D68] hover:bg-[#1E6B4E] text-white px-3 py-1.5 rounded-lg font-medium transition-colors"
           >
             <Library size={13} />
-            Cargar template
+            Cargar receta
           </button>
           )}
         </div>

@@ -1,7 +1,7 @@
 import { NavLink, useNavigate, useLocation } from 'react-router-dom'
 import {
   LayoutGrid, Edit3, BarChart2, Layers,
-  Download, Upload, Settings, BookOpen, RefreshCw, LogOut, Plus,
+  Download, Settings, BookOpen, RefreshCw, LogOut,
   ArrowLeft, Library, ClipboardCheck,
 } from 'lucide-react'
 import { useAuth } from '../../contexts/AuthContext'
@@ -108,9 +108,7 @@ export default function Sidebar() {
         <NavItem to="/app/dashboard" end icon={<LayoutGrid size={15} />} label="Mis Presupuestos" />
         {puedeEditar && (
           <>
-            <NavItem to="/app/new-project" icon={<Plus size={15} />} label="+ Nuevo Presupuesto" />
-            <NavItem to="/app/cargar-obra" icon={<ClipboardCheck size={15} />} label="Cargar obra (con recetas)" />
-            <NavItem to="/app/import" icon={<Upload size={15} />} label="Importar Excel" />
+            <NavItem to="/app/cargar-obra" icon={<ClipboardCheck size={15} />} label="Cargar obra" />
           </>
         )}
       </nav>
@@ -150,8 +148,8 @@ export default function Sidebar() {
         <div className="text-[10px] font-bold text-gray-400 tracking-wider mb-1 px-1">CONFIGURACION</div>
         <nav className="space-y-0.5 text-[13px]">
           <NavItem to="/app/settings/markups" icon={<Settings size={15} />} label="Cadena de Markups" />
-          <NavItem to="/app/catalogs" icon={<BookOpen size={15} />} label="Catalogos" />
-          <NavItem to="/app/templates" icon={<Library size={15} />} label="Templates" />
+          <NavItem to="/app/catalogs" icon={<BookOpen size={15} />} label="Lista de precios" />
+          <NavItem to="/app/templates" icon={<Library size={15} />} label="Recetas" />
         </nav>
       </div>
 

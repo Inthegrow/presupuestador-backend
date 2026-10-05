@@ -37,8 +37,25 @@ async function subir(page) {
   page.on('pageerror', (e) => console.log('PAGEERROR', e.message))
   page.on('console', (m) => { if (m.type() === 'error') console.log('CONSOLE', m.text()) })
 
-  // 1. Catálogos: todo "solo consulta" al principio; marcamos el Maestro como oficial
+  // 0. Navegación: una sola puerta de entrada (barra y menú limpios, nombres nuevos)
+  await page.goto(BASE + '/app/dashboard')
+  const barra = page.locator('header')
+  const menu = page.locator('aside')
+  await barra.waitFor()
+  const textoBarra = await barra.innerText()
+  const textoMenu = await menu.innerText()
+  check('la barra no tiene "VER 360"', !/VER 360/i.test(textoBarra))
+  check('el botón de la barra dice "CARGAR OBRA"', (await barra.getByRole('button', { name: 'CARGAR OBRA' }).count()) === 1, JSON.stringify(textoBarra))
+  check('el menú no tiene "Importar Excel"', !/Importar Excel/i.test(textoMenu))
+  check('el menú no tiene "Nuevo Presupuesto"', !/Nuevo Presupuesto/i.test(textoMenu))
+  check('el menú dice "Cargar obra", "Lista de precios" y "Recetas"',
+    /Cargar obra/.test(textoMenu) && /Lista de precios/.test(textoMenu) && /Recetas/.test(textoMenu) && !/Templates|Catalogos/.test(textoMenu),
+    JSON.stringify(textoMenu))
+
+  // 1. Lista de precios: todo "solo consulta" al principio; marcamos el Maestro como oficial
   await page.goto(BASE + '/app/catalogs')
+  check('la pantalla se llama "LISTA DE PRECIOS"', await page.getByRole('heading', { name: 'LISTA DE PRECIOS' }).isVisible())
+  check('los paneles de subida arrancan plegados', await page.getByRole('button', { name: 'Subir una lista nueva' }).isVisible() && (await page.getByText('Archivo CSV *').count()) === 0)
   await page.getByText('Maestro TERRAC - Materiales').waitFor()
   await shot(page, '01_catalogos_sin_oficial')
   const botones = page.getByRole('button', { name: 'Marcar como oficial' })

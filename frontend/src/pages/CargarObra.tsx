@@ -7,7 +7,7 @@ import { borrarBorrador, duenoBorrador, guardarBorrador, leerBorrador } from '..
 import type { Borrador } from '../lib/borrador'
 import { useAuth } from '../contexts/AuthContext'
 import type { ObraAnalisis, ObraAsignaciones, ObraCarga, ObraPrecio, ObraPropuesta, ObraRecetaCatalogo, ObraTarea } from '../lib/api'
-import { fmtCurrency, fmtDate, todayIso, unidadEnPalabras } from '../lib/format'
+import { fmtCurrency, fmtDate, unidadEnPalabras } from '../lib/format'
 import type { PriceCatalog } from '../types'
 
 const AUTH_ENABLED = import.meta.env.VITE_AUTH_ENABLED === 'true'
@@ -84,12 +84,14 @@ function origenPropuesta(pr: ObraPropuesta): string {
 // Guarda un precio: si el código ya está sin precio lo completa; si no está, lo crea en el catálogo elegido
 async function guardarPrecio(
   p: ObraPrecio,
-  datos: { precio: number; fecha: string; descripcion?: string; unidad?: string; catalogId: string },
+  datos: { precio: number; fecha?: string; descripcion?: string; unidad?: string; catalogId: string },
 ) {
+  // Without a date the server stamps its own "today" (Buenos Aires): the browser's clock may be on another day
+  const fecha_precio = datos.fecha || undefined
   if (p.problema === 'sin_precio' && p.entradas[0]) {
     return catalogApi.updateEntry(p.entradas[0].catalog_id, p.entradas[0].id, {
       precio_sin_iva: datos.precio,
-      fecha_precio: datos.fecha,
+      fecha_precio,
     })
   }
   if (!datos.catalogId) throw new Error('No hay un catálogo donde guardarlo.')
@@ -99,7 +101,7 @@ async function guardarPrecio(
     unidad: p.unidad || datos.unidad,
     tipo: p.tipo,
     precio_sin_iva: datos.precio,
-    fecha_precio: datos.fecha,
+    fecha_precio,
   })
 }
 
@@ -141,7 +143,7 @@ function PrecioRow({
   function guardar() {
     run(() => guardarPrecio(p, {
       precio: valor,
-      fecha: propuesta?.fecha ?? todayIso(),
+      fecha: propuesta?.fecha ?? undefined,
       descripcion: propuesta?.descripcion,
       unidad: propuesta?.unidad,
       catalogId,
@@ -151,7 +153,7 @@ function PrecioRow({
   function vaEnCero() {
     run(() => guardarPrecio(p, {
       precio: 0,
-      fecha: todayIso(),
+      fecha: undefined,
       descripcion: propuesta?.descripcion,
       unidad: propuesta?.unidad,
       catalogId,
@@ -203,7 +205,7 @@ function PrecioRow({
             {referencias.map((ref) => (
               <div key={ref.id} className="flex flex-wrap items-center gap-2 text-[11px] text-gray-600">
                 <span>
-                  En {ref.catalogo || 'otro catálogo'} estaba a{' '}
+                  En {ref.catalogo || 'otra lista'} estaba a{' '}
                   <strong>{fmtCurrency(ref.precio_sin_iva)}</strong>
                   {ref.fecha_precio && <span className="text-gray-400"> ({fmtDate(ref.fecha_precio)})</span>}
                 </span>
@@ -211,7 +213,7 @@ function PrecioRow({
                   disabled={busy || bloqueado || !ref.precio_sin_iva || (p.problema === 'no_esta' && !catalogId)}
                   onClick={() => run(() => guardarPrecio(p, {
                     precio: ref.precio_sin_iva || 0,
-                    fecha: ref.fecha_precio || todayIso(),
+                    fecha: ref.fecha_precio || undefined,
                     descripcion: ref.descripcion,
                     unidad: ref.unidad,
                     catalogId,
@@ -701,7 +703,7 @@ export default function CargarObra() {
       try {
         await guardarPrecio(p, {
           precio: pr.precio,
-          fecha: pr.fecha ?? todayIso(),
+          fecha: pr.fecha ?? undefined,
           descripcion: pr.descripcion,
           unidad: pr.unidad,
           catalogId: destinoDe(p, elegibles),
@@ -785,10 +787,13 @@ export default function CargarObra() {
       <div className="flex items-center gap-2 text-[#2D8D68] text-[11px] font-bold tracking-wider mb-1">
         <ClipboardCheck size={14} /> CARGAR OBRA
       </div>
-      <div className="flex items-center gap-3 mb-4">
+      <div className="flex items-center gap-3 mb-1">
         <div className="w-1 h-7 bg-[#2D8D68] rounded-full" />
         <h1 className="text-xl font-extrabold text-gray-900">CARGAR UNA OBRA</h1>
       </div>
+      <p className="text-gray-500 text-sm mb-4 ml-4">
+        Subí el cómputo de la obra (hoja 01_C&amp;P): la app le pone las recetas y los precios.
+      </p>
 
       <div className="max-w-5xl space-y-5">
         <div className="flex gap-2 text-xs font-bold">

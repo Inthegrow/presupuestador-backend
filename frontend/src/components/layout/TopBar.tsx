@@ -1,4 +1,4 @@
-import { Bell, Moon, Menu, Plus } from 'lucide-react'
+import { Plus } from 'lucide-react'
 import { rolEnPalabras } from '../../lib/roles'
 import { useAuth } from '../../contexts/AuthContext'
 import { useNavigate } from 'react-router-dom'
@@ -60,24 +60,13 @@ export default function TopBar() {
 
       {/* Right */}
       <div className="flex items-center gap-3">
-        <button className="text-gray-400 hover:text-gray-600 transition-colors">
-          <Moon size={18} />
-        </button>
-        <button className="border rounded-lg px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 flex items-center gap-1.5 transition-colors">
-          <Menu size={14} />
-          VER 360
-        </button>
-        <button className="text-gray-400 hover:text-gray-600 relative transition-colors">
-          <Bell size={18} />
-          <span className="absolute -top-1 -right-1 w-2 h-2 bg-[#E8663C] rounded-full" />
-        </button>
         {puedeEditar && (
           <button
-            onClick={() => navigate('/app/import')}
+            onClick={() => navigate('/app/cargar-obra')}
             className="bg-[#2D8D68] hover:bg-[#1B5E4B] text-white font-semibold px-4 py-1.5 rounded-lg text-xs flex items-center gap-1.5 transition-colors"
           >
             <Plus size={14} />
-            NUEVO
+            CARGAR OBRA
           </button>
         )}
         <div className="flex items-center gap-2">

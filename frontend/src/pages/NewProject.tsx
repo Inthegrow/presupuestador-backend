@@ -916,7 +916,7 @@ function StepPrecios({
       <div className="bg-white rounded-xl border p-6">
         <h2 className="text-lg font-bold text-gray-900 mb-1">Lista de Precios</h2>
         <p className="text-sm text-gray-500 mb-6">
-          Podes cargar un catalogo de precios ahora o hacerlo despues.
+          Podés cargar una lista de precios ahora o hacerlo despues.
         </p>
 
         <div className="grid grid-cols-4 gap-3 mb-6">
@@ -941,7 +941,7 @@ function StepPrecios({
               loadCatalogs()
             }}
             icon={<FileText size={20} />}
-            title="Catalogo existente"
+            title="Lista existente"
             description="Usar uno ya cargado"
           />
           <OptionCard
@@ -1060,12 +1060,12 @@ function StepPrecios({
           <div className="fade-in">
             {catalogs.length === 0 ? (
               <div className="text-sm text-gray-500 bg-gray-50 rounded-lg p-4 text-center">
-                No hay catalogos cargados todavia. Podes subir uno desde la seccion Catalogos.
+                No hay listas de precios cargadas todavía. Podés subir una desde la sección Lista de precios.
               </div>
             ) : (
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Selecciona un catalogo
+                  Seleccioná una lista
                 </label>
                 <select
                   value={selectedCatalog}
@@ -1085,7 +1085,7 @@ function StepPrecios({
 
         {priceOption === 'skip' && (
           <div className="fade-in bg-[#E8F5EE] rounded-lg p-4 border border-green-200 text-sm text-[#143D34]">
-            Vas a poder cargar precios mas tarde desde el Editor o la seccion Catalogos.
+            Vas a poder cargar precios mas tarde desde el Editor o la sección Lista de precios.
           </div>
         )}
       </div>
@@ -1147,7 +1147,7 @@ function StepEstructura({
             active={structureOption === 'template'}
             onClick={() => setStructureOption('template')}
             icon={<ClipboardList size={20} />}
-            title="Plantilla obra"
+            title="Receta de obra"
             description="Tareas tipicas de obra"
           />
           <OptionCard
@@ -1177,7 +1177,7 @@ function StepEstructura({
         {templateTasks.length > 0 && structureOption !== 'template' && (
           <div className="mb-4 bg-[#E8F5EE] rounded-lg px-4 py-2.5 border border-green-200 flex items-center gap-2 text-sm text-[#143D34]">
             <ClipboardList size={14} className="text-[#2D8D68]" />
-            <span className="font-medium">{templateTasks.length} items de plantilla</span>
+            <span className="font-medium">{templateTasks.length} ítems de receta</span>
             <span className="text-gray-500">se van a combinar con esta fuente.</span>
           </div>
         )}
@@ -1541,7 +1541,7 @@ function AIReviewPanel({
             La IA genero {items.length} items.{' '}
             {withTemplate.length > 0 && (
               <span className="text-green-200 font-medium">
-                {withTemplate.length} coinciden con tu biblioteca de templates.{' '}
+                {withTemplate.length} coinciden con tus recetas.{' '}
               </span>
             )}
             Revisa y ajusta antes de crear el presupuesto.
@@ -1627,12 +1627,12 @@ function AIReviewPanel({
                   {item.template_match ? (
                     <span className="inline-flex items-center gap-1 text-[10px] font-medium text-green-700 bg-green-50 border border-green-200 px-2 py-0.5 rounded-full">
                       <Link size={9} />
-                      Template: {item.template_match.nombre}
+                      Receta: {item.template_match.nombre}
                     </span>
                   ) : (
                     <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
                       <AlertTriangle size={9} />
-                      Sin template — se usara composicion estimada por IA
+                      Sin receta — se usara composicion estimada por IA
                     </span>
                   )}
                 </div>

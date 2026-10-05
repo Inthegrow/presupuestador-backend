@@ -87,30 +87,82 @@ Revisar que **toda** consulta use `user["org_id"]` (ya es así en casi todo). El
 ### 4.3 Comprobación
 `npm run build`; prueba en el navegador con `scripts/serve_fake.py` extendido para simular `/me` con dos empresas.
 
-## 5. Puesta en marcha (Carlos, en este orden; cada paso es un SQL para pegar)
+## 5. Puesta en marcha (05/10, con lo que se encontró en las bases)
 
-1. **Leer el `org_id` de TERRAC en la base del presupuestador** (SQL Editor del proyecto DATA):
-   ```sql
-   SELECT org_id, count(*) AS presupuestos FROM budgets GROUP BY org_id;
-   ```
-   Tiene que dar **una** fila. Ese `org_id` es el de `DEMO_ORG_ID` en Render.
-2. **Crear TERRAC en SOLÉ con ese mismo id** (SQL Editor del proyecto `yytuhddgqughemkevbni`), pegando el id:
-   ```sql
-   INSERT INTO public.organizations (id, name, slug, sector, plan)
-   VALUES ('<ORG_ID>', 'TERRAC SA', 'terrac', 'Construcción', 'pro')
-   ON CONFLICT (id) DO NOTHING;
-   -- El trigger de SOLÉ ya suma a los super_admins como admin de TERRAC.
-   INSERT INTO public.invitations (org_id, email, role, name, status)
-   VALUES ('<ORG_ID>', 'sol@…',    'leader', 'Sol',    'pending'),
-          ('<ORG_ID>', 'emilia@…', 'leader', 'Emilia', 'pending'),
-          ('<ORG_ID>', 'carlos@…', 'admin',  'Carlos', 'pending');
-   ```
-3. **Invitar**: en Supabase Auth → Users → "Invite user" con cada mail (o desde SOLÉ, Equipo → Invitar). El mail
-   que les llega los lleva a crear la clave. Al entrar, `accept_my_invitations` les da la membresía en TERRAC.
-   Ojo: el trigger de SOLÉ también les crea una empresa personal ("sol-a1b2c3"); van a ver el selector con dos.
-   Si molesta, borrar esa empresa personal desde SOLÉ (super admin).
-4. **Encender**: Vercel `VITE_AUTH_ENABLED=true` (y redeploy del frontend); Render **borrar `DEMO_ORG_ID`** y Manual Deploy.
-5. **Probar**: sin clave, `/app` manda al login y la API responde 401. Con Sol: entra, ve TERRAC, carga Ginkgo.
+Hay **dos bases de datos**, las dos de producción (no hay staging):
+
+- **SOLÉ** (`yytuhddgqughemkevbni`): usuarios, claves, empresas y membresías. La comparten SOLÉ y el presupuestador.
+  SQL Editor: https://supabase.com/dashboard/project/yytuhddgqughemkevbni/sql/new
+- **Presupuestador** (`pwlhepzmdjmvascsgvkv`, `DATA_SUPABASE_URL` en Render): presupuestos, catálogos, recetas.
+  SQL Editor: https://supabase.com/dashboard/project/pwlhepzmdjmvascsgvkv/sql/new
+
+Lo que se vio el 05/10: en SOLÉ **Terrac SA ya existe** (`ea998891-d7cd-416c-a8cf-ca93a2962167`) y Sol
+(sardito@terrac.com.ar) ya es admin. Pero los datos del presupuestador están atados al id de **IntherArq**
+(`462b39aa-efb8-44f5-b467-8ab59e2af81a`, el `DEMO_ORG_ID` de Render). Hay que moverlos a Terrac.
+
+### Paso 1: mover los datos a Terrac (base del **presupuestador**)
+Pegar entero en el SQL Editor de `pwlhepzmdjmvascsgvkv`. Es una sola sentencia: o se mueve todo o nada. Devuelve
+una fila por tabla con las filas movidas (budgets 6, budget_items 684, catalog_entries 1468, item_templates 73,
+price_catalogs 7, indirect_config 1; las demás lo que haya).
+```sql
+WITH
+u0  AS (UPDATE public.audit_logs            SET org_id = 'ea998891-d7cd-416c-a8cf-ca93a2962167' WHERE org_id = '462b39aa-efb8-44f5-b467-8ab59e2af81a' RETURNING 1),
+u1  AS (UPDATE public.budget_items          SET org_id = 'ea998891-d7cd-416c-a8cf-ca93a2962167' WHERE org_id = '462b39aa-efb8-44f5-b467-8ab59e2af81a' RETURNING 1),
+u2  AS (UPDATE public.budget_versions       SET org_id = 'ea998891-d7cd-416c-a8cf-ca93a2962167' WHERE org_id = '462b39aa-efb8-44f5-b467-8ab59e2af81a' RETURNING 1),
+u3  AS (UPDATE public.budgets               SET org_id = 'ea998891-d7cd-416c-a8cf-ca93a2962167' WHERE org_id = '462b39aa-efb8-44f5-b467-8ab59e2af81a' RETURNING 1),
+u4  AS (UPDATE public.catalog_entries       SET org_id = 'ea998891-d7cd-416c-a8cf-ca93a2962167' WHERE org_id = '462b39aa-efb8-44f5-b467-8ab59e2af81a' RETURNING 1),
+u5  AS (UPDATE public.catalog_price_history SET org_id = 'ea998891-d7cd-416c-a8cf-ca93a2962167' WHERE org_id = '462b39aa-efb8-44f5-b467-8ab59e2af81a' RETURNING 1),
+u6  AS (UPDATE public.indirect_config       SET org_id = 'ea998891-d7cd-416c-a8cf-ca93a2962167' WHERE org_id = '462b39aa-efb8-44f5-b467-8ab59e2af81a' RETURNING 1),
+u7  AS (UPDATE public.item_audits           SET org_id = 'ea998891-d7cd-416c-a8cf-ca93a2962167' WHERE org_id = '462b39aa-efb8-44f5-b467-8ab59e2af81a' RETURNING 1),
+u8  AS (UPDATE public.item_resources        SET org_id = 'ea998891-d7cd-416c-a8cf-ca93a2962167' WHERE org_id = '462b39aa-efb8-44f5-b467-8ab59e2af81a' RETURNING 1),
+u9  AS (UPDATE public.item_templates        SET org_id = 'ea998891-d7cd-416c-a8cf-ca93a2962167' WHERE org_id = '462b39aa-efb8-44f5-b467-8ab59e2af81a' RETURNING 1),
+u10 AS (UPDATE public.obra_recetas_memoria  SET org_id = 'ea998891-d7cd-416c-a8cf-ca93a2962167' WHERE org_id = '462b39aa-efb8-44f5-b467-8ab59e2af81a' RETURNING 1),
+u11 AS (UPDATE public.price_catalogs        SET org_id = 'ea998891-d7cd-416c-a8cf-ca93a2962167' WHERE org_id = '462b39aa-efb8-44f5-b467-8ab59e2af81a' RETURNING 1),
+u12 AS (UPDATE public.standard_tree_nodes   SET org_id = 'ea998891-d7cd-416c-a8cf-ca93a2962167' WHERE org_id = '462b39aa-efb8-44f5-b467-8ab59e2af81a' RETURNING 1),
+u13 AS (UPDATE public.standard_trees        SET org_id = 'ea998891-d7cd-416c-a8cf-ca93a2962167' WHERE org_id = '462b39aa-efb8-44f5-b467-8ab59e2af81a' RETURNING 1)
+SELECT 'audit_logs' AS tabla, (SELECT count(*) FROM u0) AS filas_movidas
+UNION ALL SELECT 'budget_items',          (SELECT count(*) FROM u1)
+UNION ALL SELECT 'budget_versions',       (SELECT count(*) FROM u2)
+UNION ALL SELECT 'budgets',               (SELECT count(*) FROM u3)
+UNION ALL SELECT 'catalog_entries',       (SELECT count(*) FROM u4)
+UNION ALL SELECT 'catalog_price_history', (SELECT count(*) FROM u5)
+UNION ALL SELECT 'indirect_config',       (SELECT count(*) FROM u6)
+UNION ALL SELECT 'item_audits',           (SELECT count(*) FROM u7)
+UNION ALL SELECT 'item_resources',        (SELECT count(*) FROM u8)
+UNION ALL SELECT 'item_templates',        (SELECT count(*) FROM u9)
+UNION ALL SELECT 'obra_recetas_memoria',  (SELECT count(*) FROM u10)
+UNION ALL SELECT 'price_catalogs',        (SELECT count(*) FROM u11)
+UNION ALL SELECT 'standard_tree_nodes',   (SELECT count(*) FROM u12)
+UNION ALL SELECT 'standard_trees',        (SELECT count(*) FROM u13);
+```
+Mientras la clave siga apagada, la app muestra lo de `DEMO_ORG_ID`: después de este paso **la app se ve
+vacía hasta cambiar `DEMO_ORG_ID` a `ea998891-d7cd-416c-a8cf-ca93a2962167` o encender la clave** (paso 3).
+
+### Paso 2: Emilia y Carlos entran a Terrac (base de **SOLÉ**)
+Pegar en el SQL Editor de `yytuhddgqughemkevbni`. Sol ya está; esto suma a los dos de Inthegrow. También los
+verán como equipo de Terrac dentro de SOLÉ; la marca de consultor (`hidden_from_team`) se pone después.
+```sql
+INSERT INTO public.memberships (org_id, user_id, role, name, email)
+VALUES ('ea998891-d7cd-416c-a8cf-ca93a2962167', '02a8afe6-2a62-4954-a5ea-c8932e99b051', 'admin',  'Carlos Sanchez',        'csanchez@inspiring.com.ar'),
+       ('ea998891-d7cd-416c-a8cf-ca93a2962167', 'ea065e27-fae2-4470-8db4-4bc835c0ea95', 'leader', 'María Emilia Gerlero', 'megerlero@inspiring.com.ar')
+ON CONFLICT (org_id, user_id) DO UPDATE SET role = EXCLUDED.role, email = EXCLUDED.email;
+```
+
+### Paso 3: encender
+1. **Vercel** → proyecto del frontend → Settings → Environment Variables → `VITE_AUTH_ENABLED` = `true` →
+   Deployments → Redeploy del último.
+2. **Render** → presupuestador-backend → Environment → borrar `DEMO_ORG_ID` → Save → Manual Deploy.
+
+### Paso 4: probar
+- Sin clave: la app manda al login. Con la clave de SOLÉ de Carlos: entra, elige Terrac SA (va a ver varias
+  empresas, Terrac entre ellas), ve los 6 presupuestos y los catálogos de siempre.
+- Sol entra con su clave de SOLÉ y ve solo Terrac SA. Quién puede entrar: todos los miembros de Terrac en SOLÉ;
+  los `member` (Guillermina, Camila, Nicolás López) solo miran.
+
+### Paso 5 (después): módulo "Presupuestador" en SOLÉ
+SOLÉ ya tiene módulos por empresa (`organizations.features`, `get_org_effective_modules`). Un módulo
+`presupuestador` encendido solo para Terrac, un botón en el menú de SOLÉ que abre la app ya logueada (misma
+clave), y el presupuestador exige que la empresa tenga el módulo. Dos PR chicos, uno por repo.
 
 ## 6. Fuera de este PR
 - Pantalla de equipo (invitar, cambiar rol) dentro del presupuestador: se hace desde SOLÉ por ahora.
