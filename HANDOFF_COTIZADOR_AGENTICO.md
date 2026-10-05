@@ -54,6 +54,18 @@ recetas que no se entienden solos ("DE CASCOTE"). Código `eps` en el Excel cont
 - Borrador de carga en el servidor (seguir desde otra máquina).
 - Limpieza: ramas viejas `claude/*` y `codex/*` en GitHub (Carlos).
 
+*Pedidos de Carlos del 05/10 (tarde):*
+- **Listas repetidas e editor que no respeta la oficial**: en curso (`PLAN_LISTAS_Y_EDITOR.md`).
+- **Auditoría línea por línea de Ginkgo**: por cada trabajo, de dónde sale la diferencia (cantidad por unidad,
+  precio, material de más o de menos, desperdicio, mano de obra, conversión). En curso, resultado como página.
+- **Ayuda dentro de la app**: una sección con la guía paso a paso de Cargar obra (la del artifact) y otra para
+  armar un presupuesto sin Excel (Nuevo Presupuesto).
+- **Excel con otro formato**: hoy Cargar obra exige la hoja `01_C&P` con columnas fijas (A código, B descripción,
+  C unidad, D cantidad, E/J/N/Z costos, desde la fila 8); si no la encuentra dice "El Excel no tiene la hoja
+  01_C&P". Propuesta: un paso "¿Qué columna es cada cosa?" que la app adivina y Sol confirma, guardado por formato.
+- **Cambiar la palabra "receta"** por una de la industria. Propuesta: "Análisis de precio" (lo que en obra se
+  llama análisis de precios unitarios). Decide Carlos; se cambia en toda la app y en la ayuda de una vez.
+
 *Etapas siguientes:* B (estado de cada precio y frase de confianza), C (agentes de recetas y precios, plano →
 cómputo, recargo por piso que pidió Carlos), D (certificación de avance).
 
