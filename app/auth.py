@@ -12,8 +12,9 @@ Company rule (PLAN_LOGIN_SOLE 2.3):
 
 Module (PLAN_MODULO_SOLE 2.1): only companies with SOLÉ's "presupuestador"
 module turned on count (override of the company > its plan > off). While SOLÉ
-has no such module (row missing, tables missing or unreadable) nobody is
-filtered, so this can ship before SOLÉ's migration.
+has not registered the module (no row in ``cfg_modules``) nobody is filtered,
+so this could ship before SOLÉ's migration. Once it exists, a failed read of
+the ``cfg_*`` tables answers 503: an outage never opens access.
 
 Roles are SOLÉ's: ``admin`` (everything), ``leader`` (loads and edits),
 ``member`` (only looks). Routes declare the minimum with ``require_editor`` /
@@ -47,6 +48,7 @@ READ_ONLY = "Tu usuario solo puede mirar."
 ADMIN_ONLY = "Esto lo puede hacer solo un administrador de la empresa."
 NO_PERMISSION = "Tu usuario no tiene permiso para hacer esto."
 NO_MODULE = "Tu empresa no tiene el Presupuestador habilitado. Pedíselo al administrador de SOLÉ."
+MODULE_CHECK_FAILED = "No pudimos verificar el acceso al Presupuestador. Probá de nuevo en un rato."
 
 # Key of this app in SOLÉ's module catalog (cfg_modules.key)
 MODULE_KEY = "presupuestador"
@@ -90,8 +92,9 @@ def _module_enabled(auth_db, orgs: list[dict]) -> set[str] | None:
     Same rule as SOLÉ's ``get_org_effective_modules`` (override > plan > off,
     only if the module ``is_active``), replicated here because that RPC needs
     ``auth.uid()`` and this server reads with the service key.
-    None (no filter) when the module is not in ``cfg_modules`` yet or any
-    ``cfg_*`` read fails: the transition must not lock anyone out.
+    None (no filter) only when SOLÉ has not registered the module yet (no row in
+    ``cfg_modules``): the transition must not lock anyone out. Once it exists, a
+    failed read fails closed with 503: an outage never opens access.
     """
     try:
         modules = (
@@ -119,9 +122,9 @@ def _module_enabled(auth_db, orgs: list[dict]) -> set[str] | None:
             .eq("module_key", MODULE_KEY)
             .execute()
         ).data or []
-    except Exception:
-        logger.warning("Could not read SOLÉ's cfg_* tables: companies are not filtered", exc_info=True)
-        return None
+    except Exception as exc:
+        logger.exception("Could not read SOLÉ's cfg_* tables: access is denied until they answer")
+        raise HTTPException(503, MODULE_CHECK_FAILED) from exc
     by_org = {str(o.get("org_id")): o.get("enabled") for o in overrides}
     by_plan = {str(e.get("plan")): e.get("enabled") for e in entitlements}
     enabled = set()

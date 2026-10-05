@@ -35,9 +35,10 @@
   Pedíselo al administrador de SOLÉ."`.
 - `_fetch_orgs(user_id)`: después de leer membresías y empresas (sumar `plan` al select de `organizations`),
   filtrar las empresas con el módulo encendido:
-  1. Leer `cfg_modules` con `key = MODULE_KEY`. **Si no hay fila, o la tabla no existe / da error: no se filtra**
-     (transición: el PR se puede desplegar antes de correr la migración de SOLÉ). Si hay fila con
-     `is_active = false`: ninguna empresa lo tiene.
+  1. Leer `cfg_modules` con `key = MODULE_KEY`. **Si no hay fila: no se filtra** (transición: el PR se puede
+     desplegar antes de correr la migración de SOLÉ). Si hay fila con `is_active = false`: ninguna empresa lo
+     tiene. **Si cualquiera de las tres lecturas da error: 503** "No pudimos verificar el acceso al
+     Presupuestador. Probá de nuevo en un rato." (corrección de Codex sobre el PR #33, hecha en el #34).
   2. `cfg_org_module_overrides` con `module_key = MODULE_KEY` e `org_id in (...)`.
   3. `cfg_plan_entitlements` con `module_key = MODULE_KEY` (todas las filas: son 4).
   4. Encendido = override de la empresa si existe, si no lo que trae su plan, si no apagado. (Misma regla que
