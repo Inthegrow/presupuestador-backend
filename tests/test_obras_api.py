@@ -124,9 +124,11 @@ class TestAnalizar:
         res = analizar(client)
         assert res.status_code == 200, res.text
         body = res.json()
-        assert set(body) == {"archivo", "titulo_dudoso", "catalogo_oficial", "titulo", "fecha_precios", "resumen",
-                             "tareas", "precios", "recetas", "correcciones_excel", "listo"}
+        assert set(body) == {"archivo", "titulo_dudoso", "catalogo_oficial", "excel_con_precios", "titulo",
+                             "fecha_precios", "resumen", "tareas", "precios", "recetas", "correcciones_excel",
+                             "listo"}
         assert body["catalogo_oficial"] is False
+        assert body["excel_con_precios"] is True
         assert body["titulo_dudoso"] is False  # "obra.xlsx": nothing to compare the title with
         assert body["resumen"] == {
             "rubros": 3, "pisos": 3, "trabajos": 7, "grupos": 6,
@@ -875,3 +877,127 @@ class TestDiferencias:
         db.tables["budgets"][-1]["org_id"] = "otra-org"
         assert diferencias(client).status_code == 404
         assert diferencias(client, "00000000-0000-0000-0000-00000000dead").status_code == 404
+
+
+# ── Excel sin precios ────────────────────────────────────────────────────────
+
+LIMPIEZA = "LIMPIEZA FINAL DE OBRA | gl"
+SIN_RECETA_Y_SIN_PRECIO = "Hay {n} trabajos sin receta y sin precio en el Excel: elegí una receta antes de cargar"
+
+
+def _workbook_sin_precios():
+    """The test obra with quantities only: columns E, J, N and Z empty (no detail sheets)."""
+    wb = _workbook()
+    ws = wb["01_C&P"]
+    for r in range(8, ws.max_row + 1):
+        for col in (5, 10, 14, 26):
+            ws.cell(r, col).value = None
+    return wb
+
+
+def _aristas_recipe(db):
+    """A recipe that looks like ARISTAS, so the card has something to suggest ("Quizás sea")."""
+    db.tables["item_templates"].append({"id": "tmpl-6.9", "org_id": ORG, "codigo": "6.9", "unidad": "m",
+                                        "nombre": "ARISTAS DE YESO", "parametros": [], "recursos": []})
+
+
+class TestExcelSinPrecios:
+    def test_tasks_without_recipe_are_red(self, client, db):
+        _aristas_recipe(db)
+        res = analizar(client, wb=_workbook_sin_precios())
+        assert res.status_code == 200, res.text
+        body = res.json()
+        assert body["excel_con_precios"] is False
+        assert body["resumen"]["total_excel"] == 0
+        tareas = _tareas(body)
+
+        # With a recipe: as always (green, or red for a missing catalog price)
+        assert (tareas[TENSORES]["estado"], tareas[TENSORES]["motivo_rojo"]) == ("verde", None)
+        assert (tareas[TELGOPOR]["estado"], tareas[TELGOPOR]["motivo_rojo"]) == ("rojo", "precio")
+        assert tareas[TELGOPOR]["precios_faltantes"] == ["EPS-500"]
+
+        # Without a recipe: red, the Excel has no price to use; "Quizás sea" still comes
+        for clave in (OBRADOR, ARISTAS):
+            t = tareas[clave]
+            assert (t["estado"], t["motivo_rojo"], t["receta"], t["total_excel"]) == ("rojo", "sin_receta", None, 0)
+        assert tareas[ARISTAS]["sugerencias"][0]["codigo"] == "6.9"
+        assert body["listo"] is False
+
+        # Choosing "the Excel price" on the screen does not help: it is $0
+        body = analizar(client, {OBRADOR: {"plantillas": [], "confirmada": True}}, wb=_workbook_sin_precios()).json()
+        assert _tareas(body)[OBRADOR]["motivo_rojo"] == "sin_receta"
+
+    def test_any_cost_counts_as_prices(self, client, db):
+        wb = _workbook_sin_precios()
+        wb["01_C&P"].cell(9, 10).value = 1000  # OBRADOR's M.O. per unit (J), nothing else
+        assert analizar(client, wb=wb).json()["excel_con_precios"] is True
+
+    def test_load_blocked_until_a_recipe_is_chosen(self, client, db):
+        _fix_eps(db)
+        _aristas_recipe(db)
+        res = cargar(client, wb=_workbook_sin_precios())
+        assert res.status_code == 409
+        detail = res.json()["detail"]
+        assert detail["mensaje"] == SIN_RECETA_Y_SIN_PRECIO.format(n=2)
+        assert sorted(detail["rojos"]) == sorted([OBRADOR, ARISTAS])
+        assert db.tables["budgets"] == []
+
+        res = cargar(client, wb=_workbook_sin_precios(), asignaciones={ARISTAS: {"plantillas": [["6.9", 1]]}})
+        assert res.status_code == 409
+        assert res.json()["detail"] == {
+            "mensaje": "Hay 1 trabajo sin receta y sin precio en el Excel: elegí una receta antes de cargar",
+            "rojos": [OBRADOR]}
+
+        elegidas = {ARISTAS: {"plantillas": [["6.9", 1]]}, OBRADOR: {"plantillas": [["5.1.4", 1]]}}
+        res = cargar(client, wb=_workbook_sin_precios(), asignaciones=elegidas)
+        assert res.status_code == 200, res.text
+        assert res.json()["total_excel"] == 0
+        items = {i["code"]: i for i in db.tables["budget_items"]}
+        assert (items["1.1"]["template_id"], items["4.2.2"]["template_id"]) == ("tmpl-5.1.4", "tmpl-6.9")
+        assert (items["4.2.1"]["excel_neto"], items["4.2.1"]["excel_directo"]) == (0, 0)
+
+        # Nothing to compare against
+        res = diferencias(client, items["1.1"]["budget_id"])
+        assert res.status_code == 409
+        assert res.json()["detail"] == "Este Excel no traía precios: no hay con qué comparar."
+
+    def test_excel_with_prices_and_a_task_at_zero(self, client, db):
+        """The usual Excel: nothing changes, except a task without recipe whose row says $0."""
+        wb = _workbook()
+        ws = wb["01_C&P"]
+        row = ws.max_row + 1
+        for col, value in ((1, "4.3-6"), (2, "LIMPIEZA FINAL DE OBRA"), (3, "gl"), (4, 1), (5, 0), (10, 0),
+                           (14, 0), (26, 0)):
+            ws.cell(row, col, value)
+        body = analizar(client, wb=wb).json()
+        assert body["excel_con_precios"] is True
+        tareas = _tareas(body)
+        assert (tareas[LIMPIEZA]["estado"], tareas[LIMPIEZA]["motivo_rojo"]) == ("rojo", "sin_receta")
+        # The rest as in test_contract
+        assert (tareas[OBRADOR]["estado"], tareas[OBRADOR]["motivo_rojo"]) == ("amarillo", None)
+        assert (tareas[ARISTAS]["estado"], tareas[ARISTAS]["motivo_rojo"]) == ("amarillo", None)
+        assert (tareas[TELGOPOR]["estado"], tareas[TELGOPOR]["motivo_rojo"]) == ("rojo", "precio")
+        assert tareas[TENSORES]["estado"] == "verde"  # $0 in the Excel, but it has a recipe
+        assert body["resumen"]["total_excel"] == 13850.0
+
+        _fix_eps(db)
+        res = cargar(client, wb=wb)
+        assert res.status_code == 409
+        assert res.json()["detail"] == {
+            "mensaje": "Hay 1 trabajo sin receta y sin precio en el Excel: elegí una receta antes de cargar",
+            "rojos": [LIMPIEZA]}
+        # Mixed with another kind of red: the usual message
+        res = cargar(client, wb=wb, asignaciones={ARISTAS: {"plantillas": [["5.1.4", None]]}})
+        assert res.json()["detail"]["mensaje"] == "Hay 2 trabajos en rojo: resolvelos antes de cargar"
+        assert db.tables["budgets"] == []
+
+    def test_differences_with_some_excel_prices_still_compare(self, client, db):
+        _budget_with_excel(db)
+        for i in db.tables["budget_items"]:
+            if i["id"] != "i-lim" and i.get("excel_neto") is not None:
+                i.update(excel_neto=0, excel_directo=0)
+        assert diferencias(client).status_code == 200
+        next(i for i in db.tables["budget_items"] if i["id"] == "i-lim")["excel_neto"] = 0
+        res = diferencias(client)
+        assert res.status_code == 409
+        assert res.json()["detail"] == "Este Excel no traía precios: no hay con qué comparar."
