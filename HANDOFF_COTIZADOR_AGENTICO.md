@@ -55,16 +55,20 @@ recetas que no se entienden solos ("DE CASCOTE"). Código `eps` en el Excel cont
 - Limpieza: ramas viejas `claude/*` y `codex/*` en GitHub (Carlos).
 
 *Pedidos de Carlos del 05/10 (tarde):*
-- **Listas repetidas e editor que no respeta la oficial**: en curso (`PLAN_LISTAS_Y_EDITOR.md`).
+- ✅ **Listas repetidas y editor que no respeta la oficial**: PR #35 mergeado (`PLAN_LISTAS_Y_EDITOR.md`).
 - **Auditoría línea por línea de Ginkgo**: por cada trabajo, de dónde sale la diferencia (cantidad por unidad,
-  precio, material de más o de menos, desperdicio, mano de obra, conversión). En curso, resultado como página.
-- **Ayuda dentro de la app**: una sección con la guía paso a paso de Cargar obra (la del artifact) y otra para
-  armar un presupuesto sin Excel (Nuevo Presupuesto).
+  precio, material de más o de menos, desperdicio, mano de obra, conversión). ✅ Página publicada
+  (https://claude.ai/artifact/MJAhLAA9owk6oTdU2zCwLN), con qué corregir en fórmulas, lista y Excel de Sol.
+- **Ayuda dentro de la app**: en curso con el cambio de palabra (`PLAN_FORMULA_Y_AYUDA.md`): Cargar obra, colores,
+  cómo encuentra la fórmula, Excel de otro formato, lista de precios. La guía de **armar un presupuesto a mano**
+  (Nuevo Presupuesto) va después: Carlos pidió que ese camino tenga "una UX/UI suprema" antes de documentarlo.
+  Cargar el proyecto desde SOLÉ: Carlos no sabe todavía cómo sería; queda abierto.
 - **Excel con otro formato**: hoy Cargar obra exige la hoja `01_C&P` con columnas fijas (A código, B descripción,
   C unidad, D cantidad, E/J/N/Z costos, desde la fila 8); si no la encuentra dice "El Excel no tiene la hoja
   01_C&P". Propuesta: un paso "¿Qué columna es cada cosa?" que la app adivina y Sol confirma, guardado por formato.
-- **Cambiar la palabra "receta"** por una de la industria. Propuesta: "Análisis de precio" (lo que en obra se
-  llama análisis de precios unitarios). Decide Carlos; se cambia en toda la app y en la ayuda de una vez.
+- **Cambiar la palabra "receta"**: Carlos eligió **"fórmula"** (rechazó Análisis de precio, Composición, APU,
+  Ítem tipo). Solo textos; los nombres internos no cambian. La "fórmula" de cantidad de cada material (`Q * …`)
+  pasa a llamarse "Cantidad". En curso (`PLAN_FORMULA_Y_AYUDA.md`).
 
 *Etapas siguientes:* B (estado de cada precio y frase de confianza), C (agentes de recetas y precios, plano →
 cómputo, recargo por piso que pidió Carlos), D (certificación de avance).

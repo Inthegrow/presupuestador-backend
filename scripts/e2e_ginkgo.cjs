@@ -48,9 +48,13 @@ async function subir(page) {
   check('el botón de la barra dice "NUEVO"', (await barra.getByRole('button', { name: 'NUEVO' }).count()) === 1, JSON.stringify(textoBarra))
   check('el menú tiene "Importar Excel"', /Importar Excel/i.test(textoMenu))
   check('el menú tiene "Nuevo Presupuesto"', /Nuevo Presupuesto/i.test(textoMenu))
-  check('el menú dice "Cargar obra", "Lista de precios" y "Recetas"',
-    /Cargar obra/.test(textoMenu) && /Lista de precios/.test(textoMenu) && /Recetas/.test(textoMenu) && !/Templates|Catalogos/.test(textoMenu),
+  check('el menú dice "Cargar obra", "Lista de precios" y "Fórmulas"',
+    /Cargar obra/.test(textoMenu) && /Lista de precios/.test(textoMenu) && /Fórmulas/.test(textoMenu) && !/Recetas|Templates|Catalogos/.test(textoMenu),
     JSON.stringify(textoMenu))
+  check('el menú tiene "Ayuda"', /Ayuda/.test(textoMenu), JSON.stringify(textoMenu))
+  await menu.getByRole('link', { name: 'Ayuda' }).click()
+  check('Ayuda explica cómo encuentra la app la fórmula',
+    await page.getByText('Cómo encuentra la app la fórmula').first().isVisible({ timeout: 10000 }).catch(() => false))
 
   // 1. Lista de precios: todo "solo consulta" al principio; marcamos el Maestro como oficial
   await page.goto(BASE + '/app/catalogs')
@@ -92,7 +96,7 @@ async function subir(page) {
   console.log('espesor del nombre:', texto.includes('(por los 8 cm del nombre)'), texto.includes('(por los 4 cm del nombre)'))
   console.log('frase de estado:', texto.match(/Te faltan[^\n]*|Faltan? \d+ precios?[^\n]*/)?.[0])
   const membrana = page.locator('div.border-l-4').filter({ hasText: 'MEMBRANA LIQUIDA' }).first()
-  console.log('membrana líquida:', (await membrana.innerText()).split('\n').filter((l) => /Para confirmar|Falta resolver|Sin receta|Quizás/.test(l)).join(' | '))
+  console.log('membrana líquida:', (await membrana.innerText()).split('\n').filter((l) => /Para confirmar|Falta resolver|Sin fórmula|Quizás/.test(l)).join(' | '))
 
   // 2c. Panel de precios con las propuestas del Excel (ahora arriba de las tarjetas, abierto si hay rojos)
   const guardarVisible = await page.getByRole('button', { name: /Guardar los \d+ precios que trae el Excel/ }).isVisible().catch(() => false)
@@ -126,21 +130,21 @@ async function subir(page) {
     console.log(t2.match(/Falta resolver[^\n]*|Todo listo[^\n]*/)?.[0], '|', t2.match(/Precios para corregir \(\d+\)|Todos los materiales tienen precio/)?.[0])
   }
 
-  // 2d. "Cambiar" explica qué es el buscador de recetas (PLAN_UX_2, 3.4)
-  const botonCambiar = page.getByRole('button', { name: /^(Cambiar|Elegir receta)$/ }).first()
+  // 2d. "Cambiar" explica qué es el buscador de fórmulas (PLAN_UX_2, 3.4)
+  const botonCambiar = page.getByRole('button', { name: /^(Cambiar|Elegir fórmula)$/ }).first()
   await botonCambiar.click()
-  check('buscador explica qué es', await page.getByText('Elegí la receta correcta para este trabajo. Si ninguna sirve, usá el precio del Excel.').isVisible())
+  check('buscador explica qué es', await page.getByText('Elegí la fórmula correcta para este trabajo. Si ninguna sirve, usá el precio del Excel.').isVisible())
   check('opción verde en dos líneas',
-    await page.getByText('Usar el precio del Excel (sin receta)').isVisible()
+    await page.getByText('Usar el precio del Excel (sin fórmula)').isVisible()
     && await page.getByText('Se carga con lo que cobró tu Excel; la app no desglosa materiales.').isVisible())
   await page.getByRole('button', { name: 'Cerrar', exact: true }).first().click()
 
-  // 2d'. Un trabajo que Sol dejó en $0 (la estructura la hace un subcontratista) puede quedarse sin receta
+  // 2d'. Un trabajo que Sol dejó en $0 (la estructura la hace un subcontratista) puede quedarse sin fórmula
   const cero = page.locator('div.border-l-4').filter({ hasText: 'ESTRUCTURA EN HORMIGON ARMADO' }).first()
   if (await cero.count()) {
     check('la tarjeta en $0 lo dice', (await cero.innerText()).includes('el Excel lo tiene en $0'))
-    await cero.getByRole('button', { name: /Elegir receta|Cambiar/ }).first().click()
-    check('el buscador ofrece dejarlo en $0', await page.getByText('Dejarlo en $0 como en el Excel (sin receta)').isVisible())
+    await cero.getByRole('button', { name: /Elegir fórmula|Cambiar/ }).first().click()
+    check('el buscador ofrece dejarlo en $0', await page.getByText('Dejarlo en $0 como en el Excel (sin fórmula)').isVisible())
     await page.getByRole('button', { name: 'Cerrar', exact: true }).first().click()
   } else {
     check('hay una tarjeta en $0 para probar', false)
@@ -225,7 +229,7 @@ async function subir(page) {
   const botonDirecto = page.getByRole('button', { name: 'Costo directo (sin margen)' })
   const botonFinal = page.getByRole('button', { name: 'Precio final' })
   check('el conmutador arranca en costo directo', (await botonDirecto.getAttribute('aria-pressed')) === 'true')
-  check('línea de costo directo', await page.getByText('Acá se ven las recetas: lo que cuesta hacer cada trabajo, sin margen.').isVisible())
+  check('línea de costo directo', await page.getByText('Acá se ven las fórmulas: lo que cuesta hacer cada trabajo, sin margen.').isVisible())
   check('columnas de costo', /EXCEL \(COSTO\)/i.test(t3) && /APP \(COSTO\)/i.test(t3))
   const tarjetaMargen = page.locator('div.rounded-xl').filter({ hasText: 'Si querés que coincidan, ajustá la cadena de markups del presupuesto.' }).first()
   const textoMargen = await tarjetaMargen.innerText()

@@ -2,7 +2,7 @@ import { NavLink, useNavigate, useLocation } from 'react-router-dom'
 import {
   LayoutGrid, Edit3, BarChart2, Layers,
   Download, Upload, Settings, BookOpen, RefreshCw, LogOut, Plus,
-  ArrowLeft, Library, ClipboardCheck,
+  ArrowLeft, Library, ClipboardCheck, CircleHelp,
 } from 'lucide-react'
 import { useAuth } from '../../contexts/AuthContext'
 import { rolEnPalabras } from '../../lib/roles'
@@ -151,7 +151,12 @@ export default function Sidebar() {
         <nav className="space-y-0.5 text-[13px]">
           <NavItem to="/app/settings/markups" icon={<Settings size={15} />} label="Cadena de Markups" />
           <NavItem to="/app/catalogs" icon={<BookOpen size={15} />} label="Lista de precios" />
-          <NavItem to="/app/templates" icon={<Library size={15} />} label="Recetas" />
+          <NavItem to="/app/templates" icon={<Library size={15} />} label="Fórmulas" />
+        </nav>
+        <div className="border-t my-2 mx-1" />
+        <div className="text-[10px] font-bold text-gray-400 tracking-wider mb-1 px-1">AYUDA</div>
+        <nav className="space-y-0.5 text-[13px]">
+          <NavItem to="/app/ayuda" icon={<CircleHelp size={15} />} label="Ayuda" />
         </nav>
       </div>
 

@@ -736,7 +736,7 @@ def parse_maestro(wb_formulas, wb_values, entries_by_tipo: dict[str, list[dict]]
             by_sig[_signature(tmpl)].append(code)
     for codes in by_sig.values():
         for code in codes[1:]:
-            templates[code]["notas"].append(f"Tiene la misma receta que {codes[0]}: ¿es una copia?")
+            templates[code]["notas"].append(f"Tiene la misma fórmula que {codes[0]}: ¿es una copia?")
 
     notes: list[str] = []
     tree: list[dict] = []
@@ -842,7 +842,7 @@ def report_markdown(parsed: dict, source: str = "") -> str:
     n_rev = sum(1 for t in plantillas for r in t["recursos"] if r.get("revisar"))
     status = {t["codigo"]: template_status(t) for t in plantillas}
 
-    lines = ["# Informe de carga del Maestro TERRAC: recetas y árbol", ""]
+    lines = ["# Informe de carga del Maestro TERRAC: fórmulas y árbol", ""]
     if source:
         lines += [f"Archivo: `{source}`", ""]
     lines += [
@@ -863,7 +863,7 @@ def report_markdown(parsed: dict, source: str = "") -> str:
         "- Los materiales se redondean a unidades enteras **sobre el total de la obra**, "
         "no por ítem.",
         "- **Revisar** = número fijo del ejemplo, código que no está en el catálogo, "
-        "o fórmula que no se pudo traducir.",
+        "o cantidad que no se pudo traducir.",
         "",
         "## Decisiones de la reunión con Sol", "",
         "- 7.2 y 7.3 premarcos: la mano de obra va siempre; el material es opcional "
@@ -883,7 +883,7 @@ def report_markdown(parsed: dict, source: str = "") -> str:
         lines.append("")
 
     lines += ["## Ítem por ítem", "",
-              "✅ = bien · ⚠️ = hay algo para revisar · ⬜ = sin receta", ""]
+              "✅ = bien · ⚠️ = hay algo para revisar · ⬜ = sin fórmula", ""]
     for node in parsed["arbol"]:
         code = node["codigo"]
         if node["nivel"] != "item":

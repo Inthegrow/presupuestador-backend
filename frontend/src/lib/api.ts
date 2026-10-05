@@ -275,7 +275,7 @@ export const templateApi = {
   }) => post<TemplatePreviewResponse>('/templates/preview', data),
 }
 
-// ─── Cargar obra (Excel de la obra + recetas del Maestro) ──────────────────────
+// ─── Cargar obra (Excel de la obra + fórmulas del Maestro) ──────────────────────
 
 export interface ObraPrecio {
   codigo: string
@@ -478,7 +478,7 @@ export interface ObraDiferencias {
   trabajos: ObraDiferenciaTrabajo[]
 }
 
-// Lo que Sol decidió por trabajo: { clave: { plantillas: [[codigo, factor], ...], confirmada? } } ([] = sin receta)
+// Lo que Sol decidió por trabajo: { clave: { plantillas: [[codigo, factor], ...], confirmada? } } ([] = sin fórmula)
 export type ObraAsignaciones = Record<string, { plantillas: [string, number][]; confirmada?: boolean }>
 
 function obraForm(file: File, asignaciones: ObraAsignaciones, extra: Record<string, string> = {}) {

@@ -104,22 +104,22 @@ def _asignaciones(raw: str | None) -> dict[str, dict]:
     try:
         data = json.loads(raw)
     except ValueError as exc:
-        raise HTTPException(400, "No se pudieron leer las recetas elegidas (JSON inválido)") from exc
+        raise HTTPException(400, "No se pudieron leer las fórmulas elegidas (JSON inválido)") from exc
     if not isinstance(data, dict):
-        raise HTTPException(400, "Las recetas elegidas tienen que venir como un objeto")
+        raise HTTPException(400, "Las fórmulas elegidas tienen que venir como un objeto")
     out: dict[str, dict] = {}
     for clave, value in data.items():
         if isinstance(value, list):
             value = {"plantillas": value}
         pares = value.get("plantillas") if isinstance(value, dict) else None
         if not isinstance(pares, list):
-            raise HTTPException(400, f"Receta elegida inválida para '{clave}'")
+            raise HTTPException(400, f"Fórmula elegida inválida para '{clave}'")
         norm = []
         for par in pares:
             if isinstance(par, str):
                 par = [par]
             if not isinstance(par, (list, tuple)) or not par or not str(par[0] or "").strip():
-                raise HTTPException(400, f"Receta elegida inválida para '{clave}'")
+                raise HTTPException(400, f"Fórmula elegida inválida para '{clave}'")
             norm.append([str(par[0]).strip(), _factor(par[1] if len(par) > 1 else None)])
         out[str(clave)] = {"plantillas": norm, "confirmada": bool(value.get("confirmada"))}
     return out
@@ -245,7 +245,7 @@ PORQUE = {
     "regla": "Coincide la descripción",
     "manual": "La elegiste vos",
 }
-NOTA_A_MANO = "Receta elegida a mano al cargar la obra."  # rule_for's note for a hand-picked recipe
+NOTA_A_MANO = "Fórmula elegida a mano al cargar la obra."  # rule_for's note for a hand-picked recipe
 _CODE_IN_NOTE = re.compile(r"\s*\((\d+(?:\.\d+)*)\)")
 _PRETTY_UNIT = {"m2": "m²", "m3": "m³", "u": "unidad"}
 ESTADOS = ("rojo", "amarillo", "verde")
@@ -589,7 +589,7 @@ async def analizar_obra(
     org_id = user["org_id"]
     templates = _templates(db, org_id)
     if not templates:
-        raise HTTPException(409, "No hay recetas cargadas en la app: primero hay que importar el Maestro")
+        raise HTTPException(409, "No hay fórmulas cargadas en la app: primero hay que importar el Maestro")
     result = analyze(parse_obra(wb), templates, PriceBook(db, org_id, today()), _asignaciones(asignaciones),
                      _memoria(db, org_id), excel_prices(wb))
     return {"archivo": file.filename, "titulo_dudoso": titulo_dudoso(result["titulo"], file.filename),
@@ -738,8 +738,8 @@ async def cargar_obra(
         sin_receta = bool(duros) and all(t["motivo_rojo"] == "sin_receta" for t in rojos if t["clave"] in duros)
         if sin_receta:
             mensaje = _plural(len(duros),
-                              "Hay {n} trabajo sin receta y sin precio en el Excel: elegí una receta antes de cargar",
-                              "Hay {n} trabajos sin receta y sin precio en el Excel: elegí una receta antes de cargar")
+                              "Hay {n} trabajo sin fórmula y sin precio en el Excel: elegí una fórmula antes de cargar",
+                              "Hay {n} trabajos sin fórmula y sin precio en el Excel: elegí una fórmula antes de cargar")
         else:
             mensaje = _plural(len(duros) or len(rojos), "Hay {n} trabajo en rojo: resolvelo antes de cargar",
                               "Hay {n} trabajos en rojo: resolvelos antes de cargar")
@@ -758,7 +758,7 @@ async def cargar_obra(
 
     budget = db.table("budgets").insert({
         "org_id": org_id, "name": nombre, "status": "draft", "source_file": file.filename,
-        "description": "Cantidades del Excel de la obra; precios con las recetas del Maestro",
+        "description": "Cantidades del Excel de la obra; precios con las fórmulas del Maestro",
         "indirectos": initial_indirects(db, org_id), "precios_al": book.fecha.isoformat(),
     }).execute().data[0]
     budget_id = budget["id"]
