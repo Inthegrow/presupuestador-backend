@@ -24,7 +24,10 @@ from fastapi.testclient import TestClient
 from app import auth
 from app.auth import (
     CHOOSE_ORG,
+    MODULE_KEY,
     NO_MEMBERSHIP,
+    NO_MODULE,
+    NOT_YOUR_ORG,
     READ_ONLY,
     get_current_user,
     get_user_session,
@@ -203,8 +206,8 @@ BUDGET_B = "00000000-0000-0000-0000-0000000000b1"
 CATALOG_A = "00000000-0000-0000-0000-0000000000ca"
 
 ORGS = [
-    {"id": ORG_A, "name": "TERRAC SA", "slug": "terrac"},
-    {"id": ORG_B, "name": "Obra Demo", "slug": "obra-demo"},
+    {"id": ORG_A, "name": "TERRAC SA", "slug": "terrac", "plan": "pro"},
+    {"id": ORG_B, "name": "Obra Demo", "slug": "obra-demo", "plan": "trial"},
 ]
 
 
@@ -406,3 +409,125 @@ class TestMembershipCache:
         r = client.get("/me", headers=_h("nueva"))
         assert r.status_code == 200
         assert r.json()["org_id"] == ORG_A
+
+
+# ── Módulo "presupuestador" de SOLÉ (PLAN_MODULO_SOLE 2.1) ────────────────────
+
+
+def _module(auth_db, *, is_active=True, overrides=None, plans=None):
+    """Register the module in SOLÉ's cfg_* tables of the fake auth DB."""
+    auth_db.tables["cfg_modules"] = [
+        {"key": "talento", "suite": "sole-core", "is_active": True},
+        {"key": MODULE_KEY, "suite": "growth", "is_active": is_active},
+    ]
+    auth_db.tables["cfg_org_module_overrides"] = [
+        {"id": f"ov-{org}", "org_id": org, "module_key": MODULE_KEY, "enabled": on}
+        for org, on in (overrides or {}).items()
+    ]
+    auth_db.tables["cfg_plan_entitlements"] = [
+        {"plan": plan, "module_key": MODULE_KEY, "enabled": (plans or {}).get(plan, False)}
+        for plan in ("trial", "basic", "pro", "enterprise")
+    ] + [{"plan": "trial", "module_key": "talento", "enabled": True}]
+
+
+def _org_ids(client, user: str) -> list[str]:
+    r = client.get("/me", headers=_h(user))
+    assert r.status_code == 200, r.text
+    return [o["id"] for o in r.json()["orgs"]]
+
+
+class TestModule:
+    def test_text_of_no_module(self):
+        assert NO_MODULE == "Tu empresa no tiene el Presupuestador habilitado. Pedíselo al administrador de SOLÉ."
+
+    def test_without_module_row_nothing_is_filtered(self, client, auth_db):
+        assert _org_ids(client, "carlos") == [ORG_B, ORG_A]
+        # Other modules registered, ours not yet (SOLÉ's migration still to run)
+        auth_db.tables["cfg_modules"] = [{"key": "talento", "is_active": True}]
+        auth_db.tables["cfg_org_module_overrides"] = [
+            {"org_id": ORG_A, "module_key": "talento", "enabled": False},
+        ]
+        auth.clear_membership_cache()
+        assert _org_ids(client, "carlos") == [ORG_B, ORG_A]
+
+    def test_unreadable_cfg_tables_do_not_filter(self, client, auth_db):
+        _module(auth_db, overrides={ORG_A: False, ORG_B: False})
+        original = auth_db.table
+
+        def broken(name):
+            if name == "cfg_plan_entitlements":
+                raise RuntimeError("relation does not exist")
+            return original(name)
+
+        auth_db.table = broken
+        assert _org_ids(client, "carlos") == [ORG_B, ORG_A]
+
+    def test_override_per_company(self, client, auth_db):
+        _module(auth_db, overrides={ORG_A: True, ORG_B: False}, plans={"trial": True})
+        me = client.get("/me", headers=_h("carlos")).json()
+        # Only TERRAC is left, so it is chosen without the picker
+        assert [o["id"] for o in me["orgs"]] == [ORG_A]
+        assert (me["org_id"], me["role"]) == (ORG_A, "admin")
+
+    def test_plan_entitlement_when_no_override(self, client, auth_db):
+        _module(auth_db, plans={"pro": True, "trial": False})
+        assert _org_ids(client, "carlos") == [ORG_A]  # TERRAC is pro, Obra Demo is trial
+
+    def test_override_beats_plan(self, client, auth_db):
+        _module(auth_db, overrides={ORG_A: False, ORG_B: True}, plans={"pro": True})
+        assert _org_ids(client, "carlos") == [ORG_B]
+
+    def test_company_without_plan_or_override_is_off(self, client, auth_db):
+        _module(auth_db, overrides={ORG_A: True})
+        auth_db.tables["organizations"][1]["plan"] = None
+        assert _org_ids(client, "carlos") == [ORG_A]
+
+    def test_inactive_module_leaves_no_company(self, client, auth_db):
+        _module(auth_db, is_active=False, overrides={ORG_A: True, ORG_B: True}, plans={"pro": True})
+        r = client.get("/me", headers=_h("carlos"))
+        assert r.status_code == 403
+        assert r.json()["detail"] == NO_MODULE
+
+    def test_memberships_but_no_company_with_module_is_no_module(self, client, auth_db):
+        _module(auth_db, overrides={ORG_B: True})
+        for path in ("/me", "/budgets"):
+            r = client.get(path, headers=_h("sol"))  # sol is only in TERRAC
+            assert r.status_code == 403, path
+            assert r.json()["detail"] == NO_MODULE
+        # Without memberships it is still the old text
+        r = client.get("/me", headers=_h("nadie"))
+        assert r.status_code == 403
+        assert r.json()["detail"] == NO_MEMBERSHIP
+
+    def test_header_of_a_company_without_module_is_403(self, client, auth_db):
+        _module(auth_db, overrides={ORG_A: True})
+        for path in ("/me", "/budgets"):
+            r = client.get(path, headers=_h("carlos", ORG_B))
+            assert r.status_code == 403, path
+            assert r.json()["detail"] == NOT_YOUR_ORG
+        assert client.get("/budgets", headers=_h("carlos", ORG_A)).status_code == 200
+
+    def test_no_module_is_not_cached(self, client, auth_db):
+        _module(auth_db)
+        assert client.get("/me", headers=_h("sol")).status_code == 403
+        # Turned on from SOLÉ's admin: the next request sees it
+        auth_db.tables["cfg_org_module_overrides"].append(
+            {"id": "ov-new", "org_id": ORG_A, "module_key": MODULE_KEY, "enabled": True},
+        )
+        assert _org_ids(client, "sol") == [ORG_A]
+
+    def test_filtered_list_is_cached(self, client, auth_db):
+        _module(auth_db, overrides={ORG_A: True})
+        assert _org_ids(client, "carlos") == [ORG_A]
+        auth_db.tables["cfg_org_module_overrides"].append(
+            {"id": "ov-b", "org_id": ORG_B, "module_key": MODULE_KEY, "enabled": True},
+        )
+        assert _org_ids(client, "carlos") == [ORG_A]
+        with patch("app.auth.time.monotonic", return_value=auth.time.monotonic() + 61):
+            assert _org_ids(client, "carlos") == [ORG_B, ORG_A]
+
+    def test_demo_mode_ignores_the_module(self, client, auth_db, monkeypatch):
+        _module(auth_db, is_active=False)
+        monkeypatch.setenv("DEMO_ORG_ID", ORG_A)
+        me = client.get("/me").json()
+        assert me["org_id"] == ORG_A and me["role"] == "admin"

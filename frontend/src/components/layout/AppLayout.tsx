@@ -1,4 +1,4 @@
-import { Navigate, Outlet } from 'react-router-dom'
+import { Navigate, Outlet, useLocation } from 'react-router-dom'
 import Sidebar from './Sidebar'
 import TopBar from './TopBar'
 import { useAuth } from '../../contexts/AuthContext'
@@ -9,6 +9,7 @@ const AUTH_ENABLED = import.meta.env.VITE_AUTH_ENABLED === 'true'
 
 function AppLayoutContenido() {
   const { user, loading, org, needsOrgSelect, error, reload } = useAuth()
+  const { search } = useLocation()
 
   if (loading) {
     return (
@@ -23,7 +24,9 @@ function AppLayoutContenido() {
 
   // Sin clave no se ve nada (solo con VITE_AUTH_ENABLED=true; en modo demo no hay sesión)
   if (AUTH_ENABLED && !user) {
-    return <Navigate to="/login" replace />
+    // Keep ?org= (link from SOLÉ) so the login screen still knows it
+    const urlOrg = new URLSearchParams(search).get('org')
+    return <Navigate to={urlOrg ? `/login?org=${encodeURIComponent(urlOrg)}` : '/login'} replace />
   }
 
   // Varias empresas y todavía no eligió una

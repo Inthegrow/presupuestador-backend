@@ -10,6 +10,11 @@ Company rule (PLAN_LOGIN_SOLE 2.3):
 - no header and several companies → 428 "Elegí la empresa" (``GET /me`` is the
   only route that answers anyway, with ``org_id``/``role`` in null).
 
+Module (PLAN_MODULO_SOLE 2.1): only companies with SOLÉ's "presupuestador"
+module turned on count (override of the company > its plan > off). While SOLÉ
+has no such module (row missing, tables missing or unreadable) nobody is
+filtered, so this can ship before SOLÉ's migration.
+
 Roles are SOLÉ's: ``admin`` (everything), ``leader`` (loads and edits),
 ``member`` (only looks). Routes declare the minimum with ``require_editor`` /
 ``require_admin``; a user without a known role is never let through.
@@ -41,6 +46,10 @@ CHOOSE_ORG = "Elegí la empresa"
 READ_ONLY = "Tu usuario solo puede mirar."
 ADMIN_ONLY = "Esto lo puede hacer solo un administrador de la empresa."
 NO_PERMISSION = "Tu usuario no tiene permiso para hacer esto."
+NO_MODULE = "Tu empresa no tiene el Presupuestador habilitado. Pedíselo al administrador de SOLÉ."
+
+# Key of this app in SOLÉ's module catalog (cfg_modules.key)
+MODULE_KEY = "presupuestador"
 
 ROLES = ("admin", "leader", "member")
 DEMO_ORG_NAME = "Empresa demo"
@@ -75,12 +84,64 @@ def clear_membership_cache() -> None:
     _membership_cache.clear()
 
 
-def _fetch_orgs(user_id: str) -> list[dict]:
+def _module_enabled(auth_db, orgs: list[dict]) -> set[str] | None:
+    """Ids of ``orgs`` with the module on, or None when nothing should be filtered.
+
+    Same rule as SOLÉ's ``get_org_effective_modules`` (override > plan > off,
+    only if the module ``is_active``), replicated here because that RPC needs
+    ``auth.uid()`` and this server reads with the service key.
+    None (no filter) when the module is not in ``cfg_modules`` yet or any
+    ``cfg_*`` read fails: the transition must not lock anyone out.
+    """
+    try:
+        modules = (
+            auth_db.table("cfg_modules")
+            .select("key, is_active")
+            .eq("key", MODULE_KEY)
+            .execute()
+        ).data or []
+        if not modules:
+            logger.warning("cfg_modules has no '%s' row: companies are not filtered", MODULE_KEY)
+            return None
+        if not modules[0].get("is_active"):
+            return set()
+        ids = [str(o["id"]) for o in orgs]
+        overrides = (
+            auth_db.table("cfg_org_module_overrides")
+            .select("org_id, enabled")
+            .eq("module_key", MODULE_KEY)
+            .in_("org_id", ids)
+            .execute()
+        ).data or []
+        entitlements = (
+            auth_db.table("cfg_plan_entitlements")
+            .select("plan, enabled")
+            .eq("module_key", MODULE_KEY)
+            .execute()
+        ).data or []
+    except Exception:
+        logger.warning("Could not read SOLÉ's cfg_* tables: companies are not filtered", exc_info=True)
+        return None
+    by_org = {str(o.get("org_id")): o.get("enabled") for o in overrides}
+    by_plan = {str(e.get("plan")): e.get("enabled") for e in entitlements}
+    enabled = set()
+    for org in orgs:
+        org_id = str(org["id"])
+        value = by_org.get(org_id)
+        if value is None:
+            value = by_plan.get(str(org.get("plan")))
+        if value:
+            enabled.add(org_id)
+    return enabled
+
+
+def _fetch_orgs(user_id: str) -> tuple[list[dict], bool]:
     """Read the user's memberships and their companies from the auth DB.
 
     Two queries (memberships by user, organizations by id) instead of a join, so
     the same code runs against PostgREST and the in-memory test DB.
-    Returns ``[{"id", "name", "slug", "role"}]`` sorted by company name.
+    Returns ``([{"id", "name", "slug", "role"}], had_memberships)``: the list has
+    only the companies with the module on, sorted by company name.
     """
     auth_db = get_auth_db()
     memberships = (
@@ -95,16 +156,21 @@ def _fetch_orgs(user_id: str) -> list[dict]:
         if org_id:
             roles[str(org_id)] = m.get("role")
     if not roles:
-        return []
+        return [], False
     orgs = (
         auth_db.table("organizations")
-        .select("id, name, slug")
+        .select("id, name, slug, plan")
         .in_("id", list(roles))
         .execute()
     ).data or []
     by_id = {str(o.get("id")): o for o in orgs}
+    enabled = _module_enabled(
+        auth_db, [{"id": org_id, "plan": (by_id.get(org_id) or {}).get("plan")} for org_id in roles],
+    )
     out = []
     for org_id, role in roles.items():
+        if enabled is not None and org_id not in enabled:
+            continue
         org = by_id.get(org_id) or {}
         out.append({
             "id": org_id,
@@ -113,22 +179,25 @@ def _fetch_orgs(user_id: str) -> list[dict]:
             "role": role,
         })
     out.sort(key=lambda o: (str(o["name"]).lower(), o["id"]))
-    return out
+    return out, True
 
 
 def load_orgs(user_id: str) -> list[dict]:
-    """Memberships of ``user_id``, cached for ``MEMBERSHIP_TTL_SECONDS``.
+    """Companies of ``user_id`` with the module on, cached for ``MEMBERSHIP_TTL_SECONDS``.
 
-    An empty list is not cached: right after ``accept_my_invitations`` the next
-    request has to see the new company.
+    An empty list is not cached: right after ``accept_my_invitations`` (or after
+    turning the module on in SOLÉ) the next request has to see the company.
+    403 ``NO_MODULE`` when the user has memberships but none with the module.
     """
     now = time.monotonic()
     hit = _membership_cache.get(user_id)
     if hit and now - hit[0] < MEMBERSHIP_TTL_SECONDS:
         return copy.deepcopy(hit[1])
-    orgs = _fetch_orgs(user_id)
+    orgs, had_memberships = _fetch_orgs(user_id)
     if orgs:
         _membership_cache[user_id] = (now, orgs)
+    elif had_memberships:
+        raise HTTPException(403, NO_MODULE)
     return copy.deepcopy(orgs)
 
 

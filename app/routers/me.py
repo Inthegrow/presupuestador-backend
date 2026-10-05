@@ -15,6 +15,8 @@ def me(user: dict = Depends(get_user_session)):
 
     With several companies and no ``X-Org-Id`` it still answers 200, with
     ``org_id`` and ``role`` in null: the screen shows the company picker.
+    Only companies with SOLÉ's "presupuestador" module on are listed; 403
+    ``NO_MODULE`` when the user has memberships but none of them has it.
     """
     return {
         "user_id": user["user_id"],

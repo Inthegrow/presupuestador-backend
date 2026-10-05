@@ -1,12 +1,15 @@
 // Prueba del login multiempresa en el navegador, contra vite (5179) + scripts/serve_fake.py
 // levantado con FAKE_DOS_EMPRESAS=1 (usuario con dos empresas: TERRAC SA como leader y Obra Demo como admin).
 // Uso: EXCEL_DIR=<carpeta> NODE_PATH=<node_modules con playwright> node scripts/e2e_login.cjs
+// vite en modo demo (VITE_AUTH_ENABLED=false): no hay login de Supabase, el paso 6 simula la entrada.
 const { chromium } = require('playwright')
 const path = require('path')
 const fs = require('fs')
 
 const S = process.env.EXCEL_DIR || path.join(__dirname, 'excel')
 const BASE = 'http://127.0.0.1:5179'
+const TERRAC = 'test-org-uuid'
+const OBRA_DEMO = '00000000-0000-0000-0000-00000000de30' // DEMO_ORG de scripts/serve_fake.py
 const shots = path.join(S, 'shots-login')
 fs.mkdirSync(shots, { recursive: true })
 
@@ -79,7 +82,7 @@ async function shot(page, name) {
   console.log('pestaña 2 en:', await tab2.getByLabel('Cambiar de empresa').inputValue())
   const enviados = []
   tab1.on('request', (r) => { if (r.url().includes('/api/')) enviados.push(r.headers()['x-org-id']) })
-  await tab1.getByRole('link', { name: 'Catalogos' }).click()
+  await tab1.getByRole('link', { name: 'Lista de precios' }).click()
   await tab1.getByText('Maestro TERRAC - Materiales').waitFor({ timeout: 30000 })
   const soloTerrac = enviados.length > 0 && enviados.every((h) => h === 'test-org-uuid')
   console.log('pestaña 1 sigue pidiendo como TERRAC:', soloTerrac, enviados.slice(0, 3))
@@ -89,6 +92,31 @@ async function shot(page, name) {
   await tab1.screenshot({ path: path.join(shots, '08_dos_pestanas_tab1_terrac.png') })
   await tab2.screenshot({ path: path.join(shots, '08_dos_pestanas_tab2_demo.png') })
   if (!soloTerrac) { console.error('FALLA: una pestaña mandó pedidos con la empresa de la otra'); process.exitCode = 1 }
+
+  // 6. Enlace desde SOLÉ (PLAN_MODULO_SOLE 2.2): /login?org=<Obra Demo> muestra la línea de SOLÉ y, al entrar,
+  // la barra ya está en Obra Demo sin pasar por el selector. Contexto nuevo: sin empresa guardada de los pasos de arriba.
+  // Sin Supabase no hay clave que poner: se hace lo mismo que el formulario al entrar (ir a /app/dashboard sin recargar).
+  const ctxSole = await browser.newContext({ viewport: { width: 1280, height: 900 } })
+  const sole = await ctxSole.newPage()
+  await sole.goto(BASE + '/login?org=' + OBRA_DEMO)
+  await sole.getByText('Entrá con el mismo mail y clave de SOLÉ.').waitFor({ timeout: 30000 })
+  await shot(sole, '09_login_desde_sole')
+  await sole.evaluate(() => { history.pushState({}, '', '/app/dashboard'); dispatchEvent(new PopStateEvent('popstate')) })
+  await sole.getByLabel('Cambiar de empresa').waitFor({ timeout: 30000 })
+  const desdeLogin = await sole.getByLabel('Cambiar de empresa').inputValue()
+  console.log('desde /login?org=Obra Demo entra en:', desdeLogin, '(debe ser ' + OBRA_DEMO + ')')
+  await shot(sole, '10_dashboard_desde_sole')
+  // Lo mismo entrando directo a una pantalla de la app con ?org= (TERRAC)
+  const ctxDirecto = await browser.newContext({ viewport: { width: 1280, height: 900 } })
+  const directo = await ctxDirecto.newPage()
+  await directo.goto(BASE + '/app/dashboard?org=' + TERRAC)
+  await directo.getByLabel('Cambiar de empresa').waitFor({ timeout: 30000 })
+  const desdeApp = await directo.getByLabel('Cambiar de empresa').inputValue()
+  console.log('desde /app/dashboard?org=TERRAC entra en:', desdeApp, '(debe ser ' + TERRAC + ')')
+  if (desdeLogin !== OBRA_DEMO || desdeApp !== TERRAC) {
+    console.error('FALLA: ?org= de la URL no eligió la empresa')
+    process.exitCode = 1
+  }
 
   await browser.close()
 })().catch((e) => { console.error(e); process.exit(1) })
