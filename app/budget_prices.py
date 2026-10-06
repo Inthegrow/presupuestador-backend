@@ -160,6 +160,37 @@ def is_price(found: tuple[float, str | None] | None) -> bool:
     return precio > 0 or (precio == 0 and fecha is not None)
 
 
+MOTIVO_SIN_PRECIO = "No tiene precio"
+
+
+def falta_precio(resource: dict) -> bool:
+    """Whether a saved resource has no usable price (the rule of is_price, on item_resources).
+
+    It counts when it has a code, the client does not buy it, and its price is empty or 0
+    without a date. A dated $0 is a price ("va en $0").
+    """
+    if not normalize_codigo(resource.get("codigo")) or resource.get("lo_compra_cliente"):
+        return False
+    try:
+        precio = float(resource.get("precio_unitario") or 0)
+    except (TypeError, ValueError):
+        precio = 0.0
+    return precio == 0 and resource.get("precio_fecha") in (None, "")
+
+
+def precios_faltantes(resources: list[dict]) -> list[dict]:
+    """[{codigo, descripcion, motivo}] of the resources without a price, one per code."""
+    faltan: dict[str, dict] = {}
+    for r in resources:
+        if falta_precio(r):
+            faltan.setdefault(normalize_codigo(r["codigo"]), {
+                "codigo": r["codigo"],
+                "descripcion": r.get("descripcion"),
+                "motivo": MOTIVO_SIN_PRECIO,
+            })
+    return list(faltan.values())
+
+
 def _dated(entry: dict) -> date | None:
     try:
         return parse_fecha(entry.get("fecha_precio"))

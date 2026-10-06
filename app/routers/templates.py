@@ -8,21 +8,32 @@ template has parameters with default values, waste is inherited
 from __future__ import annotations
 
 import json
+import logging
 from datetime import date
 
 from fastapi import APIRouter, Body, Depends, HTTPException
 
 from app.auth import get_current_user, require_editor
-from app.budget_prices import today
-from app.calculations import calc_item_from_resources, calc_resource_subtotal
-from app.catalog_prices import parse_fecha
+from app.budget_prices import fetch_all, today
+from app.calculations import (
+    calc_item_from_resources,
+    calc_resource_subtotal,
+)
+from app.catalog_prices import normalize_codigo, parse_fecha
 from app.db import get_data_db
 from app.formulas import FormulaError
+from app.obra_import import _scale, _scale_rendimiento, espesor_m_from, match_recipe, unit_key
 from app.recipes import expand_resource, merge_params, param_defaults, validate_template
-from app.routers.obras import PriceBook
+from app.routers.analysis import _restore, _run_cascade, _snapshot
+from app.routers.obras import MOTIVOS, PriceBook
 from app.schemas import TemplateApply, TemplateCreate, TemplatePreview, TemplateUpdate
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
+
+NO_SE_APLICO = "No se pudo aplicar la fórmula. El trabajo quedó como estaba; probá de nuevo."
+A_MEDIAS = "No se pudo aplicar la fórmula y el presupuesto puede haber quedado a medias. Avisá antes de seguir."
 
 
 def _json_list(value: object) -> list:
@@ -40,12 +51,92 @@ def _check_template(recursos: list[dict], parametros: list[dict]) -> None:
         raise HTTPException(422, errors)
 
 
+def _budget_items(db, budget_id: str, org_id: str) -> list[dict]:
+    """Every item of the budget (all pages), in a stable order."""
+    return fetch_all(
+        lambda: db.table("budget_items").select("*")
+        .eq("budget_id", budget_id).eq("org_id", org_id).order("id")
+    )
+
+
 def _precios_al(budget: dict) -> date:
     """Date the budget is priced at: its "precios al", or today when it has none."""
     try:
         return parse_fecha(budget.get("precios_al")) or today()
     except ValueError:
         return today()
+
+
+# ── Unit conversion when applying (same normalization as Cargar obra) ───────
+
+_UNIDAD_LEGIBLE = {"m2": "m²", "m3": "m³"}
+
+
+def _unidad_legible(unidad: object) -> str:
+    """'m2' / 'M2' / 'm²' → 'm²'; any other unit as it is written."""
+    return _UNIDAD_LEGIBLE.get(unit_key(unidad), str(unidad or "").strip())
+
+
+def factor_propuesto(descripcion: str, unidad_trabajo: object, template: dict) -> float | None:
+    """Units of the recipe per unit of the item to propose, or None.
+
+    m³ recipe on a m² item: the thickness in the name ("e=8cm" → 0.08). Otherwise, the
+    rule of Cargar obra (match_recipe) when it uses this recipe and was written for the
+    item's unit: its fixed factor, or its "factor_defecto" (0.10 for a contrapiso).
+    """
+    uf, ut = unit_key(template.get("unidad")), unit_key(unidad_trabajo)
+    if uf == "m3" and ut == "m2":
+        espesor = espesor_m_from(descripcion)
+        if espesor:
+            return espesor
+    rule = match_recipe(descripcion or "")
+    codigo = str(template.get("codigo") or "")
+    if not rule or not codigo:
+        return None
+    for code, factor in rule["plantillas"]:
+        if str(code) != codigo:
+            continue
+        # A fixed factor converts from the unit the rule was written for ("obra")
+        if factor is not None and rule.get("obra") and unit_key(rule["obra"]) == ut:
+            return float(factor)
+        return rule.get("factor_defecto")
+    return None
+
+
+def _num(value: object) -> float | None:
+    try:
+        return float(str(value).replace(",", ".")) if isinstance(value, str) else float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def scale_resource(resource: dict, factor: float) -> dict:
+    """Template resource in item units: Q → (Q*factor), like Cargar obra (expand_item).
+
+    The scaled formula / rendimiento is what item_resources keeps, so a later
+    recalculation (quantity change, parameters, cascade) gives the same result.
+    Old resources without a formula scale their per-unit quantity (they are never
+    re-evaluated).
+    """
+    if factor == 1:
+        return resource
+    scaled = dict(resource)
+    scaled["formula"] = _scale(resource.get("formula"), factor)
+    scaled["rendimiento"] = _scale_rendimiento(resource.get("rendimiento"), factor)
+    if resource.get("formula") in (None, "") and _num(resource.get("cantidad_por_unidad")) is not None:
+        scaled["cantidad_por_unidad"] = _num(resource["cantidad_por_unidad"]) * factor
+    if resource.get("rendimiento") in (None, "") and _num(resource.get("trabajadores_por_unidad")) is not None:
+        scaled["trabajadores_por_unidad"] = _num(resource["trabajadores_por_unidad"]) * factor
+    return scaled
+
+
+MOTIVO_NO_ESTA_OFICIAL = "No está en la lista oficial"
+
+
+def _motivo(problema: str, hay_oficial: bool) -> str:
+    if problema == "no_esta" and hay_oficial:
+        return MOTIVO_NO_ESTA_OFICIAL
+    return MOTIVOS.get(problema) or MOTIVO_NO_ESTA_OFICIAL
 
 
 def org_waste_pct(db, org_id: str) -> float | None:
@@ -213,6 +304,15 @@ async def preview_template(body: TemplatePreview, user: dict = Depends(require_e
     }
 
 
+def mensaje_reemplazo(n: int) -> str:
+    """Warning before a formula replaces what the item already has."""
+    if n == 1:
+        return ("Este trabajo ya tiene 1 recurso cargado (material, mano de obra o subcontrato). "
+                "La fórmula lo reemplaza.")
+    return (f"Este trabajo ya tiene {n} recursos cargados (materiales, mano de obra o subcontratos). "
+            "La fórmula los reemplaza.")
+
+
 @router.post("/{template_id}/apply/{budget_id}/items/{item_id}")
 async def apply_template(
     template_id: str,
@@ -265,6 +365,39 @@ async def apply_template(
     item = item_result.data[0]
     qty = float(item.get("cantidad") or 1)
 
+    # Units: the recipe's and the item's must match, or the conversion must be given
+    if body.factor is not None and body.factor <= 0:
+        raise HTTPException(422, ["El factor tiene que ser mayor que cero"])
+    # Codex (PR #37): resources already in the item (loaded by hand, or another recipe)
+    # are not replaced without asking. Asked before the conversion, so the screen confirms
+    # first and then sends reemplazar=true (and the factor, when it is asked for).
+    if not body.reemplazar:
+        tiene = (
+            db.table("item_resources").select("id").eq("item_id", item_id).eq("org_id", org_id).execute().data
+            or []
+        )
+        if tiene:
+            raise HTTPException(409, {
+                "codigo": "CONFIRMAR_REEMPLAZO",
+                "mensaje": mensaje_reemplazo(len(tiene)),
+                "recursos": len(tiene),
+            })
+
+    uf, ut = unit_key(template.get("unidad")), unit_key(item.get("unidad"))
+    factor = 1.0
+    if uf and ut and uf != ut:
+        if body.factor is None:
+            unidad_formula, unidad_trabajo = _unidad_legible(template.get("unidad")), _unidad_legible(item.get("unidad"))
+            raise HTTPException(409, {
+                "codigo": "FALTA_CONVERSION",
+                "mensaje": (f"La fórmula está en {unidad_formula} y el trabajo en {unidad_trabajo}. "
+                            f"¿Cuántos {unidad_formula} hay en 1 {unidad_trabajo}?"),
+                "unidad_formula": unidad_formula,
+                "unidad_trabajo": unidad_trabajo,
+                "factor_propuesto": factor_propuesto(item.get("description") or "", item.get("unidad"), template),
+            })
+        factor = float(body.factor)
+
     recursos = _json_list(template.get("recursos"))
     parametros = _json_list(template.get("parametros"))
     params = merge_params(param_defaults(parametros), body.parametros)
@@ -275,7 +408,7 @@ async def apply_template(
     try:
         for r in recursos:
             row = expand_resource(
-                r, qty, params,
+                scale_resource(r, factor), qty, params,
                 presupuesto_pct=budget.data[0].get("desperdicio_pct"),
                 plantilla_pct=template.get("desperdicio_pct"),
                 organizacion_pct=org_pct,
@@ -287,10 +420,16 @@ async def apply_template(
     # Same price rule as Cargar obra and "Actualizar precios": oficial catalog first,
     # price in force at the budget's "precios al" date (today when it has none)
     book = PriceBook(db, org_id, _precios_al(budget.data[0])) if any(r["codigo"] for r in rows) else None
-    created = []
+    faltantes: dict[str, dict] = {}
     for row in rows:
         entry, precio, fecha, problema = book.price(row) if book and row["codigo"] else (None, None, None, None)
         con_precio = entry is not None and problema is None  # a dated $0 is a price too
+        if row["codigo"] and not con_precio and not row.get("lo_compra_cliente"):
+            faltantes.setdefault(normalize_codigo(row["codigo"]) or row["codigo"], {
+                "codigo": row["codigo"],
+                "descripcion": row.get("descripcion"),
+                "motivo": _motivo(problema, book.hay_oficial),
+            })
         row.update({
             "item_id": item_id,
             "org_id": org_id,
@@ -300,26 +439,61 @@ async def apply_template(
             "precio_fecha": fecha if con_precio else None,
         })
         calc_resource_subtotal(row)
-        res = db.table("item_resources").insert(row).execute()
-        if res.data:
-            created.append(res.data[0])
 
-    # Recalculate item from its new resources
-    all_resources = (
-        db.table("item_resources")
-        .select("*")
-        .eq("item_id", item_id)
-        .execute()
-    )
-    updated_item = calc_item_from_resources(dict(item), all_resources.data or [])
-    db.table("budget_items").update({
-        "template_id": template_id,
+    # The recipe replaces what the item had (applying twice must not add it twice).
+    # Codex (PR #37): all or nothing. The whole budget is read first; if any write fails
+    # (resources, the item, the cascade), everything goes back to how it was.
+    try:
+        items = _budget_items(db, budget_id, org_id)
+        before = _snapshot(db, org_id, budget.data[0], items)
+    except Exception as exc:
+        logger.exception("Could not read budget %s before applying template %s", budget_id, template_id)
+        raise HTTPException(500, {"codigo": "NO_SE_APLICO", "mensaje": NO_SE_APLICO}) from exc
+    anteriores = [r for r in before["resources"] if str(r.get("item_id")) == item_id]
+
+    try:
+        db.table("item_resources").delete().eq("item_id", item_id).eq("org_id", org_id).execute()
+        created = (db.table("item_resources").insert(rows).execute().data or []) if rows else []
+        if len(created) != len(rows):
+            raise RuntimeError(f"Se guardaron {len(created)} de {len(rows)} recursos")
+
+        # Recalculate the item from its new resources (non-cost fields + a provisional total)
+        all_resources = (
+            db.table("item_resources").select("*").eq("item_id", item_id).eq("org_id", org_id).execute()
+        )
+        updated_item = calc_item_from_resources(dict(item), all_resources.data or [])
+        written = db.table("budget_items").update({
+            "template_id": template_id,
+            "parametros": params,
+            "mat_unitario": updated_item["mat_unitario"],
+            "mo_unitario": updated_item["mo_unitario"],
+        }).eq("id", item_id).eq("org_id", org_id).execute()
+        if not written.data:
+            raise RuntimeError(f"No se actualizó el ítem {item_id}")
+        # Then the same full recalculation as "Recálculo completo" (inherited waste, purchase
+        # rounding over the whole budget, cascade indirects), so the item shows its final price
+        # right away and a later full recalculation does not move it
+        _run_cascade(db, org_id, budget.data[0], _budget_items(db, budget_id, org_id), strict=True)
+    except Exception as exc:
+        logger.exception("Applying template %s to item %s failed", template_id, item_id)
+        try:
+            # The item's old resources were deleted: put them back with their ids,
+            # then every item and resource of the budget as it was
+            db.table("item_resources").delete().eq("item_id", item_id).eq("org_id", org_id).execute()
+            if anteriores:
+                back = db.table("item_resources").insert(anteriores).execute().data or []
+                if len(back) != len(anteriores):
+                    raise RuntimeError(f"Se restauraron {len(back)} de {len(anteriores)} recursos")
+            _restore(db, org_id, before)
+        except Exception:
+            logger.exception("Could not restore budget %s after a failed apply", budget_id)
+            raise HTTPException(500, {"codigo": "A_MEDIAS", "mensaje": A_MEDIAS}) from exc
+        raise HTTPException(500, {"codigo": "NO_SE_APLICO", "mensaje": NO_SE_APLICO}) from exc
+
+    return {
+        "resources_created": len(created),
+        "item_updated": True,
         "parametros": params,
-        "mat_unitario": updated_item["mat_unitario"],
-        "mo_unitario": updated_item["mo_unitario"],
-        "mat_total": updated_item["mat_total"],
-        "mo_total": updated_item["mo_total"],
-        "directo_total": updated_item["directo_total"],
-    }).eq("id", item_id).execute()
-
-    return {"resources_created": len(created), "item_updated": True, "parametros": params}
+        "factor": factor,
+        "precios_faltantes": list(faltantes.values()),
+    }

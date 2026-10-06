@@ -89,6 +89,26 @@ async function conAviso<T>(run: () => Promise<T>): Promise<T> {
   }
 }
 
+// Error de la API con el estado HTTP y, si el servidor mandó JSON, su `detail` ya interpretado.
+// El mensaje sigue siendo `${status}: ${texto}`, como antes, para no romper a quien lo muestra tal cual.
+export class ApiError extends Error {
+  status: number
+  detail: unknown
+  constructor(status: number, text: string) {
+    super(`${status}: ${text}`)
+    this.name = 'ApiError'
+    this.status = status
+    let detail: unknown = text
+    try {
+      const parsed = JSON.parse(text)
+      if (parsed && typeof parsed === 'object' && 'detail' in parsed) detail = (parsed as { detail: unknown }).detail
+    } catch {
+      /* no era JSON: detail queda como texto */
+    }
+    this.detail = detail
+  }
+}
+
 function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   return conAviso(async () => {
     const res = await fetch(`${BASE_URL}${path}`, {
@@ -101,7 +121,7 @@ function request<T>(method: string, path: string, body?: unknown): Promise<T> {
     })
     if (!res.ok) {
       const text = await res.text()
-      throw new Error(`${res.status}: ${text}`)
+      throw new ApiError(res.status, text)
     }
     return res.json() as Promise<T>
   })
@@ -186,6 +206,10 @@ export const budgetApi = {
   deleteResource: (budgetId: string, itemId: string, resourceId: string) =>
     del<void>(`/budgets/${budgetId}/items/${itemId}/resources/${resourceId}`),
 
+  // Materiales sin precio, calculado por el servidor sobre los recursos guardados
+  preciosFaltantes: (budgetId: string, itemId: string) =>
+    get<{ precios_faltantes: PrecioFaltante[] }>(`/budgets/${budgetId}/items/${itemId}/precios-faltantes`),
+
   // Full recalculation: formulas, inherited waste, purchase rounding, indirects
   cascadeRecalculate: (budgetId: string) =>
     post<CascadeResult>(`/budgets/${budgetId}/cascade-recalculate`),
@@ -212,7 +236,9 @@ export const budgetApi = {
   // Excel import/export
   importExcel: (formData: FormData) => postFile<{ budget_id: string; budget_name: string; items_inserted: number; resources_inserted: number; catalog_entries: number; date_codes_corrected: number; catalog_id: string | null; catalog_reused: boolean; catalog_name: string | null; precios_actualizados: number; precios_nuevos: number }>('/budgets/import-excel', formData),
   exportExcel: (id: string) => getBlob(`/budgets/${id}/export/excel`),
-  exportPdf: (id: string) => getBlob(`/budgets/${id}/export/pdf`),
+  // vista 'cliente': PDF con el precio de venta por trabajo, sin costos internos
+  exportPdf: (id: string, vista?: 'cliente') =>
+    getBlob(`/budgets/${id}/export/pdf${vista ? `?vista=${vista}` : ''}`),
 
   // AI Plan analysis
   analyzePlan: (id: string, formData: FormData) =>
@@ -253,6 +279,58 @@ export const budgetApi = {
 
 // ─── Template API ──────────────────────────────────────────────────────────────
 
+export interface PrecioFaltante {
+  codigo: string
+  descripcion: string | null
+  motivo: string
+}
+
+export interface TemplateApplyResult {
+  resources_created: number
+  item_updated: boolean
+  precios_faltantes?: PrecioFaltante[]
+}
+
+// Detalle del 409 cuando la unidad de la fórmula no coincide con la del trabajo y no se mandó `factor`
+export interface FaltaConversion {
+  codigo: 'FALTA_CONVERSION'
+  mensaje: string
+  unidad_formula: string
+  unidad_trabajo: string
+  factor_propuesto: number | null
+}
+
+export function esFaltaConversion(err: unknown): err is ApiError & { detail: FaltaConversion } {
+  if (!(err instanceof ApiError) || err.status !== 409) return false
+  const d = err.detail as { codigo?: unknown } | null
+  return !!d && typeof d === 'object' && d.codigo === 'FALTA_CONVERSION'
+}
+
+// Detalle del 409 cuando el trabajo ya tiene recursos y no se mandó `reemplazar: true`
+export interface ConfirmarReemplazo {
+  codigo: 'CONFIRMAR_REEMPLAZO'
+  mensaje: string
+  recursos: number
+}
+
+/** 500 de aplicar una fórmula: NO_SE_APLICO (quedó como estaba) o A_MEDIAS (falló también la restauración). */
+export interface FalloAplicar {
+  codigo: 'NO_SE_APLICO' | 'A_MEDIAS'
+  mensaje: string
+}
+
+export function esFalloAplicar(err: unknown): err is ApiError & { detail: FalloAplicar } {
+  if (!(err instanceof ApiError)) return false
+  const d = err.detail as { codigo?: unknown } | null
+  return !!d && typeof d === 'object' && (d.codigo === 'NO_SE_APLICO' || d.codigo === 'A_MEDIAS')
+}
+
+export function esConfirmarReemplazo(err: unknown): err is ApiError & { detail: ConfirmarReemplazo } {
+  if (!(err instanceof ApiError) || err.status !== 409) return false
+  const d = err.detail as { codigo?: unknown } | null
+  return !!d && typeof d === 'object' && d.codigo === 'CONFIRMAR_REEMPLAZO'
+}
+
 export const templateApi = {
   list: (categoria?: string) =>
     get<any[]>(`/templates${categoria ? `?categoria=${encodeURIComponent(categoria)}` : ''}`),
@@ -261,10 +339,15 @@ export const templateApi = {
   create: (data: any) => post<any>('/templates', data),
   update: (id: string, data: any) => patch<any>(`/templates/${id}`, data),
   remove: (id: string) => del<{ ok: boolean }>(`/templates/${id}`),
-  apply: (templateId: string, budgetId: string, itemId: string, parametros?: Record<string, number>) =>
-    post<{ resources_created: number; item_updated: boolean }>(
+  apply: (
+    templateId: string,
+    budgetId: string,
+    itemId: string,
+    opts?: { parametros?: Record<string, number>; factor?: number; reemplazar?: boolean },
+  ) =>
+    post<TemplateApplyResult>(
       `/templates/${templateId}/apply/${budgetId}/items/${itemId}`,
-      parametros ? { parametros } : undefined,
+      opts && (opts.parametros || opts.factor !== undefined || opts.reemplazar !== undefined) ? opts : undefined,
     ),
   preview: (data: {
     cantidad: number

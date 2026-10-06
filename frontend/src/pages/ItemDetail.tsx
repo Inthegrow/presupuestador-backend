@@ -1,5 +1,5 @@
-import { useEffect, useState, useCallback } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useEffect, useRef, useState, useCallback } from 'react'
+import { useParams, useNavigate, Link } from 'react-router-dom'
 import {
   ChevronRight,
   ChevronDown,
@@ -17,8 +17,10 @@ import {
   Save,
   ArrowLeft,
   Library,
+  AlertTriangle,
 } from 'lucide-react'
-import { budgetApi, templateApi } from '../lib/api'
+import { budgetApi, templateApi, esFaltaConversion, esConfirmarReemplazo, esFalloAplicar } from '../lib/api'
+import type { FaltaConversion, PrecioFaltante } from '../lib/api'
 import { useAuth } from '../contexts/AuthContext'
 import { fmtCurrency, fmtNumber, fmtPercent } from '../lib/format'
 import type { ItemResource, BudgetItem, Budget, ItemAudit, IndirectConfig } from '../types'
@@ -723,17 +725,27 @@ function ItemParams({
 interface TemplateModalProps {
   budgetId: string
   itemId: string
-  onApplied: () => void
+  // true si el trabajo ya tiene fórmula o recursos: aplicar otra los reemplaza
+  reemplaza: boolean
+  // cuántos recursos tiene cargados ahora (para el texto de la confirmación)
+  recursosCargados: number
+  onApplied: () => Promise<void> | void
   onClose: () => void
 }
 
-function TemplateModal({ budgetId, itemId, onApplied, onClose }: TemplateModalProps) {
+// Paso intermedio antes de aplicar: confirmar el reemplazo o responder la conversión de unidades
+type Paso =
+  | { tipo: 'confirmar'; tmpl: any; mensaje: string }
+  | { tipo: 'conversion'; tmpl: any; det: FaltaConversion; valor: string; reemplazar: boolean }
+
+function TemplateModal({ budgetId, itemId, reemplaza, recursosCargados, onApplied, onClose }: TemplateModalProps) {
   const [templates, setTemplates] = useState<any[]>([])
   const [categories, setCategories] = useState<string[]>([])
   const [selectedCat, setSelectedCat] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [applying, setApplying] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [paso, setPaso] = useState<Paso | null>(null)
 
   useEffect(() => {
     Promise.all([templateApi.list(), templateApi.categories()])
@@ -751,17 +763,67 @@ function TemplateModal({ budgetId, itemId, onApplied, onClose }: TemplateModalPr
     ? templates.filter((t) => t.categoria === selectedCat)
     : templates
 
-  const handleApply = async (templateId: string) => {
-    setApplying(templateId)
+  // Texto de la confirmación según lo que la pantalla sabe del trabajo
+  const mensajeReemplazo = () =>
+    recursosCargados > 0
+      ? recursosCargados === 1
+        ? 'Este trabajo ya tiene 1 recurso cargado (material, mano de obra o subcontrato). La fórmula lo reemplaza.'
+        : `Este trabajo ya tiene ${recursosCargados} recursos cargados (materiales, mano de obra o subcontratos). La fórmula los reemplaza.`
+      : 'Reemplaza los materiales y la mano de obra que tiene ahora.'
+
+  // Pide al servidor aplicar la fórmula. Si el trabajo ya tiene recursos pide confirmar (409 CONFIRMAR_REEMPLAZO);
+  // si falta la conversión de unidades, abre el recuadro para responderla. `reemplazar` se arrastra en todos los reenvíos.
+  const aplicar = async (tmpl: any, opts: { factor?: number; reemplazar?: boolean } = {}) => {
+    setApplying(tmpl.id)
     setError(null)
     try {
-      await templateApi.apply(templateId, budgetId, itemId)
-      onApplied()
+      const body: { factor?: number; reemplazar?: boolean } = {}
+      if (opts.factor !== undefined) body.factor = opts.factor
+      if (opts.reemplazar) body.reemplazar = true
+      await templateApi.apply(tmpl.id, budgetId, itemId, Object.keys(body).length ? body : undefined)
+      await onApplied()
       onClose()
-    } catch {
-      setError('Error al aplicar la fórmula. Intentá de nuevo.')
+    } catch (err) {
+      if (esConfirmarReemplazo(err)) {
+        setPaso({ tipo: 'confirmar', tmpl, mensaje: err.detail.mensaje || mensajeReemplazo() })
+      } else if (esFaltaConversion(err)) {
+        const prop = err.detail.factor_propuesto
+        setPaso({
+          tipo: 'conversion',
+          tmpl,
+          det: err.detail,
+          valor: prop != null ? String(prop).replace('.', ',') : '',
+          reemplazar: !!opts.reemplazar,
+        })
+      } else if (esFalloAplicar(err)) {
+        setPaso(null)
+        // El mensaje del servidor dice si quedó como estaba o si hay que revisar antes de seguir
+        setError(err.detail.mensaje)
+        // Si pudo quedar a medias, mostrar lo que hay guardado de verdad (sin cerrar el aviso)
+        if (err.detail.codigo === 'A_MEDIAS') Promise.resolve(onApplied()).catch(() => {})
+      } else {
+        setPaso(null)
+        setError('Error al aplicar la fórmula. Intentá de nuevo.')
+      }
       setApplying(null)
     }
+  }
+
+  // Al elegir una fórmula: si el trabajo ya tiene una, primero se pide confirmación en la misma ventana
+  const handleElegir = (tmpl: any) => {
+    setError(null)
+    if (reemplaza) setPaso({ tipo: 'confirmar', tmpl, mensaje: mensajeReemplazo() })
+    else aplicar(tmpl)
+  }
+
+  const enviarConversion = () => {
+    if (!paso || paso.tipo !== 'conversion') return
+    const n = Number(paso.valor.trim().replace(',', '.'))
+    if (!Number.isFinite(n) || n <= 0) {
+      setError('Escribí un número mayor que cero.')
+      return
+    }
+    aplicar(paso.tmpl, { factor: n, reemplazar: paso.reemplazar })
   }
 
   return (
@@ -782,7 +844,7 @@ function TemplateModal({ budgetId, itemId, onApplied, onClose }: TemplateModalPr
         </div>
 
         {/* Category tabs */}
-        {categories.length > 0 && (
+        {!paso && categories.length > 0 && (
           <div className="px-4 pt-3 pb-2 flex gap-2 flex-wrap flex-shrink-0 border-b border-gray-100">
             {categories.map((cat) => (
               <button
@@ -800,7 +862,92 @@ function TemplateModal({ budgetId, itemId, onApplied, onClose }: TemplateModalPr
           </div>
         )}
 
+        {/* Confirmar el reemplazo */}
+        {paso?.tipo === 'confirmar' && (
+          <div className="px-4 py-4 flex-shrink-0">
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-800">
+              <div className="font-semibold text-[#143D34] mb-1">{paso.tmpl.nombre}</div>
+              <p>{paso.mensaje}</p>
+              <div className="flex items-center gap-2 mt-3">
+                <button
+                  onClick={() => aplicar(paso.tmpl, { reemplazar: true })}
+                  disabled={applying !== null}
+                  className="flex items-center gap-1.5 text-xs bg-[#2D8D68] hover:bg-[#1E6B4E] text-white px-3 py-1.5 rounded-lg font-medium transition-colors disabled:opacity-50"
+                >
+                  {applying !== null ? (
+                    <>
+                      <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      Aplicando...
+                    </>
+                  ) : (
+                    'Reemplazar'
+                  )}
+                </button>
+                <button
+                  onClick={() => { setPaso(null); setError(null) }}
+                  disabled={applying !== null}
+                  className="text-xs bg-white border text-gray-700 px-3 py-1.5 rounded-lg font-semibold hover:bg-gray-50 disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* La unidad de la fórmula no es la del trabajo: preguntar cuánto es */}
+        {paso?.tipo === 'conversion' && (
+          <div className="px-4 py-4 flex-shrink-0">
+            <div className="bg-gray-50 rounded-xl px-4 py-3 text-xs text-gray-700">
+              <div className="font-semibold text-[#143D34] text-sm mb-1">{paso.tmpl.nombre}</div>
+              <div className="flex flex-wrap items-center gap-2">
+                <span>{paso.det.mensaje}</span>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  autoFocus
+                  value={paso.valor}
+                  onChange={(e) => setPaso({ ...paso, valor: e.target.value })}
+                  onKeyDown={(e) => { if (e.key === 'Enter') enviarConversion() }}
+                  className="border rounded-lg px-2 py-1 w-24 bg-white"
+                />
+                <span className="text-gray-500">{paso.det.unidad_formula}</span>
+              </div>
+              <p className="text-[11px] text-gray-500 mt-1.5">
+                Para contrapisos y carpetas es el espesor en metros: 10 cm = 0,10
+              </p>
+              <div className="flex items-center gap-2 mt-3">
+                <button
+                  onClick={enviarConversion}
+                  disabled={applying !== null}
+                  className="flex items-center gap-1.5 text-xs bg-[#2D8D68] hover:bg-[#1E6B4E] text-white px-3 py-1.5 rounded-lg font-medium transition-colors disabled:opacity-50"
+                >
+                  {applying !== null ? (
+                    <>
+                      <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      Aplicando...
+                    </>
+                  ) : (
+                    <>
+                      <Check size={12} />
+                      Aplicar
+                    </>
+                  )}
+                </button>
+                <button
+                  onClick={() => { setPaso(null); setError(null) }}
+                  disabled={applying !== null}
+                  className="text-xs bg-white border text-gray-700 px-3 py-1.5 rounded-lg font-semibold hover:bg-gray-100 disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Template list */}
+        {!paso && (
         <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
           {loading && (
             <div className="flex items-center gap-2 text-sm text-gray-400 py-6 justify-center">
@@ -839,7 +986,7 @@ function TemplateModal({ budgetId, itemId, onApplied, onClose }: TemplateModalPr
                     </div>
                   </div>
                   <button
-                    onClick={() => handleApply(tmpl.id)}
+                    onClick={() => handleElegir(tmpl)}
                     disabled={isApplying || applying !== null}
                     className="flex items-center gap-1.5 text-xs bg-[#2D8D68] hover:bg-[#1E6B4E] text-white px-3 py-1.5 rounded-lg font-medium transition-colors disabled:opacity-50 flex-shrink-0"
                   >
@@ -860,6 +1007,7 @@ function TemplateModal({ budgetId, itemId, onApplied, onClose }: TemplateModalPr
             )
           })}
         </div>
+        )}
 
         {/* Error */}
         {error && (
@@ -893,6 +1041,23 @@ export default function ItemDetail() {
   const [memoriaDraft, setMemoriaDraft] = useState('')
   const [memoriaSaving, setMemoriaSaving] = useState(false)
   const [templateModalOpen, setTemplateModalOpen] = useState(false)
+  // Materiales sin precio, tal como los calcula el servidor sobre lo guardado
+  const [faltantes, setFaltantes] = useState<PrecioFaltante[]>([])
+  const faltantesReq = useRef(0)
+
+  // Pide el aviso al servidor; si falla, sin aviso. Se ignoran respuestas viejas si hubo un pedido más nuevo.
+  const refrescarFaltantes = useCallback(async () => {
+    if (!id || !itemId) return
+    const req = ++faltantesReq.current
+    let lista: PrecioFaltante[] = []
+    try {
+      const r = await budgetApi.preciosFaltantes(id, itemId)
+      lista = Array.isArray(r?.precios_faltantes) ? r.precios_faltantes : []
+    } catch {
+      lista = []
+    }
+    if (req === faltantesReq.current) setFaltantes(lista)
+  }, [id, itemId])
 
   const loadData = useCallback(async (cancelled?: { v: boolean }) => {
     if (!id || !itemId) {
@@ -916,12 +1081,13 @@ export default function ItemDetail() {
       setRecursos(Array.isArray(res) ? res : [])
       if (ind) setIndirects(ind)
       if (!it) setError('No se encontro el item.')
+      refrescarFaltantes()
     } catch {
       if (!cancelled?.v) setError('Error cargando datos del item.')
     } finally {
       if (!cancelled?.v) setLoading(false)
     }
-  }, [id, itemId])
+  }, [id, itemId, refrescarFaltantes])
 
   const reloadResources = useCallback(async () => {
     if (!id || !itemId) return
@@ -936,7 +1102,8 @@ export default function ItemDetail() {
     } catch {
       // silent
     }
-  }, [id, itemId])
+    refrescarFaltantes()
+  }, [id, itemId, refrescarFaltantes])
 
   useEffect(() => {
     const cancelled = { v: false }
@@ -1027,7 +1194,7 @@ export default function ItemDetail() {
             className="flex items-center gap-1.5 text-xs bg-[#2D8D68] hover:bg-[#1E6B4E] text-white px-3 py-1.5 rounded-lg font-medium transition-colors"
           >
             <Library size={13} />
-            Cargar fórmula
+            {item?.template_id ? 'Cambiar fórmula' : 'Cargar fórmula'}
           </button>
           )}
         </div>
@@ -1041,6 +1208,8 @@ export default function ItemDetail() {
         <TemplateModal
           budgetId={id}
           itemId={itemId}
+          reemplaza={!!item?.template_id || recursos.length > 0}
+          recursosCargados={recursos.length}
           onApplied={reloadResources}
           onClose={() => setTemplateModalOpen(false)}
         />
@@ -1089,6 +1258,18 @@ export default function ItemDetail() {
           ))}
         </div>
       </div>
+
+      {faltantes.length > 0 && (
+        <div className="mb-4 flex items-start gap-2 text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+          <AlertTriangle size={14} className="flex-shrink-0 mt-0.5" />
+          <div>
+            Faltan precios:{' '}
+            {faltantes.slice(0, 5).map((f) => f.descripcion || f.codigo).join(', ')}
+            {faltantes.length > 5 && ` y ${faltantes.length - 5} más`}.{' '}
+            <Link to="/app/catalogs" className="underline font-semibold">Cargalos en Lista de precios.</Link>
+          </div>
+        </div>
+      )}
 
       {item && id && <ItemParams budgetId={id} item={item} onSaved={reloadResources} />}
 

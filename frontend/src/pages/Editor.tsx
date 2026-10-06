@@ -184,7 +184,9 @@ export default function Editor() {
     try {
       await budgetApi.recalculate(id)
       await budgetApi.applyIndirects(id)
-      await refreshData()
+      const data = await refreshData()
+      // Refresca también la lista visible del rubro elegido (si no, la tabla queda con los números viejos)
+      if (data && selectedNode) setItems(getItemsForNode(selectedNode, data.items))
     } catch (err) {
       console.error('Error recalculating:', err)
     } finally {
