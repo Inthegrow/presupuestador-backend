@@ -658,8 +658,10 @@ RESOURCES_CHUNK = 200  # item ids per item_resources request
 
 @router.get("/{budget_id}/precios-faltantes")
 async def get_budget_missing_prices(budget_id: UUID, user: dict = Depends(get_current_user)):
-    """How many codes without a price each item has (the dot of the editor's table), with
-    the rule of GET .../items/{item_id}/precios-faltantes. Resources are read in bulk."""
+    """How many codes without a price each item has, and how many resources it has (the dot
+    of the editor's table), with the rule of GET .../items/{item_id}/precios-faltantes.
+    Resources are read in bulk. The resource count is real: a formula can leave no resources
+    (an empty formula, or all of them deleted later), and that item is not "listo"."""
     db = get_data_db()
     org_id = user["org_id"]
     bid = str(budget_id)
@@ -675,7 +677,10 @@ async def get_budget_missing_prices(budget_id: UUID, user: dict = Depends(get_cu
             .eq("org_id", org_id).in_("item_id", chunk).order("id")
         ):
             por_item.setdefault(str(r["item_id"]), []).append(r)
-    return {"por_item": {i: len(precios_faltantes(rs)) for i, rs in por_item.items()}}
+    return {
+        "por_item": {i: len(precios_faltantes(rs)) for i, rs in por_item.items()},
+        "recursos_por_item": {i: len(rs) for i, rs in por_item.items()},
+    }
 
 
 # ── Resource helpers ────────────────────────────────────────────────────────

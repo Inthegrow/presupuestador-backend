@@ -57,7 +57,7 @@ export default function Editor() {
   // Rubro que Sol eligió a mano en el árbol: los trabajos nuevos van ahí (la selección automática no cuenta)
   const [rubroElegido, setRubroElegido] = useState<TreeNode | null>(null)
   // Precios que faltan en cada trabajo, y de qué trabajos se preguntó (null: la consulta falló o no volvió)
-  const [faltantes, setFaltantes] = useState<{ porItem: Record<string, number>; ids: Set<string> } | null>(null)
+  const [faltantes, setFaltantes] = useState<{ porItem: Record<string, number>; recursosPorItem: Record<string, number>; ids: Set<string> } | null>(null)
   const faltantesReq = useRef(0)
   const [indirectConfig, setIndirectConfig] = useState<{estructura_pct: number, jefatura_pct: number, logistica_pct: number, herramientas_pct: number} | null>(null)
 
@@ -177,7 +177,11 @@ export default function Editor() {
     try {
       const r = await budgetApi.preciosFaltantesPorItem(id)
       const porItem = r && typeof r.por_item === 'object' && r.por_item !== null ? r.por_item : null
-      if (req === faltantesReq.current) setFaltantes(porItem ? { porItem, ids } : null)
+      const recursosPorItem = r && typeof r.recursos_por_item === 'object' && r.recursos_por_item !== null
+        ? r.recursos_por_item : null
+      if (req === faltantesReq.current) {
+        setFaltantes(porItem && recursosPorItem ? { porItem, recursosPorItem, ids } : null)
+      }
     } catch {
       if (req === faltantesReq.current) setFaltantes(null)
     }

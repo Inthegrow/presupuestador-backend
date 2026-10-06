@@ -314,7 +314,8 @@ class TestMissingPricesOfTheBudget:
         ]
         r = self._get(client)
         assert r.status_code == 200, r.text
-        assert r.json() == {"por_item": {ITEM: 2, "i31": 0, "i32": 0}}
+        assert r.json() == {"por_item": {ITEM: 2, "i31": 0, "i32": 0},
+                            "recursos_por_item": {ITEM: 4, "i31": 2, "i32": 0}}
 
     def test_reads_the_resources_in_bulk(self, client, db):
         for n in range(5):
@@ -337,6 +338,24 @@ class TestMissingPricesOfTheBudget:
         por_item = self._get(client).json()["por_item"]
         assert por_item[r.json()["item"]["id"]] == len(r.json()["precios_faltantes"]) == 2
         assert r.json()["rubro"]["id"] not in por_item
+
+    def test_counts_the_real_resources(self, client, db):
+        # Codex, PR #41: a formula that leaves no resources must not look "listo" in the table
+        originales = copy.deepcopy(db.tables["item_templates"][0]["recursos"])
+        db.tables["item_templates"][0]["recursos"] = []
+        r = agregar(client)
+        assert r.status_code == 200, r.text
+        nuevo = r.json()["item"]["id"]
+        body = self._get(client).json()
+        assert body["por_item"][nuevo] == 0
+        assert body["recursos_por_item"][nuevo] == 0
+        # and with the formula's resources, deleting all of them later also gives 0
+        db.tables["item_templates"][0]["recursos"] = originales
+        r = agregar(client)
+        otro = r.json()["item"]["id"]
+        assert self._get(client).json()["recursos_por_item"][otro] > 0
+        db.tables["item_resources"] = [x for x in db.tables["item_resources"] if x["item_id"] != otro]
+        assert self._get(client).json()["recursos_por_item"][otro] == 0
 
     def test_other_company(self, client, db):
         db.tables["budgets"][0]["org_id"] = "other-org"

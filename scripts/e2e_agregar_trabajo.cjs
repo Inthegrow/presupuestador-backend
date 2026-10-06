@@ -121,6 +121,19 @@ const j = async (method, url, body) => (await fetch(API + url, { method, headers
   check(await fila(/hueco del 18/i).count() > 0 && await page.locator('[data-semaforo]').count() === 0, 'consulta de faltantes caída: la tabla queda sin puntos');
   await page.unroute('**/precios-faltantes');
 
+  // 7b. un trabajo con fórmula y sin recursos (fórmula vacía o se borraron todos): rojo, nunca verde (Codex, PR #41)
+  {
+    const its = await j('GET', `/budgets/${bud.id}/items`)
+    const hueco = (Array.isArray(its) ? its : its.items).find((i) => /hueco del 18/i.test(i.description || ''))
+    const res = await j('GET', `/budgets/${bud.id}/items/${hueco.id}/resources`)
+    for (const r of (Array.isArray(res) ? res : res.resources)) {
+      await fetch(`${API}/budgets/${bud.id}/items/${hueco.id}/resources/${r.id}`, { method: 'DELETE' })
+    }
+    await page.reload(); await page.waitForTimeout(2500)
+    check(await punto(/hueco del 18/i).getAttribute('data-semaforo').catch(() => null) === 'rojo', 'con fórmula y sin recursos: punto rojo, no verde')
+    check(await punto(/hueco del 18/i).getAttribute('title').catch(() => null) === 'La fórmula no cargó materiales ni mano de obra', 'punto rojo dice que la fórmula no cargó nada')
+  }
+
   // 8. pantallas: ancho 1280 y celular
   await page.reload(); await page.waitForTimeout(2500);
   await page.getByText('Terminaciones', { exact: true }).first().click(); await page.waitForTimeout(400);

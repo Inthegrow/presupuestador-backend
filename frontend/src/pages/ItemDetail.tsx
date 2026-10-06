@@ -23,7 +23,7 @@ import { budgetApi, templateApi, esFaltaConversion, esConfirmarReemplazo, esFall
 import type { FaltaConversion, PrecioFaltante, TemplateSugerencias } from '../lib/api'
 import { useAuth } from '../contexts/AuthContext'
 import { fmtCurrency, fmtNumber, fmtPercent, unidadEnPalabras } from '../lib/format'
-import { ESTILO, estadoDeTrabajo } from '../lib/semaforo'
+import { ESTILO, estadoDeTrabajo, precioPorUnidad } from '../lib/semaforo'
 import BuscadorFormulas from '../components/ui/BuscadorFormulas'
 import PreguntaConversion, { factorComoTexto, leerFactor } from '../components/ui/PreguntaConversion'
 import type { ItemResource, BudgetItem, Budget, ItemAudit, IndirectConfig } from '../types'
@@ -1115,6 +1115,7 @@ export default function ItemDetail() {
     recursos: recursos.length,
     preciosFaltantes: faltantes.length,
     preciosVerificados: faltantesEstado === 'ok',
+    precioAMano: item ? precioPorUnidad(item) : 0,
   })
 
   if (loading) {

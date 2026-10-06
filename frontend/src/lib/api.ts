@@ -227,7 +227,7 @@ export const budgetApi = {
 
   // Cuántos precios faltan en cada trabajo del presupuesto, todos juntos (para el punto de color de la tabla)
   preciosFaltantesPorItem: (budgetId: string) =>
-    get<{ por_item: Record<string, number> }>(`/budgets/${budgetId}/precios-faltantes`),
+    get<{ por_item: Record<string, number>; recursos_por_item?: Record<string, number> }>(`/budgets/${budgetId}/precios-faltantes`),
 
   // Agregar un trabajo con su fórmula ya aplicada, dentro del rubro de la fórmula (o de `parent_id`).
   // Si la unidad no es la de la fórmula y falta `factor`: 409 FALTA_CONVERSION y no se crea nada.
