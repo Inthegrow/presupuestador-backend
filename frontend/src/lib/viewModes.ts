@@ -72,21 +72,15 @@ function classifyItems(
   return nodes
 }
 
-// Filter to only "leaf" items (items that have real quantities / are not section headers)
+/** A rubro or piso row (same markers the server uses: "Seccion", "Sección generada por IA"). */
+function isSection(item: BudgetItem): boolean {
+  const notas = (item.notas ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase()
+  return notas === 'seccion' || notas === 'seccion generada por ia'
+}
+
+// Only works (trabajos): never the rubro / piso rows
 function getLeafItems(items: BudgetItem[]): BudgetItem[] {
-  // Items with a code containing a dot (e.g. "1.01") are typically leaf items.
-  // Section headers have codes like "1-" or no code at all.
-  // Also include items that have cantidad > 0 or a unit defined.
-  return items.filter((i) => {
-    const code = i.code ?? ''
-    // Has a dot in code = sub-item
-    if (/\d+\.\d+/.test(code)) return true
-    // Has unit and quantity = leaf
-    if (i.unidad && i.cantidad && i.cantidad > 0) return true
-    // Has costs but no children indicator
-    if (i.directo_total > 0 && !code.match(/^\d+\s*[-–]/)) return true
-    return false
-  })
+  return items.filter((i) => !isSection(i))
 }
 
 // ─── Group by Rubro (default — returns existing tree as-is) ─────────────────
@@ -98,23 +92,51 @@ export function groupByRubro(tree: TreeNode[]): TreeNode[] {
 // ─── Group by Floor / Piso ──────────────────────────────────────────────────
 
 const FLOOR_RULES: { label: string; keywords: RegExp }[] = [
-  { label: 'Subsuelo', keywords: /sub\s*suelo|s[oó]tano|nivel\s*-/i },
-  { label: 'Planta Baja', keywords: /planta\s*baja|p\.?\s*b\.?|pb\b|nivel\s*0/i },
-  { label: 'Piso 1', keywords: /piso\s*1|1[°º]?\s*piso|primer\s*piso|nivel\s*1/i },
-  { label: 'Piso 2', keywords: /piso\s*2|2[°º]?\s*piso|segundo\s*piso|nivel\s*2/i },
-  { label: 'Piso 3', keywords: /piso\s*3|3[°º]?\s*piso|tercer\s*piso|nivel\s*3/i },
-  { label: 'Piso 4', keywords: /piso\s*4|4[°º]?\s*piso|cuarto\s*piso|nivel\s*4/i },
-  { label: 'Piso 5', keywords: /piso\s*5|5[°º]?\s*piso|quinto\s*piso|nivel\s*5/i },
-  { label: 'Piso 6', keywords: /piso\s*6|6[°º]?\s*piso|sexto\s*piso|nivel\s*6/i },
-  { label: 'Piso 7', keywords: /piso\s*7|7[°º]?\s*piso|s[eé]ptimo\s*piso|nivel\s*7/i },
-  { label: 'Piso 8', keywords: /piso\s*8|8[°º]?\s*piso|octavo\s*piso|nivel\s*8/i },
-  { label: 'Azotea / Terraza', keywords: /azotea|terraza|cubierta|techo|tanque/i },
+  { label: 'Fundaciones / Subsuelo', keywords: /fundaci|sub\s*suelo|s[oó]tano|nivel\s*-/i },
+  { label: 'Planta Baja', keywords: /planta\s*baja|\bp\.?\s?b\b|nivel\s*0\b/i },
+  { label: 'Piso 1', keywords: /\bpiso\s*1\b|\b1[°º]?\s*piso|primer[o]?\s*piso|nivel\s*1\b/i },
+  { label: 'Piso 2', keywords: /\bpiso\s*2\b|\b2[°º]?\s*piso|segundo\s*piso|nivel\s*2\b/i },
+  { label: 'Piso 3', keywords: /\bpiso\s*3\b|\b3[°º]?\s*piso|tercer[o]?\s*piso|nivel\s*3\b/i },
+  { label: 'Piso 4', keywords: /\bpiso\s*4\b|\b4[°º]?\s*piso|cuarto\s*piso|nivel\s*4\b/i },
+  { label: 'Piso 5', keywords: /\bpiso\s*5\b|\b5[°º]?\s*piso|quinto\s*piso|nivel\s*5\b/i },
+  { label: 'Piso 6', keywords: /\bpiso\s*6\b|\b6[°º]?\s*piso|sexto\s*piso|nivel\s*6\b/i },
+  { label: 'Piso 7', keywords: /\bpiso\s*7\b|\b7[°º]?\s*piso|s[eé]ptimo\s*piso|nivel\s*7\b/i },
+  { label: 'Piso 8', keywords: /\bpiso\s*8\b|\b8[°º]?\s*piso|octavo\s*piso|nivel\s*8\b/i },
+  { label: 'Azotea / Terraza', keywords: /azotea|terraza|cubierta|techo|tanque|sala\s*de\s*m[aá]quinas/i },
 ]
 
+const SIN_PISO = 'Toda la obra (sin piso)'
+
+/**
+ * Each work goes to the piso of its nearest rubro/piso row that names one ("4.2- PRIMER PISO",
+ * "3.3- SOBRE PRIMER PISO"), as Sol's Excel is organized; only if none does, to what its own
+ * name says; and if nothing names a piso, to "Toda la obra (sin piso)".
+ */
 export function groupByFloor(items: BudgetItem[]): TreeNode[] {
   virtualId = 0
-  const leaves = getLeafItems(items)
-  return classifyItems(leaves, FLOOR_RULES)
+  const byId = new Map(items.map((i) => [String(i.id), i]))
+  const floorOf = (text: string): string | null => {
+    for (const rule of FLOOR_RULES) if (rule.keywords.test(text)) return rule.label
+    return null
+  }
+  const buckets = new Map<string, BudgetItem[]>()
+  for (const item of getLeafItems(items)) {
+    let label: string | null = null
+    const seen = new Set<string>()
+    let parent = item.parent_id ? byId.get(String(item.parent_id)) : undefined
+    while (parent && !label && !seen.has(String(parent.id))) {
+      seen.add(String(parent.id))
+      label = floorOf(parent.description ?? '')
+      parent = parent.parent_id ? byId.get(String(parent.parent_id)) : undefined
+    }
+    label = label ?? floorOf(item.description ?? '') ?? SIN_PISO
+    if (!buckets.has(label)) buckets.set(label, [])
+    buckets.get(label)!.push(item)
+  }
+  const order = [...FLOOR_RULES.map((r) => r.label), SIN_PISO]
+  return order
+    .filter((label) => (buckets.get(label)?.length ?? 0) > 0)
+    .map((label) => makeVirtualNode(label, buckets.get(label)!.map(itemToLeaf)))
 }
 
 // ─── Group by Material ──────────────────────────────────────────────────────
