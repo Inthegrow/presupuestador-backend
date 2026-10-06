@@ -110,6 +110,32 @@ export class ApiError extends Error {
   }
 }
 
+/** Mensaje para mostrar a partir de un texto de error como `409: {"detail": ...}`: el mensaje del servidor leído como
+ *  JSON (`detail` en texto o `{mensaje}`), así las comillas, las tildes y los saltos de línea salen enteros (una regex lo
+ *  cortaba en la primera comilla). Cualquier otro texto vuelve tal cual. */
+export function mensajeDeTexto(msg: string): string {
+  const start = msg.indexOf('{')
+  if (start >= 0) {
+    try {
+      const body = JSON.parse(msg.slice(start)) as { detail?: unknown }
+      const d = body.detail
+      if (typeof d === 'string' && d.trim()) return d
+      if (d && typeof d === 'object' && typeof (d as { mensaje?: unknown }).mensaje === 'string') {
+        return (d as { mensaje: string }).mensaje
+      }
+    } catch {
+      /* no es JSON: va el texto como vino */
+    }
+  }
+  return msg
+}
+
+/** Lo mismo que `mensajeDeTexto`, desde un error cualquiera (vacío: `porDefecto`). */
+export function textoDeError(e: unknown, porDefecto = ''): string {
+  const msg = e instanceof Error ? e.message : String(e ?? '')
+  return mensajeDeTexto(msg) || porDefecto
+}
+
 /** Texto para mostrar de un error: el `detail` del servidor (texto o `{mensaje}`) o, si no hay, el del error. */
 export function mensajeDeError(err: unknown, porDefecto = 'Algo salió mal. Probá de nuevo.'): string {
   if (err instanceof ApiError) {

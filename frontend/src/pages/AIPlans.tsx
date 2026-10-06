@@ -13,7 +13,7 @@ import {
   Link,
   AlertTriangle,
 } from 'lucide-react'
-import { budgetApi } from '../lib/api'
+import { budgetApi, mensajeDeError, textoDeError } from '../lib/api'
 import { useAuth } from '../contexts/AuthContext'
 import type { AIAnalysisResult, AISeccion, AIItem, AIItemToInsert } from '../types'
 import FileUpload from '../components/ui/FileUpload'
@@ -138,15 +138,15 @@ export default function AIPlans() {
       }
       setItems(flat)
     } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Error desconocido'
+      const msg = e instanceof Error ? e.message : ''
       if (msg.includes('503')) {
-        setError('La IA no esta disponible. Falta configurar OPENAI_API_KEY en el servidor.')
+        setError('La inteligencia artificial no está disponible: falta configurarla en el servidor (OPENAI_API_KEY).')
       } else if (msg.includes('501')) {
-        setError('El servidor no soporta PDF. Subi el plano como imagen JPG o PNG.')
+        setError('El servidor no acepta PDF. Subí el plano como imagen JPG o PNG.')
       } else if (msg.includes('422')) {
-        setError('La IA no pudo interpretar el plano. Intenta con una imagen mas clara o de mayor resolucion.')
+        setError('La IA no pudo leer el plano. Probá con una imagen más clara o de más resolución.')
       } else {
-        setError(`Error al analizar: ${msg}`)
+        setError(`No se pudo analizar el plano: ${textoDeError(e, 'probá de nuevo.')}`)
       }
     } finally {
       if (analyzeStepRef.current) clearInterval(analyzeStepRef.current)
@@ -210,8 +210,7 @@ export default function AIPlans() {
       setInsertedCount(res.inserted)
       setDone(true)
     } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Error desconocido'
-      setError(`Error al agregar items: ${msg}`)
+      setError(`No se pudieron agregar los trabajos: ${mensajeDeError(e)}`)
     } finally {
       setSaving(false)
     }
@@ -240,10 +239,10 @@ export default function AIPlans() {
       </div>
       <div className="flex items-center gap-3 mb-2">
         <div className="w-1 h-7 bg-[#2D8D68] rounded-full" />
-        <h1 className="text-xl font-extrabold text-gray-900">ANALISIS DE PLANOS CON IA</h1>
+        <h1 className="text-xl font-extrabold text-gray-900">PLANOS CON INTELIGENCIA ARTIFICIAL</h1>
       </div>
       <p className="text-gray-500 text-sm mb-6 ml-4">
-        Subi una foto o PDF del plano. La IA identifica ambientes, estructura e instalaciones y genera items de presupuesto.
+        Subí una foto o un PDF del plano. La inteligencia artificial (IA) reconoce ambientes, estructura e instalaciones y propone los trabajos del presupuesto.
       </p>
 
       {/* Error banner */}
@@ -260,14 +259,14 @@ export default function AIPlans() {
           <div className="flex items-center gap-2">
             <CheckCircle size={16} className="text-[#2D8D68]" />
             <span className="text-sm font-medium">
-              {insertedCount} items agregados al presupuesto correctamente.
+              {insertedCount === 1 ? '1 trabajo agregado' : `${insertedCount} trabajos agregados`} al presupuesto.
             </span>
           </div>
           <button
             onClick={() => navigate(`/app/budgets/${id}/editor`)}
             className="text-xs font-semibold text-[#2D8D68] hover:text-[#1B5E4B] flex items-center gap-1 transition-colors"
           >
-            <Edit3 size={12} /> Ir al Editor
+            <Edit3 size={12} /> Abrir el presupuesto
           </button>
         </div>
       )}
@@ -277,8 +276,8 @@ export default function AIPlans() {
         <div className="lg:col-span-2 space-y-4">
           <FileUpload
             accept="image/*,.pdf"
-            label="Arrasta el plano aca"
-            hint="JPG, PNG, WEBP o PDF -- hasta 20 MB"
+            label="Arrastrá el plano acá"
+            hint="JPG, PNG, WEBP o PDF, hasta 20 MB"
             onFile={handleFile}
             icon={
               <div className="flex items-center justify-center gap-2 text-gray-400">
@@ -295,7 +294,7 @@ export default function AIPlans() {
                 <div className="w-6 h-6 border-2 border-[#2D8D68] border-t-transparent rounded-full animate-spin" />
                 <div>
                   <p className="text-sm font-semibold text-[#143D34]">Analizando plano...</p>
-                  <p className="text-xs text-gray-500">Esto puede tardar 20-40 segundos</p>
+                  <p className="text-xs text-gray-500">Puede tardar entre 20 y 40 segundos</p>
                 </div>
               </div>
               <div className="space-y-1.5">
@@ -340,7 +339,7 @@ export default function AIPlans() {
           {result && result.proyecto.descripcion && (
             <div className="bg-white rounded-xl border overflow-hidden">
               <div className="bg-[#2D8D68] text-white px-4 py-2.5 text-sm font-semibold">
-                Resumen del Proyecto
+                Resumen del proyecto
               </div>
               <div className="p-4 space-y-3">
                 <p className="text-sm text-gray-700">{result.proyecto.descripcion}</p>
@@ -377,10 +376,10 @@ export default function AIPlans() {
           <div className="bg-white rounded-xl border overflow-hidden">
             {/* Header */}
             <div className="bg-[#2D8D68] text-white px-4 py-3 flex justify-between items-center">
-              <span className="font-semibold text-sm">Items Sugeridos por IA</span>
+              <span className="font-semibold text-sm">Trabajos que propone la IA</span>
               {totalItems > 0 && (
                 <span className="text-xs bg-white/20 px-2.5 py-0.5 rounded-full">
-                  {totalItems} items en {sectionNames.length} secciones
+                  {totalItems} {totalItems === 1 ? 'trabajo' : 'trabajos'} en {sectionNames.length} {sectionNames.length === 1 ? 'rubro' : 'rubros'}
                 </span>
               )}
             </div>
@@ -395,7 +394,7 @@ export default function AIPlans() {
                 ) : (
                   <div className="flex flex-col items-center gap-2">
                     <Layers size={32} className="text-gray-300" />
-                    <span>Carga un plano para comenzar el analisis.</span>
+                    <span>Subí un plano para empezar.</span>
                   </div>
                 )}
               </div>
@@ -408,18 +407,18 @@ export default function AIPlans() {
                       onClick={selectAll}
                       className="text-[10px] font-medium text-[#2D8D68] hover:text-[#1B5E4B] transition-colors"
                     >
-                      Seleccionar todos
+                      Tildar todos
                     </button>
                     <span className="text-gray-300">|</span>
                     <button
                       onClick={deselectAll}
                       className="text-[10px] font-medium text-gray-500 hover:text-gray-700 transition-colors"
                     >
-                      Deseleccionar todos
+                      Destildar todos
                     </button>
                   </div>
                   <span className="text-[10px] text-gray-400">
-                    {accepted.length} de {totalItems} seleccionados
+                    {accepted.length} de {totalItems} tildados
                   </span>
                 </div>
 
@@ -445,11 +444,11 @@ export default function AIPlans() {
                             )}
                             <span className="text-xs font-bold text-gray-700">{secName}</span>
                             <span className="text-[10px] text-gray-400">
-                              ({secItems.length} items)
+                              ({secItems.length} {secItems.length === 1 ? 'trabajo' : 'trabajos'})
                             </span>
                           </div>
                           <span className="text-[10px] text-[#2D8D68] font-medium">
-                            {secAccepted}/{secItems.length} sel.
+                            {secAccepted} de {secItems.length} tildados
                           </span>
                         </button>
 
@@ -501,7 +500,7 @@ export default function AIPlans() {
                                       {item.unidad}
                                     </span>
                                     <div className="flex items-center gap-1">
-                                      <span className="text-[10px] text-gray-400">Cant:</span>
+                                      <span className="text-[10px] text-gray-400">Cantidad:</span>
                                       <input
                                         type="number"
                                         value={item.editCantidad}
@@ -530,7 +529,7 @@ export default function AIPlans() {
                                     ) : (
                                       <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
                                         <AlertTriangle size={9} />
-                                        Sin fórmula — composicion estimada por IA
+                                        Sin fórmula: composición estimada por la IA
                                       </span>
                                     )}
                                   </div>
@@ -547,7 +546,7 @@ export default function AIPlans() {
                 {/* Footer */}
                 <div className="p-4 border-t bg-gray-50 flex items-center justify-between">
                   <span className="text-xs text-gray-500">
-                    {accepted.length} de {totalItems} items seleccionados
+                    {accepted.length} de {totalItems} trabajos tildados
                   </span>
                   <button
                     onClick={addAccepted}
@@ -560,8 +559,8 @@ export default function AIPlans() {
                     {saving
                       ? 'Agregando...'
                       : done
-                        ? 'Items agregados'
-                        : `Agregar ${accepted.length} items al presupuesto`}
+                        ? 'Trabajos agregados'
+                        : `Agregar ${accepted.length} ${accepted.length === 1 ? 'trabajo' : 'trabajos'} al presupuesto`}
                   </button>
                 </div>
               </>

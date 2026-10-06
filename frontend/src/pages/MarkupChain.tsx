@@ -31,14 +31,14 @@ interface FieldDef {
 const INDIRECTO_FIELDS: FieldDef[] = [
   { key: 'imprevistos_pct', label: 'Imprevistos' },
   { key: 'estructura_pct', label: 'Estructura' },
-  { key: 'jefatura_pct', label: 'Jefatura de Obra' },
+  { key: 'jefatura_pct', label: 'Jefatura de obra' },
   { key: 'logistica_pct', label: 'Logística' },
   { key: 'herramientas_pct', label: 'Herramientas' },
 ]
 
 const IMPUESTO_FIELDS: FieldDef[] = [
   { key: 'ingresos_brutos_pct', label: 'Ingresos Brutos', hint: 'sobre el subtotal con beneficio' },
-  { key: 'imp_cheque_pct', label: 'Impuesto al Cheque', hint: 'sobre el subtotal con beneficio' },
+  { key: 'imp_cheque_pct', label: 'Impuesto al cheque', hint: 'sobre el subtotal con beneficio' },
 ]
 
 function PctInput({
@@ -314,7 +314,7 @@ export default function MarkupChain() {
 
           <div className="px-6 pb-6">
             {/* ── COSTOS INDIRECTOS ── */}
-            <SectionDivider label="Costos Indirectos" />
+            <SectionDivider label="Costos indirectos" />
             <div className="space-y-2">
               {INDIRECTO_FIELDS.map((f) => (
                 <div key={f.key} className="flex items-center justify-between">
@@ -332,7 +332,7 @@ export default function MarkupChain() {
             </div>
             {/* Subtotal indirectos */}
             <div className="flex items-center justify-between mt-3 pt-3 border-t border-dashed border-gray-200">
-              <span className="text-sm font-semibold text-gray-600">Subtotal Indirectos:</span>
+              <span className="text-sm font-semibold text-gray-600">Subtotal de indirectos:</span>
               <span className="text-sm font-bold text-[#E8663C]">{fmtPct(subtotalIndirectosPct)} %</span>
             </div>
 
@@ -527,7 +527,7 @@ export default function MarkupChain() {
           {recalcError && <p className="text-xs text-red-600 mt-2">{recalcError}</p>}
           {recalc && (
             <div className="mt-3 text-xs text-gray-600 space-y-2">
-              <p>{recalc.items_updated} ítems y {recalc.resources_updated} recursos recalculados.</p>
+              <p>{recalc.items_updated} {recalc.items_updated === 1 ? 'trabajo' : 'trabajos'} y {recalc.resources_updated} recursos recalculados.</p>
               {recalc.errores.length > 0 && (
                 <ul className="text-red-700 list-disc ml-4">
                   {recalc.errores.map((e, i) => <li key={i}>{e}</li>)}
@@ -566,7 +566,7 @@ export default function MarkupChain() {
           <div className="space-y-1.5 text-xs text-gray-600">
             <div className="flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-blue-400 flex-shrink-0" />
-              <span>Costo Directo (MAT + MO)</span>
+              <span>Costo directo (materiales + mano de obra)</span>
             </div>
             <div className="flex items-center gap-2 ml-3">
               <span className="text-gray-300">+</span>

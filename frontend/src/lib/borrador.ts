@@ -1,7 +1,10 @@
-// Draft of the "Cargar obra" screen, kept in the browser (IndexedDB) so a reload does not lose it.
-// One draft per owner (user + company): another login on the same browser never sees it.
+// Drafts kept in the browser (IndexedDB) so a reload or closing the screen does not lose the work:
+// "Cargar obra" (guardarBorrador / leerBorrador / borrarBorrador) and the "Nuevo presupuesto" wizard
+// (the generic *BorradorDe functions, with their own key). One draft per screen and owner (user + company):
+// another login on the same browser never sees it.
 // Every call is wrapped in try/catch: if the browser refuses (private mode), the screen works as before.
 import type { ObraAsignaciones } from './api'
+import { fmtDate } from './format'
 
 const DB_NAME = 'presupuestador'
 const STORE = 'borradores'
@@ -12,8 +15,8 @@ export function duenoBorrador(userId: string | null | undefined, orgId: string |
   return userId && orgId ? `${userId}|${orgId}` : null
 }
 
-function clave(dueno: string): string {
-  return PREFIJO + dueno
+function clave(dueno: string, prefijo = PREFIJO): string {
+  return prefijo + dueno
 }
 
 export interface PendienteBorrador {
@@ -108,4 +111,59 @@ export async function leerBorrador(dueno: string): Promise<Borrador | null> {
   } catch {
     return null
   }
+}
+
+// ─── Drafts of other screens (same store, one key per screen) ────────────────────
+
+export type PantallaBorrador = 'nuevo-presupuesto'
+
+export async function guardarBorradorDe<T>(pantalla: PantallaBorrador, dueno: string, valor: T): Promise<void> {
+  await encolar(async () => {
+    try {
+      await conStore('readwrite', (s) => s.put(valor, clave(dueno, `${pantalla}:`)))
+    } catch {
+      /* no storage: the draft is simply not kept */
+    }
+  })
+}
+
+export async function borrarBorradorDe(pantalla: PantallaBorrador, dueno: string): Promise<void> {
+  await encolar(async () => {
+    try {
+      await conStore('readwrite', (s) => s.delete(clave(dueno, `${pantalla}:`)))
+    } catch {
+      /* nothing to do */
+    }
+  })
+}
+
+/** The saved draft, checked by `validar` (it returns null for anything that does not look like one). */
+export async function leerBorradorDe<T>(
+  pantalla: PantallaBorrador, dueno: string, validar: (crudo: unknown) => T | null,
+): Promise<T | null> {
+  try {
+    await cola
+    const crudo = await conStore<unknown>('readonly', (s) => s.get(clave(dueno, `${pantalla}:`)))
+    return crudo == null ? null : validar(crudo)
+  } catch {
+    return null
+  }
+}
+
+/** "hace 5 minutos", "ayer" or the date: when a draft was saved */
+export function haceCuanto(iso: string, ahora = new Date()): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  const min = Math.floor((ahora.getTime() - d.getTime()) / 60000)
+  if (min < 1) return 'hace un momento'
+  if (min < 60) return `hace ${min} ${min === 1 ? 'minuto' : 'minutos'}`
+  const mismoDia = d.toDateString() === ahora.toDateString()
+  if (mismoDia) {
+    const h = Math.floor(min / 60)
+    return `hace ${h} ${h === 1 ? 'hora' : 'horas'}`
+  }
+  const ayer = new Date(ahora)
+  ayer.setDate(ayer.getDate() - 1)
+  if (d.toDateString() === ayer.toDateString()) return 'ayer'
+  return fmtDate(iso.slice(0, 10))
 }

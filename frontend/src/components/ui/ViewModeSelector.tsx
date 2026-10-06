@@ -18,22 +18,22 @@ const HELP_SECTIONS = [
   {
     emoji: '\u{1F3D7}\uFE0F',
     title: 'RUBRO',
-    desc: 'Agrupa los items por secci\u00F3n de obra tal como fueron definidos (Tareas Preliminares, Estructura, Alba\u00F1iler\u00EDa...)',
+    desc: 'Agrupa los trabajos por rubro, tal como están en el presupuesto (Tareas preliminares, Estructura, Albañilería…).',
   },
   {
     emoji: '\u{1F3E2}',
     title: 'PISO',
-    desc: 'Agrupa items por planta del edificio (Subsuelo, Planta Baja, Pisos, Azotea)',
+    desc: 'Agrupa los trabajos por planta del edificio (Subsuelo, Planta baja, Pisos, Azotea).',
   },
   {
     emoji: '\u{1F4E6}',
     title: 'MATERIAL',
-    desc: 'Agrupa items por tipo de material principal (Hormig\u00F3n, Acero, Ladrillos, Cer\u00E1mica...)',
+    desc: 'Agrupa los trabajos por el material principal (Hormigón, Acero, Ladrillos, Cerámica…).',
   },
   {
     emoji: '\u{1F527}',
     title: 'GREMIO / ESPECIALIDAD',
-    desc: 'Agrupa items por el gremio o especialidad que lo ejecuta (Electricista, Plomero, Pintor, Carpintero...). Util para ver cuanto trabajo tiene cada gremio.',
+    desc: 'Agrupa los trabajos por el gremio que los hace (Electricista, Plomero, Pintor, Carpintero…). Sirve para ver cuánto trabajo tiene cada gremio.',
   },
 ]
 
@@ -87,7 +87,7 @@ export default function ViewModeSelector({ mode, onChange }: Props) {
           ref={btnRef}
           onClick={() => setShowHelp((v) => !v)}
           className="w-7 h-7 flex items-center justify-center rounded-full border border-gray-200 bg-white text-gray-400 hover:text-gray-600 hover:bg-gray-50 transition-colors"
-          aria-label="Ayuda sobre vistas"
+          aria-label="Qué muestra cada vista" title="Qué muestra cada vista"
         >
           <HelpCircle size={15} />
         </button>
@@ -101,6 +101,7 @@ export default function ViewModeSelector({ mode, onChange }: Props) {
               <h3 className="text-xs font-bold text-gray-800 tracking-wide">VISTAS DEL PRESUPUESTO</h3>
               <button
                 onClick={() => setShowHelp(false)}
+                aria-label="Cerrar"
                 className="text-gray-400 hover:text-gray-600 transition-colors"
               >
                 <X size={14} />

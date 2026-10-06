@@ -55,7 +55,7 @@ const ATTR_INVISIBLES = new Set([
 ])
 const esAttrVisible = (n) => !ATTR_INVISIBLES.has(n) && !n.startsWith('data-') && !/^on[A-Z]/.test(n)
 // Llamadas cuyos strings se muestran
-const LLAMADA_VISIBLE = /^(set(Error|Err|Msg|Mensaje|Aviso|Info|Ok|Exito|Status|Estado|Warning|Alerta|Nota|Toast)\w*|alert|confirm|prompt|toast\w*|avisar|Error)$/
+const LLAMADA_VISIBLE = /^(set(Error|Err|Msg|Mensaje|Aviso|Info|Ok|Exito|Status|Estado|Warning|Alerta|Nota|Toast)\w*|alert|confirm|prompt|toast\w*|addToast|avisar|Error)$/
 // Propiedades de objetos cuyos strings se muestran
 const PROP_VISIBLE = new Set([
   'label', 'title', 'titulo', 'subtitulo', 'description', 'descripcion', 'desc', 'hint', 'ayuda', 'help', 'mensaje',
@@ -328,8 +328,11 @@ function candidatosPy(src) {
           // f-string: the {expressions} are code, not text (keep offsets by blanking them)
           text = text.replace(/\{\{|\}\}|\{[^{}]*\}/g, (x) => (x === '{{' || x === '}}' ? x : ' '.repeat(x.length)))
         }
-        out.push({ start, text })
         i = k + q.length
+        // Dict keys ("codigo": ...) and codes ("A_MEDIAS", "seccion") are data, not text for Sol
+        const esClave = /^\s*:/.test(src.slice(i, i + 4))
+        const esCodigo = !/\s/.test(text) && (/_/.test(text) || /^[A-Z0-9]+$/.test(text) || /^[a-z0-9.-]+$/.test(text))
+        if (!esClave && !esCodigo) out.push({ start, text })
         continue
       }
       if (c === '(') depth++

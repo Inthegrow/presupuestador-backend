@@ -1,9 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  FileText,
   Building2,
-  Percent,
   CheckCircle,
   ChevronRight,
   ChevronLeft,
@@ -18,6 +16,7 @@ import {
   AlertTriangle,
   Check,
   RotateCcw,
+  History,
 } from 'lucide-react'
 import { ApiError, budgetApi, catalogApi } from '../lib/api'
 import type { CreateFullPayload } from '../lib/api'
@@ -29,6 +28,9 @@ import type { SelectionState } from '../components/ui/GenericTaskSelector'
 import { CLAVES_INDIRECTOS, cascadaIndirectos, indirectosCompletos } from '../lib/cascada'
 import type { ClaveIndirecto, IndirectosPct } from '../lib/cascada'
 import { fmtDate, todayIso } from '../lib/format'
+import { borrarBorradorDe, duenoBorrador, guardarBorradorDe, haceCuanto, leerBorradorDe } from '../lib/borrador'
+
+const AUTH_ENABLED = import.meta.env.VITE_AUTH_ENABLED === 'true'
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -92,17 +94,57 @@ interface Resultado {
   aviso?: string
 }
 
+// Work in progress kept in this browser (lib/borrador.ts), so closing the wizard halfway loses nothing
+interface BorradorNuevo {
+  paso: number
+  project: ProjectData
+  structureOption: StructureOption
+  seleccion: SelectionState
+  sections: Section[]
+  jsonSections: Section[]
+  json: Blob | null
+  jsonNombre: string
+  plan: Blob | null
+  planNombre: string
+  indirectos: IndirectosTexto | null
+  // ISO date of the last save
+  guardadoEn: string
+}
+
+const OPCIONES_ESTRUCTURA: StructureOption[] = ['template', 'plan', 'manual', 'json']
+
+function esRubros(x: unknown): x is Section[] {
+  return Array.isArray(x) && x.every((r) => r && typeof r === 'object' && typeof r.nombre === 'string' && Array.isArray(r.items))
+}
+
+function leerBorradorNuevo(crudo: unknown): BorradorNuevo | null {
+  if (!crudo || typeof crudo !== 'object') return null
+  const b = crudo as Partial<BorradorNuevo>
+  if (!b.project || typeof b.project.name !== 'string' || typeof b.project.description !== 'string') return null
+  if (!b.seleccion || typeof b.seleccion !== 'object' || !esRubros(b.sections) || !esRubros(b.jsonSections)) return null
+  return {
+    paso: typeof b.paso === 'number' ? b.paso : PASO_DATOS,
+    project: { name: b.project.name, description: b.project.description },
+    structureOption: OPCIONES_ESTRUCTURA.includes(b.structureOption as StructureOption) ? b.structureOption as StructureOption : 'template',
+    seleccion: b.seleccion,
+    sections: b.sections,
+    jsonSections: b.jsonSections,
+    json: b.json instanceof Blob ? b.json : null,
+    jsonNombre: typeof b.jsonNombre === 'string' ? b.jsonNombre : '',
+    plan: b.plan instanceof Blob ? b.plan : null,
+    planNombre: typeof b.planNombre === 'string' ? b.planNombre : '',
+    indirectos: b.indirectos && typeof b.indirectos === 'object' ? b.indirectos : null,
+    guardadoEn: typeof b.guardadoEn === 'string' ? b.guardadoEn : new Date().toISOString(),
+  }
+}
+
 // Only an admin can delete a budget: an editor cannot undo one already created
 function esSinPermiso(e: unknown): boolean {
   return e instanceof ApiError && e.status === 403
 }
 
-const STEPS = [
-  { label: 'Datos', icon: FileText },
-  { label: 'Estructura', icon: Building2 },
-  { label: 'Indirectos', icon: Percent },
-  { label: 'Resultado', icon: CheckCircle },
-]
+// The steps, as pills like "Cargar obra" (1 Subir · 2 Revisar · 3 Cargar)
+const STEPS = ['Datos', 'Trabajos', 'Indirectos', 'Listo']
 const PASO_DATOS = 0
 const PASO_ESTRUCTURA = 1
 const PASO_INDIRECTOS = 2
@@ -184,22 +226,23 @@ function normNombre(s: string): string {
 // Valida el contenido real de un JSON de estructura (los tipos de TypeScript no lo hacen) y lo pasa a rubros.
 // Nombre y descripción tienen que ser texto; unidad, texto o nada; cantidad, número o nada.
 function leerRubrosJson(data: unknown): { rubros: Section[] } | { error: string } {
+  // textos-ok: the keys the file must have ("items", "descripcion") are written as they go in the file
   const formato = 'Formato esperado: [{"nombre": "Rubro", "items": [{"descripcion": "...", "unidad": "m2", "cantidad": 10}]}].'
-  if (!Array.isArray(data)) return { error: `El archivo JSON tiene que ser una lista de rubros. ${formato}` }
+  if (!Array.isArray(data)) return { error: `El archivo .json tiene que ser una lista de rubros. ${formato}` }
   const vacio = (v: unknown) => v === undefined || v === null
   const rubros: Section[] = []
   for (let i = 0; i < data.length; i++) {
     const r = data[i] as Record<string, unknown> | null
     const donde = `Rubro ${i + 1}`
-    if (!r || typeof r !== 'object' || Array.isArray(r)) return { error: `${donde}: tiene que ser {"nombre": ..., "items": [...]}. ${formato}` }
+    if (!r || typeof r !== 'object' || Array.isArray(r)) return { error: `${donde}: tiene que ser {"nombre": ..., "items": [...]}. ${formato}` } // textos-ok
     if (!vacio(r.nombre) && typeof r.nombre !== 'string') return { error: `${donde}: el nombre tiene que ser texto.` }
-    if (!vacio(r.items) && !Array.isArray(r.items)) return { error: `${donde}: "items" tiene que ser una lista de trabajos.` }
+    if (!vacio(r.items) && !Array.isArray(r.items)) return { error: `${donde}: "items" tiene que ser una lista de trabajos.` } // textos-ok
     const items: SectionItem[] = []
     const lista = (r.items ?? []) as unknown[]
     for (let k = 0; k < lista.length; k++) {
       const it = lista[k] as Record<string, unknown> | null
       const dondeT = `${donde}, trabajo ${k + 1}`
-      if (!it || typeof it !== 'object' || Array.isArray(it)) return { error: `${dondeT}: tiene que ser {"descripcion": ..., "unidad": ..., "cantidad": ...}.` }
+      if (!it || typeof it !== 'object' || Array.isArray(it)) return { error: `${dondeT}: tiene que ser {"descripcion": ..., "unidad": ..., "cantidad": ...}.` } // textos-ok
       if (!vacio(it.descripcion) && typeof it.descripcion !== 'string') return { error: `${dondeT}: la descripción tiene que ser texto.` }
       if (!vacio(it.unidad) && typeof it.unidad !== 'string') return { error: `${dondeT}: la unidad tiene que ser texto.` }
       if (!vacio(it.cantidad) && (typeof it.cantidad !== 'number' || !Number.isFinite(it.cantidad))) {
@@ -238,7 +281,7 @@ function armarRubros(
   }
 
   const conItems = (s: Section) => s.items.filter((it) => it.descripcion.trim())
-  for (const [origen, lista] of [['Importar JSON', jsonSections], ['Definir manual', manuales]] as const) {
+  for (const [origen, lista] of [['Importar un archivo (.json)', jsonSections], ['A mano', manuales]] as const) {
     for (let i = 0; i < lista.length; i++) {
       const s = lista[i]
       const items = conItems(s)
@@ -274,7 +317,11 @@ function armarRubros(
 
 export default function NewProject() {
   const navigate = useNavigate()
-  const { puedeEditar } = useAuth()
+  const { puedeEditar, user, org } = useAuth()
+  // The draft belongs to this user in this company, like the one of "Cargar obra"
+  const dueno = duenoBorrador(user?.id ?? (AUTH_ENABLED ? null : 'demo'), org?.id)
+  // Draft left by a previous visit (null = none)
+  const [borrador, setBorrador] = useState<BorradorNuevo | null>(null)
   const [step, setStep] = useState(PASO_DATOS)
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState('')
@@ -325,6 +372,69 @@ export default function NewProject() {
 
   const armado = useMemo(() => armarRubros(seleccion, jsonSections, sections), [seleccion, jsonSections, sections])
   const trabajosTipicos = useMemo(() => trabajosElegidos(seleccion).length, [seleccion])
+
+  // ─── Draft ─────────────────────────────────────────────────────────────────
+
+  // Something worth keeping: a name, a description or any work chosen
+  const hayAlgo = !!(
+    project.name.trim() || project.description.trim() || trabajosTipicos > 0 || planFile || jsonSections.length > 0 ||
+    sections.some((r) => r.nombre.trim() || r.items.length > 0)
+  )
+
+  useEffect(() => {
+    setBorrador(null)
+    if (dueno) leerBorradorDe('nuevo-presupuesto', dueno, leerBorradorNuevo).then(setBorrador)
+  }, [dueno])
+
+  // Keep the work in progress (debounced 500 ms) until the budget exists
+  useEffect(() => {
+    if (!dueno || !hayAlgo || result || pendiente || step >= PASO_RESULTADO) return
+    const t = setTimeout(() => {
+      void guardarBorradorDe<BorradorNuevo>('nuevo-presupuesto', dueno, {
+        paso: step,
+        project,
+        structureOption,
+        seleccion,
+        sections,
+        jsonSections,
+        json: jsonFile,
+        jsonNombre: jsonFile?.name ?? '',
+        plan: planFile,
+        planNombre: planFile?.name ?? '',
+        indirectos,
+        guardadoEn: new Date().toISOString(),
+      })
+    }, 500)
+    return () => clearTimeout(t)
+  }, [dueno, hayAlgo, result, pendiente, step, project, structureOption, seleccion, sections, jsonSections, jsonFile, planFile, indirectos])
+
+  // Once the budget is created there is nothing left half-done
+  useEffect(() => {
+    if (dueno && (result || pendiente)) {
+      setBorrador(null)
+      void borrarBorradorDe('nuevo-presupuesto', dueno)
+    }
+  }, [dueno, result, pendiente])
+
+  function seguirBorrador() {
+    if (!borrador) return
+    const b = borrador
+    setBorrador(null)
+    setProject(b.project)
+    setStructureOption(b.structureOption)
+    setSeleccion(b.seleccion)
+    setSections(b.sections.length > 0 ? b.sections : [{ id: uid(), nombre: '', items: [] }])
+    setJsonSections(b.jsonSections)
+    setJsonFile(b.json ? new File([b.json], b.jsonNombre || 'rubros.json', { type: 'application/json' }) : null)
+    setPlanFile(b.plan ? new File([b.plan], b.planNombre || 'plano', { type: b.plan.type }) : null)
+    if (b.indirectos) setIndirectos(b.indirectos)
+    irA(Math.min(Math.max(b.paso, PASO_DATOS), PASO_INDIRECTOS))
+  }
+
+  function descartarBorrador() {
+    setBorrador(null)
+    if (dueno) void borrarBorradorDe('nuevo-presupuesto', dueno)
+  }
 
   // ─── Step navigation ───────────────────────────────────────────────────────
 
@@ -383,7 +493,7 @@ export default function NewProject() {
       try {
         data = JSON.parse(e.target?.result as string)
       } catch {
-        setError('El archivo JSON no tiene un formato válido.')
+        setError('El archivo .json no tiene un formato válido.')
         return
       }
       const leido = leerRubrosJson(data)
@@ -569,7 +679,7 @@ export default function NewProject() {
         // Could not undo it (only an admin deletes budgets): say what was created, do not create another one
         setResult({
           ...creado,
-          aviso: `La IA no pudo analizar el plano (${motivo.replace(/\.+$/, '')}). El presupuesto se creó con los demás trabajos, sin los del plano. Podés volver a analizar el plano desde "IA + Planos" del presupuesto.`,
+          aviso: `La IA no pudo analizar el plano (${motivo.replace(/\.+$/, '')}). El presupuesto se creó con los demás trabajos, sin los del plano. Podés volver a analizar el plano desde "Planos con IA" del presupuesto.`,
         })
         setStep(PASO_RESULTADO)
       }
@@ -674,49 +784,47 @@ export default function NewProject() {
         <h1 className="text-2xl font-extrabold text-gray-900">CREAR PRESUPUESTO</h1>
       </div>
 
-      {/* Stepper */}
-      <div className="max-w-4xl mx-auto mb-8">
-        <div className="flex items-center justify-between relative">
-          {/* Connecting line */}
-          <div className="absolute top-5 left-0 right-0 h-0.5 bg-gray-200 z-0" />
-          <div
-            className="absolute top-5 left-0 h-0.5 bg-[#2D8D68] z-0 transition-all duration-500"
-            style={{ width: `${(step / (STEPS.length - 1)) * 100}%` }}
-          />
-
-          {STEPS.map((s, i) => {
-            const Icon = s.icon
-            const isActive = i === step
-            const isDone = i < step
-            return (
-              <div key={i} className="flex flex-col items-center z-10">
-                <div
-                  className={`w-10 h-10 rounded-full flex items-center justify-center transition-all duration-300 ${
-                    isDone
-                      ? 'bg-[#2D8D68] text-white'
-                      : isActive
-                        ? 'bg-[#2D8D68] text-white ring-4 ring-[#2D8D68]/20'
-                        : 'bg-white border-2 border-gray-300 text-gray-400'
-                  }`}
-                >
-                  {isDone ? (
-                    <CheckCircle size={18} />
-                  ) : (
-                    <Icon size={18} />
-                  )}
-                </div>
-                <span
-                  className={`mt-2 text-xs font-medium ${
-                    isActive || isDone ? 'text-[#2D8D68]' : 'text-gray-400'
-                  }`}
-                >
-                  {s.label}
-                </span>
-              </div>
-            )
-          })}
-        </div>
+      {/* Steps, as pills (like Cargar obra) */}
+      <div className="max-w-4xl mx-auto mb-6">
+        <ol className="flex flex-wrap gap-2 text-xs font-bold" data-testid="pasos" aria-label="Pasos">
+          {STEPS.map((label, i) => (
+            <li
+              key={label}
+              aria-current={i === step ? 'step' : undefined}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-full ${i === step ? 'bg-[#2D8D68] text-white' : i < step ? 'bg-[#E8F5EE] text-[#143D34]' : 'bg-gray-100 text-gray-500'}`}
+            >
+              {i < step ? <Check size={12} aria-hidden="true" /> : <span>{i + 1}</span>}
+              <span>{label}</span>
+            </li>
+          ))}
+        </ol>
       </div>
+
+      {/* A draft left halfway: offer to go on with it */}
+      {borrador && !hayAlgo && step === PASO_DATOS && (
+        <div className="max-w-4xl mx-auto mb-5 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex flex-wrap items-center gap-3" data-testid="borrador-nuevo">
+          <History size={18} className="text-amber-700 flex-shrink-0" aria-hidden="true" />
+          <div className="flex-1 min-w-[220px]">
+            <div className="text-sm font-bold text-amber-800">Tenés un presupuesto a medias</div>
+            <div className="text-xs text-amber-800">
+              {borrador.project.name.trim() ? <span className="font-semibold">{borrador.project.name.trim()}</span> : 'Sin nombre'}
+              {haceCuanto(borrador.guardadoEn) && <>, {haceCuanto(borrador.guardadoEn)}</>}
+            </div>
+          </div>
+          <button
+            onClick={seguirBorrador}
+            className="bg-[#2D8D68] hover:bg-[#1B5E4B] text-white font-semibold px-4 py-1.5 rounded-lg text-sm"
+          >
+            Seguir
+          </button>
+          <button
+            onClick={descartarBorrador}
+            className="bg-white border border-amber-300 text-amber-800 font-semibold px-4 py-1.5 rounded-lg text-sm hover:bg-amber-100"
+          >
+            Descartar
+          </button>
+        </div>
+      )}
 
       {/* AI Review Panel overlay */}
       {showAiReview && (
@@ -994,7 +1102,7 @@ function StepEstructura({
   return (
     <div className="fade-in space-y-4">
       <div className="bg-white rounded-xl border p-6">
-        <h2 className="text-lg font-bold text-gray-900 mb-1">Estructura de obra</h2>
+        <h2 className="text-lg font-bold text-gray-900 mb-1">Rubros y trabajos</h2>
         <p className="text-sm text-gray-500 mb-6">
           Definí los rubros y trabajos del presupuesto. Podés combinar varias fuentes.
         </p>
@@ -1011,22 +1119,22 @@ function StepEstructura({
             active={structureOption === 'plan'}
             onClick={() => setStructureOption('plan')}
             icon={<Image size={20} />}
-            title="Subir plano (IA)"
-            description="La IA lee el plano"
+            title="Subir un plano"
+            description="Lo lee la inteligencia artificial"
           />
           <OptionCard
             active={structureOption === 'manual'}
             onClick={() => setStructureOption('manual')}
             icon={<Building2 size={20} />}
-            title="Definir manual"
-            description="Armar rubros y trabajos"
+            title="A mano"
+            description="Escribís rubros y trabajos"
           />
           <OptionCard
             active={structureOption === 'json'}
             onClick={() => setStructureOption('json')}
             icon={<FileJson size={20} />}
-            title="Importar JSON"
-            description="Estructura desde archivo"
+            title="Importar un archivo (.json)"
+            description="Rubros y trabajos de un archivo"
           />
         </div>
 
@@ -1194,7 +1302,8 @@ function StepEstructura({
           <div className="fade-in">
             <FileUpload
               accept=".json"
-              label="Subí un archivo JSON"
+              label="Subí un archivo .json"
+              // textos-ok: the keys of the file, as they go in it
               hint='Formato: [{"nombre": "Rubro", "items": [{"descripcion": "...", "unidad": "m2", "cantidad": 10}]}]'
               onFile={onJsonFile}
               value={jsonFile}
@@ -1204,14 +1313,14 @@ function StepEstructura({
             {jsonFile && jsonSections.length > 0 && (
               <div className="mt-4 bg-[#E8F5EE] rounded-lg p-4 border border-green-200">
                 <div className="text-sm font-medium text-[#143D34] mb-2">
-                  Estructura importada: {jsonSections.length} rubros,{' '}
-                  {jsonSections.reduce((s, sec) => s + sec.items.length, 0)} trabajos
+                  Del archivo: {jsonSections.length} {jsonSections.length === 1 ? 'rubro' : 'rubros'},{' '}
+                  {trabajos(jsonSections.reduce((s, sec) => s + sec.items.length, 0))}
                 </div>
                 <div className="space-y-1">
                   {jsonSections.map((sec, i) => (
                     <div key={sec.id} className="text-xs text-gray-600">
                       <span className="font-medium">{i + 1}. {sec.nombre}</span>
-                      <span className="text-gray-400 ml-2">({sec.items.length} trabajos)</span>
+                      <span className="text-gray-400 ml-2">({trabajos(sec.items.length)})</span>
                     </div>
                   ))}
                 </div>
@@ -1409,13 +1518,13 @@ function StepResultado({
             onClick={() => navigate(`/app/budgets/${result.budgetId}/editor`)}
             className="bg-[#2D8D68] hover:bg-[#1B5E4B] text-white font-semibold px-6 py-2.5 rounded-lg text-sm transition-colors"
           >
-            Abrir en el editor
+            Abrir el presupuesto
           </button>
           <button
             onClick={() => navigate('/app/dashboard')}
             className="bg-white border text-gray-600 px-6 py-2.5 rounded-lg text-sm hover:bg-gray-50 transition-colors"
           >
-            Volver a Mis Presupuestos
+            Volver a Mis presupuestos
           </button>
         </div>
       </div>

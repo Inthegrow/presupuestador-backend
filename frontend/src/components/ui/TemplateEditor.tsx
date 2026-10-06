@@ -9,7 +9,7 @@ const TIPOS: { value: TemplateResource['tipo']; label: string }[] = [
   { value: 'material', label: 'Material' },
   { value: 'mano_obra', label: 'Mano de obra' },
   { value: 'equipo', label: 'Equipo' },
-  { value: 'mo_material', label: 'Mat. indirecto' },
+  { value: 'mo_material', label: 'Material indirecto' },
   { value: 'subcontrato', label: 'Subcontrato' },
 ]
 
@@ -190,7 +190,7 @@ export default function TemplateEditor({
           <span className="font-bold text-[#143D34] text-base">
             {template ? 'Editar fórmula' : 'Nueva fórmula'}
           </span>
-          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-[#C3E5D3] text-[#2D8D68]">
+          <button onClick={onClose} aria-label="Cerrar" className="p-1.5 rounded-lg hover:bg-[#C3E5D3] text-[#2D8D68]">
             <X size={16} />
           </button>
         </div>
@@ -237,21 +237,22 @@ export default function TemplateEditor({
               </button>
             </div>
             <p className="text-[11px] text-gray-400 mb-2">
-              Valores por defecto. Se pueden cambiar en cada presupuesto. Úsalos en la cantidad por su nombre.
+              Valores por defecto: se pueden cambiar en cada presupuesto. Usalos en la cantidad por su nombre (la primera columna).
             </p>
             {params.length === 0 && <p className="text-xs text-gray-400 italic">Sin parámetros.</p>}
             <div className="space-y-1.5">
               {params.map((p, i) => (
                 <div key={i} className="grid grid-cols-12 gap-2 items-center">
-                  <input className={`${inputCls} col-span-3 font-mono`} placeholder="espesor" value={p.clave}
+                  <input className={`${inputCls} col-span-3 font-mono`} placeholder="espesor" aria-label="Nombre del parámetro (se usa en la cantidad)" value={p.clave}
                     onChange={(e) => setParam(i, { clave: e.target.value })} />
-                  <input className={`${inputCls} col-span-2 text-right`} placeholder="0.20" value={str(p.valor)}
+                  <input className={`${inputCls} col-span-2 text-right`} placeholder="0.20" aria-label="Valor por defecto" value={str(p.valor)}
                     onChange={(e) => setParam(i, { valor: e.target.value })} />
-                  <input className={`${inputCls} col-span-2`} placeholder="m" value={p.unidad ?? ''}
+                  <input className={`${inputCls} col-span-2`} placeholder="m" aria-label="Unidad del parámetro" value={p.unidad ?? ''}
                     onChange={(e) => setParam(i, { unidad: e.target.value })} />
-                  <input className={`${inputCls} col-span-4`} placeholder="Descripción" value={p.descripcion ?? ''}
+                  <input className={`${inputCls} col-span-4`} placeholder="Descripción (lo que se ve, ej. Espesor)" aria-label="Descripción del parámetro" value={p.descripcion ?? ''}
                     onChange={(e) => setParam(i, { descripcion: e.target.value })} />
                   <button onClick={() => setParams(params.filter((_, j) => j !== i))}
+                    aria-label="Borrar el parámetro" title="Borrar el parámetro"
                     className="col-span-1 text-gray-400 hover:text-red-600 justify-self-center">
                     <Trash2 size={13} />
                   </button>
@@ -272,7 +273,7 @@ export default function TemplateEditor({
               </button>
             </div>
             <p className="text-[11px] text-gray-400 mb-2">
-              Cantidad: <span className="font-mono">Q</span> es la cantidad del ítem. Se permiten números,
+              Cantidad: <span className="font-mono">Q</span> es la cantidad del trabajo. Se permiten números,
               <span className="font-mono"> + - * / ( )</span> y parámetros. Mano de obra: días = Q / rendimiento.
               Desperdicio vacío = hereda.
             </p>
@@ -399,7 +400,7 @@ export default function TemplateEditor({
                     <th className="text-left font-medium py-1">Recurso</th>
                     <th className="text-right font-medium py-1">Cantidad</th>
                     <th className="text-right font-medium py-1">Desperdicio</th>
-                    <th className="text-right font-medium py-1">Cant. efectiva</th>
+                    <th className="text-right font-medium py-1">Cantidad con desperdicio</th>
                     <th />
                   </tr>
                 </thead>
@@ -409,7 +410,7 @@ export default function TemplateEditor({
                       <td className="py-1">{row.codigo || row.descripcion || '—'}</td>
                       <td className="py-1 text-right tabular-nums">
                         {row.tipo === 'mano_obra'
-                          ? `${row.trabajadores} trab × ${row.dias} días`
+                          ? `${row.trabajadores} trabajadores × ${row.dias} días`
                           : `${row.cantidad} ${row.unidad || ''}`}
                       </td>
                       <td className="py-1 text-right text-gray-500">
@@ -426,7 +427,7 @@ export default function TemplateEditor({
               </table>
             )}
             <p className="text-[10px] text-gray-400 mt-2">
-              El redondeo a unidad de compra se aplica al recalcular la obra, sobre el total de todos los ítems.
+              El redondeo a unidad de compra se aplica al recalcular la obra, sobre el total de todos los trabajos.
             </p>
           </section>
         </div>

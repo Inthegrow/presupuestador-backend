@@ -6,6 +6,7 @@ import type { AgregarTrabajoPayload, AgregarTrabajoResult, FaltaConversion, Temp
 import BuscadorFormulas from './BuscadorFormulas'
 import type { FormulaBuscable } from './BuscadorFormulas'
 import PreguntaConversion, { factorComoTexto, leerFactor } from './PreguntaConversion'
+import { conTildes } from '../../lib/textos'
 
 // Renglón "Agregá un trabajo" del editor: se escribe como se habla, se elige la fórmula, la cantidad y Enter.
 // El servidor crea el trabajo con la fórmula aplicada, dentro del rubro de la fórmula (o del rubro elegido).
@@ -245,7 +246,7 @@ export default function AgregarTrabajo({ budgetId, rubroElegido, onSoltarRubro, 
       </button>
     </>
   ) : elegida?.formula.categoria ? (
-    <>Va al rubro de su fórmula: <b className="font-semibold text-gray-700">{elegida.formula.categoria}</b> (si no está, se crea).</>
+    <>Va al rubro de su fórmula: <b className="font-semibold text-gray-700">{conTildes(elegida.formula.categoria)}</b> (si no está, se crea).</>
   ) : (
     <>Cada trabajo va al rubro de su fórmula (si no está, se crea). Si elegís un rubro en el árbol, va a ese.</>
   )
