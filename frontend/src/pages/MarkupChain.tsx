@@ -203,6 +203,8 @@ export default function MarkupChain() {
     setConfirmar(null)
     setSaveMsg(null)
     const partes: string[] = []
+    // Generales sin ningún presupuesto que los siga: se explica la regla en vez de un "Listo" vacío
+    let sinAfectados = false
     try {
       if (id) {
         // Los % de esta obra: el servidor la recalcula al guardar
@@ -216,13 +218,19 @@ export default function MarkupChain() {
         const data = await budgetApi.updateGeneralIndirects({ ...cuerpoGeneral(), aplicar: true })
         if (id) setGeneral(data)
         const n = typeof data?.actualizados === 'number' ? data.actualizados : 0
-        partes.push(
-          n === 0
-            ? id ? 'valores generales guardados' : 'ningún presupuesto cambió de precio'
-            : `${n} ${n === 1 ? 'presupuesto actualizado' : 'presupuestos actualizados'}`,
-        )
+        if (n === 0) {
+          if (id) partes.push('valores generales guardados')
+          else sinAfectados = true
+        } else {
+          partes.push(`${n} ${n === 1 ? 'presupuesto actualizado' : 'presupuestos actualizados'}`)
+        }
       }
-      setSaveMsg({ tipo: 'ok', texto: `Listo: ${partes.join('; ')}.` })
+      setSaveMsg({
+        tipo: 'ok',
+        texto: sinAfectados
+          ? 'Guardado. Los presupuestos nuevos van a usar estos porcentajes. Los que ya estaban creados guardan los suyos y no cambian: para cambiar uno, entrá a su Coeficiente de pase.'
+          : `Listo: ${partes.join('; ')}.`,
+      })
     } catch (err) {
       const hecho = partes.length > 0 ? ` (sí se guardó: ${partes.join('; ')})` : ''
       setSaveMsg({ tipo: 'error', texto: `No se pudo guardar${hecho}. ${mensajeDeError(err)}` })
@@ -264,7 +272,7 @@ export default function MarkupChain() {
       <p className="text-gray-500 text-sm mb-6 ml-4">
         {id
           ? 'Porcentajes de esta obra. Arrancan con los valores generales; cambiarlos acá no toca las otras obras. Al guardar, los precios de esta obra se actualizan solos.'
-          : 'Los valores generales: los usan todos los presupuestos que no tienen porcentajes propios.'}
+          : 'Los valores generales: con estos arranca cada presupuesto nuevo.'}
       </p>
 
       {cargaFallo && (
@@ -422,8 +430,16 @@ export default function MarkupChain() {
               </p>
             </div>
 
+            {/* La regla, antes de guardar los generales */}
+            {!id && puedeGuardar && (
+              <p className="mt-5 text-[11px] text-gray-500" data-testid="regla-generales">
+                Cada presupuesto guarda los porcentajes con los que se creó. Cambiar estos solo toca los presupuestos
+                nuevos y los que todavía siguen los generales; antes de guardar te digo cuáles.
+              </p>
+            )}
+
             {/* Save */}
-            <div className="mt-6 flex items-center justify-end gap-x-4 gap-y-2 flex-wrap">
+            <div className={`${!id && puedeGuardar ? 'mt-3' : 'mt-6'} flex items-center justify-end gap-x-4 gap-y-2 flex-wrap`}>
               {id && esAdmin && (
                 <label className="flex items-center gap-2 text-xs text-gray-600">
                   <input type="checkbox" checked={alsoGeneral} onChange={(e) => setAlsoGeneral(e.target.checked)} />

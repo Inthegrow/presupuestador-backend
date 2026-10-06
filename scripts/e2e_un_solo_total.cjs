@@ -1,6 +1,7 @@
 // Prueba de punta a punta de "un solo total": el precio sin IVA del editor es el mismo en el tablero, en el PDF para
 // el cliente y en el Excel exportado; guardar una nota no lo cambia; agregar un recurso cambia el trabajo y el total en
-// lo mismo; cambiar el beneficio en Coeficiente de pase avisa a quién toca, actualiza y todo sigue cerrando; la barra
+// lo mismo; cambiar el beneficio general avisa a quién toca (solo los que siguen los generales: Ginkgo tiene sus
+// propios % y no cambia), los % propios de Ginkgo lo actualizan solo y todo sigue cerrando; la barra
 // dice 34% (y mientras carga no dice ningún %); "Recálculo completo" muestra el error en rojo.
 // Corre contra vite (5179) + scripts/serve_fake.py (8000), con el servidor falso recién levantado.
 // Uso: EXCEL_DIR=<carpeta con ginkgo.xlsx> NODE_PATH=<node_modules con playwright> node scripts/e2e_un_solo_total.cjs
@@ -200,36 +201,72 @@ const valor = async (loc) => Number(await loc.getAttribute('data-valor'))
   const e2 = await leerEscalera(page)
   check(cerca(e2.neto, e1.neto, 10), `recalcular todo no mueve el total (más que redondeos de centavos) (${pesos(e1.neto)} → ${pesos(e2.neto)})`)
 
-  // 7. Coeficiente de pase general: beneficio 20% → aviso con Ginkgo → Seguir → actualizados
+  // 7. Coeficiente de pase general. Cada presupuesto guarda los % con los que se creó (Ginkgo los tiene propios);
+  //    solo cambian los que siguen los generales: una obra vieja sin % propios.
+  const vieja = (await j('POST', '/__fake/insert/budgets', [{
+    id: require('crypto').randomUUID(), name: 'Obra vieja (sigue los generales)', status: 'draft', indirectos: null,
+    desperdicio_pct: null, precios_al: null, created_at: '2026-01-10T10:00:00+00:00', updated_at: '2026-01-10T10:00:00+00:00',
+  }]))[0]
+  await j('POST', `/budgets/${vieja.id}/items`, [{ code: '1.1', description: 'Trabajo a mano', unidad: 'm2', cantidad: 10, mat_unitario: 1000, mo_unitario: 500, sort_order: 1 }])
+  const viejaAntes = (await j('GET', `/budgets/${vieja.id}/analysis`)).neto_total
+  check(viejaAntes > 0, `la obra vieja tiene precio (${pesos(viejaAntes)})`)
   await j('POST', `/budgets/${id}/versions`)
   await page.goto(`${B}/app/settings/markups`)
   const filaBeneficio = page.locator('div.flex.items-center.justify-between', { hasText: 'sobre el subtotal con indirectos' })
   await filaBeneficio.locator('input').waitFor({ timeout: 10000 })
   await page.waitForTimeout(500)
+  check(/Cada presupuesto guarda los porcentajes con los que se creó/.test(await page.getByTestId('regla-generales').innerText()), 'antes de guardar, una línea explica la regla')
   await filaBeneficio.locator('input').fill('20')
   await page.getByRole('button', { name: 'Guardar cambios' }).click()
   const aviso = page.getByTestId('confirmar-afectados')
   const huboAviso = await aviso.waitFor({ timeout: 8000 }).then(() => true).catch(() => false)
-  check(huboAviso && /Esto cambia el precio de \d+ presupuestos? que usa/.test(await aviso.innerText()) && /Ginkgo/.test(await aviso.innerText()),
-    `aparece el aviso "Esto cambia el precio de N presupuestos…" con Ginkgo${huboAviso ? '' : ' (no apareció: ¿Ginkgo quedó con porcentajes propios?)'}`)
+  const txtAviso = huboAviso ? await aviso.innerText() : ''
+  check(/Esto cambia el precio de 1 presupuesto que usa estos porcentajes: Obra vieja \(sigue los generales\)/.test(txtAviso),
+    `aparece el aviso con la obra que sigue los generales ("${txtAviso.split('\n')[0]}")`)
+  check(huboAviso && !/Ginkgo/.test(txtAviso), 'Ginkgo (con sus propios %) no está en el aviso')
   await page.screenshot({ path: SHOTS + '/05_aviso_afectados.png' })
   if (huboAviso) await aviso.getByRole('button', { name: 'Seguir' }).click()
   const resultado = page.getByTestId('resultado-guardar')
   await resultado.waitFor({ timeout: 60000 })
-  const txtRes = await resultado.innerText()
-  check(/Listo: \d+ presupuestos? actualizados?/.test(txtRes), `"${txtRes.trim()}"`)
+  const txtRes = (await resultado.innerText()).trim()
+  check(txtRes === 'Listo: 1 presupuesto actualizado.', `"${txtRes}"`)
   await page.screenshot({ path: SHOTS + '/06_listo_actualizados.png' })
+  // La obra vieja cambió de precio (× 1,20/1,10) y lo muestra su editor
+  await page.goto(`${B}/app/budgets/${vieja.id}/editor`)
+  await page.getByTestId('pct-indirectos').waitFor({ timeout: 15000 })
+  const ev = await leerEscalera(page)
+  check(cerca(ev.neto / viejaAntes, 1.2 / 1.1, 0.0005), `la obra vieja muestra el precio nuevo (${pesos(viejaAntes)} → ${pesos(ev.neto)})`)
+  check(cerca(ev.directo + ev.ind + ev.ben + ev.imp, ev.neto, 0.05), 'y sus renglones siguen sumando')
+  check(cerca(await totalPdfCliente(vieja.id), ev.neto, 0.05), 'y su PDF para el cliente coincide')
+  // Ginkgo no se tocó
   await page.goto(`${B}/app/budgets/${id}/editor`)
   await page.getByTestId('pct-indirectos').waitFor({ timeout: 15000 })
   const e3 = await leerEscalera(page)
-  check(cerca(e3.neto / e2.neto, 1.2 / 1.1, 0.0005), `el editor muestra el precio nuevo (× 1,20/1,10: ${pesos(e2.neto)} → ${pesos(e3.neto)})`)
+  check(e3.neto === e2.neto, `Ginkgo, con sus propios %, no cambió (${pesos(e2.neto)} → ${pesos(e3.neto)})`)
+  check(/10% beneficio/.test(await page.getByTestId('coeficiente-pase').innerText()), 'Ginkgo sigue con 10% de beneficio')
   check((await page.getByTestId('pct-indirectos').innerText()).trim() === '34%', 'la barra sigue diciendo 34%')
-  check(cerca(e3.directo + e3.ind + e3.ben + e3.imp, e3.neto, 0.05), 'y los renglones siguen sumando')
-  const pdf1 = await totalPdfCliente(id)
-  check(cerca(pdf1, e3.neto, 0.05), `el PDF para el cliente también (${pdf1} / ${e3.neto})`)
-  await page.screenshot({ path: SHOTS + '/07_editor_beneficio_20.png' })
+  check(cerca(await totalPdfCliente(id), e3.neto, 0.05), 'el PDF de Ginkgo tampoco cambió')
+  await page.screenshot({ path: SHOTS + '/07_ginkgo_sin_cambios.png' })
+  // Si ningún presupuesto sigue los generales: no hay aviso y se explica la regla
+  await page.route('**/indirects/general/afectados', (r) => r.fulfill({ status: 200, contentType: 'application/json', body: '{"presupuestos":[]}' }))
+  await page.route('**/indirects/general', (r) => r.request().method() === 'PATCH'
+    ? r.fulfill({ status: 200, contentType: 'application/json', body: '{"beneficio_pct":20,"actualizados":0}' })
+    : r.continue())
+  await page.goto(`${B}/app/settings/markups`)
+  await filaBeneficio.locator('input').waitFor({ timeout: 10000 })
+  await page.waitForTimeout(500)
+  await page.getByRole('button', { name: 'Guardar cambios' }).click()
+  await page.getByTestId('resultado-guardar').waitFor({ timeout: 15000 })
+  check(await page.getByTestId('confirmar-afectados').count() === 0, 'sin presupuestos que sigan los generales: no hay aviso')
+  check(/^Guardado\. Los presupuestos nuevos van a usar estos porcentajes\. Los que ya estaban creados guardan los suyos y no cambian: para cambiar uno, entrá a su Coeficiente de pase\.$/.test((await page.getByTestId('resultado-guardar').innerText()).trim()),
+    'y explica: "Guardado. Los presupuestos nuevos van a usar estos porcentajes…"')
+  await page.screenshot({ path: SHOTS + '/07b_sin_afectados.png' })
+  await page.unroute('**/indirects/general/afectados')
+  await page.unroute('**/indirects/general')
 
   // 8. Los % propios del presupuesto (desde el editor): se actualiza solo, sin aviso
+  await page.goto(`${B}/app/budgets/${id}/editor`)
+  await page.getByTestId('pct-indirectos').waitFor({ timeout: 15000 })
   await page.getByRole('button', { name: 'Editar porcentajes' }).click()
   await page.waitForURL(/settings\/markups\?budget=/)
   const filaB2 = page.locator('div.flex.items-center.justify-between', { hasText: 'sobre el subtotal con indirectos' })

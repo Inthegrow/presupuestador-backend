@@ -205,7 +205,7 @@ export default function DataTable({ items, onEditItem, onViewDetail, onDeleteIte
             <th className="px-3 py-2 text-right font-semibold text-[11px] tracking-wide">Directo</th>
             <th className="px-3 py-2 text-right font-semibold text-[11px] tracking-wide">Indirecto</th>
             <th className="px-3 py-2 text-right font-semibold text-[11px] tracking-wide">Beneficio</th>
-            <th className="px-3 py-2 text-right font-bold text-[11px] tracking-wide" title="Con indirectos, beneficio e impuestos (Ingresos Brutos y cheque). Sin IVA.">Precio sin IVA</th>
+            <th className="px-3 py-2 text-right font-bold text-[11px] tracking-wide" title="Sin IVA. Incluye indirectos, beneficio e impuestos (Ingresos Brutos y cheque): por eso es más que Directo + Indirecto + Beneficio.">Precio sin IVA</th>
             <th className="px-3 py-2 w-16" />
           </tr>
         </thead>
