@@ -338,8 +338,8 @@ class TestPlanilla:
         assert values["Impuesto al cheque"][0] == 0.012
         assert values["IVA"][0] == 0.21
         assert values["SUBTOTAL 01 - COSTOS DIRECTOS"][1] == summary["directo_total"]
-        assert values["TOTAL (NETO) SIN IVA"][1] == summary["neto_total"]
-        assert values["TOTAL CON IVA"][1] == summary["total_final"]
+        assert values["PRECIO SIN IVA"][1] == summary["neto_total"]
+        assert values["PRECIO CON IVA"][1] == summary["total_final"]
         coef = cascade_factors({**CFG})["coeficiente"]
         assert values["Coeficiente de pase (sin IVA)"][1] == coef
         texto = next(k for k in values if isinstance(k, str) and k.startswith("Por cada $100"))

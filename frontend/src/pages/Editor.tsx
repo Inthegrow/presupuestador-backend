@@ -21,8 +21,8 @@ import type { ViewMode } from '../lib/viewModes'
 
 const FIELD_LABELS: Record<string, string> = {
   cantidad: 'Cantidad',
-  mat_unitario: 'MAT Unit',
-  mo_unitario: 'MO Unit',
+  mat_unitario: 'Materiales por unidad',
+  mo_unitario: 'Mano de obra por unidad',
 }
 
 interface Toast {
@@ -60,12 +60,14 @@ export default function Editor() {
   // Error del último "Recálculo completo" (queda a la vista hasta cerrarlo o volver a probar)
   const [recalcError, setRecalcError] = useState<string[] | null>(null)
   const [savingVersion, setSavingVersion] = useState(false)
+  // Last saved version: undefined = not known yet (or could not be read), null = none saved
+  const [ultimaVersion, setUltimaVersion] = useState<number | null | undefined>(undefined)
   const [showStatusMenu, setShowStatusMenu] = useState(false)
   const [statusChanging, setStatusChanging] = useState(false)
 
   const STATUS_OPTIONS = [
     { value: 'draft', label: 'Borrador', badgeCls: 'bg-gray-100 text-gray-600 border-gray-200' },
-    { value: 'review', label: 'En Revisión', badgeCls: 'bg-yellow-100 text-yellow-700 border-yellow-200' },
+    { value: 'review', label: 'En revisión', badgeCls: 'bg-yellow-100 text-yellow-700 border-yellow-200' },
     { value: 'approved', label: 'Aprobado', badgeCls: 'bg-green-100 text-green-700 border-green-200' },
     { value: 'sent', label: 'Enviado', badgeCls: 'bg-blue-100 text-blue-700 border-blue-200' },
   ]
@@ -141,13 +143,13 @@ export default function Editor() {
       setBudget((prev) => prev ? { ...prev, status: updated.status } : prev)
       const label = [
         { value: 'draft', label: 'Borrador' },
-        { value: 'review', label: 'En Revisión' },
+        { value: 'review', label: 'En revisión' },
         { value: 'approved', label: 'Aprobado' },
         { value: 'sent', label: 'Enviado' },
       ].find((s) => s.value === newStatus)?.label ?? newStatus
       addToast(`Estado actualizado: ${label}`)
     } catch {
-      addToast('Error al cambiar estado', 'error')
+      addToast('No se pudo cambiar el estado. Probá de nuevo.', 'error')
     }
     setStatusChanging(false)
   }, [id, addToast])
@@ -207,6 +209,13 @@ export default function Editor() {
       })
       .catch(() => {/* keep empty state */})
       .finally(() => setLoading(false))
+    setUltimaVersion(undefined)
+    budgetApi.getVersions(id)
+      .then((vs) => {
+        const nums = (Array.isArray(vs) ? vs : []).map((v) => v.version ?? 0)
+        setUltimaVersion(nums.length > 0 ? Math.max(...nums) : null)
+      })
+      .catch(() => setUltimaVersion(undefined))
     setIndirectFallo(false)
     budgetApi.getIndirects(id).then(config => {
       if (config) setIndirectConfig(config)
@@ -242,6 +251,7 @@ export default function Editor() {
     try {
       const v = await budgetApi.createVersion(id)
       addToast(v?.version ? `Versión v${v.version} guardada` : 'Versión guardada')
+      if (v?.version) setUltimaVersion(v.version)
     } catch (err) {
       addToast(`No se guardó la versión: ${mensajeDeError(err)}`, 'error')
     } finally {
@@ -263,7 +273,7 @@ export default function Editor() {
       updatedItem = (result as unknown as { item?: BudgetItem })?.item
       if (!updatedItem) throw new Error('El servidor no devolvió el trabajo actualizado')
     } catch (err) {
-      addToast(`No se guardó ${fieldLabel.toLowerCase()}: ${mensajeDeError(err)}`, 'error')
+      addToast(`No se guardó el cambio en ${fieldLabel.toLowerCase()}: ${mensajeDeError(err)}`, 'error')
       throw err
     }
 
@@ -271,7 +281,7 @@ export default function Editor() {
     setAllItems((prev) => prev.map((item) => (item.id === itemId ? { ...item, ...nuevo } : item)))
     setItems((prev) => prev.map((item) => (item.id === itemId ? { ...item, ...nuevo } : item)))
 
-    addToast(`${fieldLabel} actualizado: ${formatVal(oldValue)} → ${formatVal(newValue)}`)
+    addToast(`${fieldLabel}: ${formatVal(oldValue)} → ${formatVal(newValue)}`)
   }, [id, addToast])
 
   /** Suggest next section code */
@@ -302,12 +312,12 @@ export default function Editor() {
           setItems(getItemsForNode(newNode, data.items))
         }
       }
-      addToast(`Seccion creada: ${sectionCodigo} - ${sectionNombre}`)
+      addToast(`Rubro creado: ${sectionCodigo} - ${sectionNombre}`)
       setShowSectionForm(false)
       setSectionCodigo('')
       setSectionNombre('')
     } catch (err) {
-      addToast(`Error al crear seccion: ${err instanceof Error ? err.message : 'desconocido'}`, 'error')
+      addToast(`No se pudo crear el rubro: ${mensajeDeError(err)}`, 'error')
     } finally {
       setSectionSaving(false)
     }
@@ -329,9 +339,9 @@ export default function Editor() {
           }
         }
       }
-      addToast(`Seccion renombrada: ${newName}`)
+      addToast(`Rubro renombrado: ${newName}`)
     } catch (err) {
-      addToast(`Error al editar seccion: ${err instanceof Error ? err.message : 'desconocido'}`, 'error')
+      addToast(`No se pudo renombrar el rubro: ${mensajeDeError(err)}`, 'error')
     }
   }, [id, selectedNode, refreshData, getItemsForNode, addToast])
 
@@ -350,9 +360,9 @@ export default function Editor() {
           setItems(firstNode ? getItemsForNode(firstNode, data.items) : [])
         }
       }
-      addToast(`Seccion eliminada: ${node.description}`)
+      addToast(`Rubro borrado: ${node.description}`)
     } catch (err) {
-      addToast(`Error al eliminar seccion: ${err instanceof Error ? err.message : 'desconocido'}`, 'error')
+      addToast(`No se pudo borrar el rubro: ${mensajeDeError(err)}`, 'error')
     }
   }, [id, selectedNode, rubroElegido, refreshData, getItemsForNode, addToast])
 
@@ -469,6 +479,12 @@ export default function Editor() {
 
   // Totales: la suma de lo que guardó el servidor en cada trabajo (los rubros no suman)
   const trabajos = useMemo(() => allItems.filter((i) => i.notas !== 'Seccion'), [allItems])
+  // "Diferencias con el Excel" only for a budget that came from an Excel with totals: the same rule the server
+  // uses for /obras/{id}/diferencias (works with excel_neto saved, and at least one Excel amount that is not 0)
+  const tieneTotalesExcel = useMemo(
+    () => trabajos.some((i) => i.excel_neto != null && (Number(i.excel_neto) !== 0 || Number(i.excel_directo ?? 0) !== 0)),
+    [trabajos],
+  )
   const ivaPct = indirectConfig ? indirectosCompletos(indirectConfig).iva_pct : null
   const escalera = useMemo(() => escaleraDe(trabajos, ivaPct), [trabajos, ivaPct])
   const pcts = pctsEscalera(indirectConfig)
@@ -532,17 +548,30 @@ export default function Editor() {
 
       {/* Breadcrumb */}
       <div className="flex items-center flex-wrap gap-1.5 text-xs mb-1">
-        <span
-          className="text-gray-400 cursor-pointer hover:text-[#2D8D68] transition-colors"
+        <button
+          type="button"
+          className="text-gray-400 hover:text-[#2D8D68] transition-colors"
           onClick={() => navigate('/app/dashboard')}
         >
-          Presupuestos
-        </span>
+          Mis presupuestos
+        </button>
         <ChevronRight size={12} className="text-gray-300" />
-        <span className="font-semibold text-gray-900">
-          {budget?.name ?? 'Edificio Las Heras \u2014 Obra Gris'}
-        </span>
-        <span className="bg-[#E8F5EE] text-[#1B5E4B] text-[10px] font-medium px-1.5 py-0.5 rounded-full">v3</span>
+        {budget ? (
+          <span className="font-semibold text-gray-900">{budget.name}</span>
+        ) : loading ? (
+          <span className="inline-block w-44 h-3 rounded bg-gray-200 animate-pulse" data-testid="nombre-cargando" aria-hidden="true" />
+        ) : (
+          <span className="font-semibold text-gray-900">Presupuesto</span>
+        )}
+        {ultimaVersion !== undefined && (
+          <span
+            data-testid="version-editor"
+            title={ultimaVersion === null ? 'Todavía no se guardó ninguna versión' : 'Última versión guardada'}
+            className="bg-[#E8F5EE] text-[#1B5E4B] text-[10px] font-medium px-1.5 py-0.5 rounded-full"
+          >
+            {ultimaVersion === null ? 'Sin versiones' : `v${ultimaVersion}`}
+          </span>
+        )}
       </div>
 
       {/* Section label */}
@@ -554,9 +583,13 @@ export default function Editor() {
       <div className="flex items-center justify-between gap-x-4 gap-y-2 flex-wrap mb-3">
         <div className="flex items-center gap-3 flex-wrap min-w-0">
           <div className="w-1 h-7 bg-gradient-to-b from-[#2D8D68] to-[#2D8D68]/40 rounded-full" />
-          <h1 className="text-xl font-extrabold text-gray-900">
-            {budget?.name?.toUpperCase() ?? 'PRESUPUESTO'}
-          </h1>
+          {budget || !loading ? (
+            <h1 className="text-xl font-extrabold text-gray-900">
+              {budget?.name?.toUpperCase() ?? 'PRESUPUESTO'}
+            </h1>
+          ) : (
+            <span className="inline-block w-64 h-6 rounded bg-gray-200 animate-pulse" aria-label="Cargando el presupuesto" role="status" />
+          )}
           {/* Status badge / dropdown */}
           <div className="relative">
             <button
@@ -601,14 +634,16 @@ export default function Editor() {
             onClick={() => navigate(`/app/budgets/${id ?? '1'}/ai`)}
             className="bg-white border border-gray-200 text-gray-700 px-3.5 py-1.5 rounded-xl text-xs font-medium hover:bg-gray-50 hover:shadow-sm transition-all duration-200"
           >
-            IA + Plano
+            Planos con IA
           </button>
-          <button
-            onClick={() => navigate(`/app/budgets/${id ?? '1'}/diferencias`)}
-            className="bg-white border border-gray-200 text-gray-700 px-3.5 py-1.5 rounded-xl text-xs font-medium hover:bg-gray-50 hover:shadow-sm transition-all duration-200"
-          >
-            Diferencias con el Excel
-          </button>
+          {tieneTotalesExcel && (
+            <button
+              onClick={() => navigate(`/app/budgets/${id ?? '1'}/diferencias`)}
+              className="bg-white border border-gray-200 text-gray-700 px-3.5 py-1.5 rounded-xl text-xs font-medium hover:bg-gray-50 hover:shadow-sm transition-all duration-200"
+            >
+              Diferencias con el Excel
+            </button>
+          )}
           <button
             onClick={() => navigate(`/app/budgets/${id ?? '1'}/export`)}
             className="bg-white border border-gray-200 text-gray-700 px-3.5 py-1.5 rounded-xl text-xs font-medium hover:bg-gray-50 hover:shadow-sm transition-all duration-200"
@@ -683,13 +718,13 @@ export default function Editor() {
         <div className="w-64 bg-white rounded-2xl shadow-sm border border-gray-100 flex-shrink-0 overflow-hidden flex flex-col">
           {/* Gradient header */}
           <div className="bg-gradient-to-r from-[#143D34] to-[#2D8D68] text-white px-4 py-3 flex justify-between items-center">
-            <span className="font-semibold text-xs tracking-wide">Estructura de Obra</span>
+            <span className="font-semibold text-xs tracking-wide">Estructura de obra</span>
             {puedeEditar && (
               <button
                 onClick={openSectionForm}
                 className="text-[#E0A33A] text-xs font-medium flex items-center gap-0.5 hover:text-yellow-200 transition-colors"
               >
-                <Plus size={12} /> Seccion
+                <Plus size={12} /> Rubro
               </button>
             )}
           </div>
@@ -701,7 +736,8 @@ export default function Editor() {
                 <input
                   ref={sectionCodigoRef}
                   type="text"
-                  placeholder="Cod"
+                  placeholder="N.º"
+                  aria-label="Número del rubro"
                   value={sectionCodigo}
                   onChange={(e) => setSectionCodigo(e.target.value)}
                   onKeyDown={(e) => {
@@ -712,7 +748,8 @@ export default function Editor() {
                 />
                 <input
                   type="text"
-                  placeholder="Nombre de seccion"
+                  placeholder="Nombre del rubro"
+                  aria-label="Nombre del rubro"
                   value={sectionNombre}
                   onChange={(e) => setSectionNombre(e.target.value)}
                   onKeyDown={(e) => {
@@ -829,19 +866,19 @@ export default function Editor() {
                 <LayoutGrid size={28} className="text-gray-300" />
               </div>
               <h3 className="text-sm font-semibold text-gray-500 mb-1">
-                Selecciona una seccion del arbol
+                Elegí un rubro en el árbol
               </h3>
               <p className="text-xs text-gray-400 mb-4 max-w-xs mx-auto">
-                Hace click en cualquier seccion del panel izquierdo para ver y editar sus items de presupuesto.
+                Tocá cualquier rubro del panel de la izquierda para ver y editar sus trabajos.
               </p>
               <div className="flex items-center justify-center gap-4 text-[10px] text-gray-400">
                 <span className="flex items-center gap-1">
                   <MousePointerClick size={12} />
-                  Click para seleccionar
+                  Tocá para elegir
                 </span>
                 <span className="flex items-center gap-1">
                   <Command size={12} />
-                  Editar celdas inline
+                  Tocá una celda para editarla
                 </span>
               </div>
             </div>
@@ -859,9 +896,9 @@ export default function Editor() {
                   setAllItems(refreshedItems)
                   if (selectedNode) setItems(getItemsForNode(selectedNode, refreshedItems))
                   cargarFaltantes(refreshedItems)
-                  addToast(`Item eliminado: ${desc}`)
+                  addToast(`Trabajo borrado: ${desc}`)
                 } catch (err) {
-                  addToast(`Error al eliminar: ${err instanceof Error ? err.message : 'desconocido'}`, 'error')
+                  addToast(`No se pudo borrar el trabajo: ${mensajeDeError(err)}`, 'error')
                 }
               }}
             />

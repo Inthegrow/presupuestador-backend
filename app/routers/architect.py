@@ -69,7 +69,7 @@ async def _extract_pages_b64(files: list[UploadFile]) -> tuple[list[str], list[s
             raise HTTPException(400, f"Solo se aceptan PDFs: {f.filename}")
         content = await f.read()
         if len(content) > 20 * 1024 * 1024:
-            raise HTTPException(400, f"Archivo muy grande (>20MB): {f.filename}")
+            raise HTTPException(400, f"El archivo es muy grande (máximo 20 MB): {f.filename}")
         pages = _pdf_pages_to_images(content)
         if not pages:
             raise HTTPException(400, f"No se pudo leer el PDF: {f.filename}")
@@ -192,7 +192,7 @@ async def classify_plans(
     settings = get_settings()
     client = settings.openai_client
     if client is None:
-        raise HTTPException(503, "IA no disponible — OPENAI_API_KEY no configurada.")
+        raise HTTPException(503, "La inteligencia artificial no está disponible: falta configurar OPENAI_API_KEY.")
     if not files:
         raise HTTPException(400, "Enviá al menos un archivo PDF.")
     if len(files) > 20:
@@ -223,10 +223,10 @@ async def classify_plans(
     try:
         data = await _call_vision(client, settings.OPENAI_MODEL_VISION, _SYS_CLASSIFY, prompt, first_pages_b64, max_tokens=4096)
     except json.JSONDecodeError:
-        raise HTTPException(422, "La IA no devolvió un formato válido para clasificación.")
+        raise HTTPException(422, "La IA no devolvió una respuesta válida para clasificar los planos.")
     except Exception as e:
         logger.error("OpenAI API error in classify: %s", e)
-        raise HTTPException(502, "Error al comunicarse con la IA.")
+        raise HTTPException(502, "No se pudo hablar con la IA. Probá de nuevo en unos segundos.")
 
     clasificaciones = data.get("clasificaciones", [])
 
@@ -317,7 +317,7 @@ async def analyze_architecture(
     settings = get_settings()
     client = settings.openai_client
     if client is None:
-        raise HTTPException(503, "IA no disponible.")
+        raise HTTPException(503, "La inteligencia artificial no está disponible.")
 
     _validate_budget(budget_id, user)
     all_b64, file_names, _ = await _extract_pages_b64(files)
@@ -335,10 +335,10 @@ async def analyze_architecture(
     try:
         data = await _call_vision(client, settings.OPENAI_MODEL_VISION, _SYS_ARCH, prompt, all_b64, max_tokens=16384)
     except json.JSONDecodeError:
-        raise HTTPException(422, "La IA no devolvió JSON válido para análisis arquitectónico.")
+        raise HTTPException(422, "La IA no devolvió una respuesta válida para el análisis de arquitectura.")
     except Exception as e:
         logger.error("PASO 1A error: %s", e)
-        raise HTTPException(502, "Error al comunicarse con la IA.")
+        raise HTTPException(502, "No se pudo hablar con la IA. Probá de nuevo en unos segundos.")
 
     return {"budget_id": str(budget_id), "paso": "1A", "archivos": file_names, **data}
 
@@ -393,7 +393,7 @@ async def analyze_structure(
     settings = get_settings()
     client = settings.openai_client
     if client is None:
-        raise HTTPException(503, "IA no disponible.")
+        raise HTTPException(503, "La inteligencia artificial no está disponible.")
 
     _validate_budget(budget_id, user)
     _, file_names, pages_per_file = await _extract_pages_b64(files)
@@ -508,7 +508,7 @@ async def analyze_sections(
     settings = get_settings()
     client = settings.openai_client
     if client is None:
-        raise HTTPException(503, "IA no disponible.")
+        raise HTTPException(503, "La inteligencia artificial no está disponible.")
 
     _validate_budget(budget_id, user)
     all_b64, file_names, _ = await _extract_pages_b64(files)
@@ -526,10 +526,10 @@ async def analyze_sections(
     try:
         data = await _call_vision(client, settings.OPENAI_MODEL_VISION, _SYS_SECTIONS, prompt, all_b64, max_tokens=8192)
     except json.JSONDecodeError:
-        raise HTTPException(422, "La IA no devolvió JSON válido para análisis de cortes.")
+        raise HTTPException(422, "La IA no devolvió una respuesta válida para el análisis de cortes.")
     except Exception as e:
         logger.error("PASO 1C error: %s", e)
-        raise HTTPException(502, "Error al comunicarse con la IA.")
+        raise HTTPException(502, "No se pudo hablar con la IA. Probá de nuevo en unos segundos.")
 
     return {"budget_id": str(budget_id), "paso": "1C", "archivos": file_names, **data}
 
@@ -603,7 +603,7 @@ async def synthesize(
     settings = get_settings()
     client = settings.openai_client
     if client is None:
-        raise HTTPException(503, "IA no disponible.")
+        raise HTTPException(503, "La inteligencia artificial no está disponible.")
 
     _validate_budget(budget_id, user)
 
@@ -618,9 +618,9 @@ async def synthesize(
     try:
         data = await _call_text(client, settings.OPENAI_MODEL_VISION, _SYS_SYNTH, prompt, max_tokens=16384)
     except json.JSONDecodeError:
-        raise HTTPException(422, "La IA no devolvió JSON válido para la síntesis.")
+        raise HTTPException(422, "La IA no devolvió una respuesta válida para la síntesis.")
     except Exception as e:
         logger.error("PASO 1D error: %s", e)
-        raise HTTPException(502, "Error al comunicarse con la IA.")
+        raise HTTPException(502, "No se pudo hablar con la IA. Probá de nuevo en unos segundos.")
 
     return {"budget_id": str(budget_id), "paso": "1D", **data}

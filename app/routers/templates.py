@@ -248,7 +248,7 @@ async def get_template(template_id: str, user: dict = Depends(get_current_user))
         .execute()
     )
     if not result.data:
-        raise HTTPException(404, "Template no encontrado")
+        raise HTTPException(404, "Fórmula no encontrada")
     return result.data[0]
 
 
@@ -270,7 +270,7 @@ async def create_template(body: TemplateCreate, user: dict = Depends(require_edi
     }
     result = db.table("item_templates").insert(data).execute()
     if not result.data:
-        raise HTTPException(500, "Error al crear template")
+        raise HTTPException(500, "No se pudo crear la fórmula. Probá de nuevo.")
     return result.data[0]
 
 
@@ -298,7 +298,7 @@ async def update_template(
         .execute()
     )
     if not current.data:
-        raise HTTPException(404, "Template no encontrado")
+        raise HTTPException(404, "Fórmula no encontrada")
     if "recursos" in updates or "parametros" in updates:
         recursos = updates.get("recursos", _json_list(current.data[0].get("recursos")))
         parametros = updates.get("parametros", _json_list(current.data[0].get("parametros")))
@@ -316,7 +316,7 @@ async def update_template(
         .execute()
     )
     if not result.data:
-        raise HTTPException(404, "Template no encontrado")
+        raise HTTPException(404, "Fórmula no encontrada")
     return result.data[0]
 
 
@@ -535,7 +535,7 @@ async def apply_template(
         .execute()
     )
     if not tmpl.data:
-        raise HTTPException(404, "Template no encontrado")
+        raise HTTPException(404, "Fórmula no encontrada")
     template = tmpl.data[0]
 
     budget = (
@@ -557,7 +557,7 @@ async def apply_template(
         .execute()
     )
     if not item_result.data:
-        raise HTTPException(404, "Item no encontrado")
+        raise HTTPException(404, "Trabajo no encontrado")
     item = item_result.data[0]
     qty = float(item.get("cantidad") or 1)
 

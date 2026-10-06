@@ -963,7 +963,7 @@ async def diferencias_con_excel(
     Excel (directo, indirectos, beneficio o impuestos). ``modo`` (neto, directo o nivel) elige el orden.
     """
     if modo not in MODOS:
-        raise HTTPException(422, f"modo debe ser uno de: {', '.join(MODOS)}")
+        raise HTTPException(422, f"El modo tiene que ser uno de: {', '.join(MODOS)}")
     db = get_data_db()
     org_id = user["org_id"]
     bid = str(budget_id)

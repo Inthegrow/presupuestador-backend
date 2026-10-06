@@ -85,11 +85,11 @@ class TestImportExcelPriceList:
         data = upload(client, workbook(V1_MAT, V1_MO))
         assert len(db.tables["price_catalogs"]) == 1
         catalog = db.tables["price_catalogs"][0]
-        assert catalog["name"] == "Catalogo - Las Heras.xlsx" and not catalog.get("oficial")
+        assert catalog["name"] == "Catálogo - Las Heras.xlsx" and not catalog.get("oficial")
         assert data["catalog_id"] == catalog["id"]
         assert data["catalog_entries"] == 4
         assert data["catalog_reused"] is False
-        assert data["catalog_name"] == "Catalogo - Las Heras.xlsx"
+        assert data["catalog_name"] == "Catálogo - Las Heras.xlsx"
         assert (data["precios_actualizados"], data["precios_nuevos"]) == (0, 4)
         # Each new price starts its history
         assert history(db, "MAT-1") == [(100, None)]
@@ -105,7 +105,7 @@ class TestImportExcelPriceList:
         assert len(db.tables["price_catalogs"]) == 1
         assert second["catalog_id"] == first["catalog_id"]
         assert second["catalog_reused"] is True
-        assert second["catalog_name"] == "Catalogo - Las Heras.xlsx"
+        assert second["catalog_name"] == "Catálogo - Las Heras.xlsx"
         assert (second["precios_actualizados"], second["precios_nuevos"]) == (1, 1)
         # Changed price: the new one is today's, the old one stays in the history
         assert entry(db, "MAT-1")["precio_sin_iva"] == 120

@@ -16,9 +16,22 @@ const AUTH_ENABLED = import.meta.env.VITE_AUTH_ENABLED === 'true'
 
 function errorText(e: unknown): string {
   const msg = e instanceof Error ? e.message : String(e)
-  // The API answers "409: {...json...}": show only the message
-  const m = msg.match(/"mensaje"\s*:\s*"([^"]+)"/) || msg.match(/"detail"\s*:\s*"([^"]+)"/)
-  return m ? m[1] : msg
+  // The API answers "409: {...json...}": show only the message. Read it as JSON, so quotes and
+  // other escaped characters inside the message come out whole (a regex cut it at the first quote)
+  const start = msg.indexOf('{')
+  if (start >= 0) {
+    try {
+      const body = JSON.parse(msg.slice(start)) as { detail?: unknown }
+      const d = body.detail
+      if (typeof d === 'string' && d.trim()) return d
+      if (d && typeof d === 'object' && typeof (d as { mensaje?: unknown }).mensaje === 'string') {
+        return (d as { mensaje: string }).mensaje
+      }
+    } catch {
+      /* not JSON: fall through */
+    }
+  }
+  return msg
 }
 
 function normUnidad(u?: string | null): string {
