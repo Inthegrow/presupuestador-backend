@@ -59,7 +59,7 @@ recetas que no se entienden solos ("DE CASCOTE"). Código `eps` en el Excel cont
 - **Auditoría línea por línea de Ginkgo**: por cada trabajo, de dónde sale la diferencia (cantidad por unidad,
   precio, material de más o de menos, desperdicio, mano de obra, conversión). ✅ Página publicada
   (https://claude.ai/artifact/MJAhLAA9owk6oTdU2zCwLN), con qué corregir en fórmulas, lista y Excel de Sol.
-- **Ayuda dentro de la app**: en curso con el cambio de palabra (`PLAN_FORMULA_Y_AYUDA.md`): Cargar obra, colores,
+- ✅ **Ayuda dentro de la app** (PR #36, `PLAN_FORMULA_Y_AYUDA.md`): Cargar obra, colores,
   cómo encuentra la fórmula, Excel de otro formato, lista de precios. La guía de **armar un presupuesto a mano**
   (Nuevo Presupuesto) va después: Carlos pidió que ese camino tenga "una UX/UI suprema" antes de documentarlo.
   Cargar el proyecto desde SOLÉ: Carlos no sabe todavía cómo sería; queda abierto.
@@ -73,9 +73,9 @@ recetas que no se entienden solos ("DE CASCOTE"). Código `eps` en el Excel cont
 *Presupuesto a mano (Nuevo Presupuesto), auditoría del 05/10:* https://claude.ai/artifact/3KfqizZ6HkfNGqtUmSpDiL
 (informe con 26 fricciones). Hoy el precio sale mal sin aviso (contrapiso m² calculado como m³, aplicar dos veces suma
 los materiales, faltantes en $0 sin marca) y "Vista Cliente" bajaba el PDF interno con el margen. Ocho entregas:
-1 ✅ precio seguro (`PLAN_PRECIO_SEGURO.md`, PR #37) · 2 ✅ buscador y semáforo en el detalle (`PLAN_BUSCADOR_EN_DETALLE.md`, PR #38) · 3 ✅ asistente (`PLAN_ASISTENTE.md`, PR #39) · ✅ comparar al mismo nivel del Excel + "Coeficiente de pase" (`PLAN_COMPARAR_MISMO_NIVEL.md`, PR #40) · 4 agregar trabajo en un renglón (`PLAN_AGREGAR_TRABAJO.md`, en curso) · (4 arriba)
-trabajo en un renglón · 5 un solo total (**decide Carlos**: suma de netos por trabajo o cascada con imprevistos, IIBB
-y cheque) · 6 exportar (resto) · 7 coherencia con Cargar obra y tildes · 8 celular. La guía de Ayuda de este camino,
+1 ✅ precio seguro (`PLAN_PRECIO_SEGURO.md`, PR #37) · 2 ✅ buscador y semáforo en el detalle (`PLAN_BUSCADOR_EN_DETALLE.md`, PR #38) · 3 ✅ asistente (`PLAN_ASISTENTE.md`, PR #39) · ✅ comparar al mismo nivel del Excel + "Coeficiente de pase" (`PLAN_COMPARAR_MISMO_NIVEL.md`, PR #40) · 4 ✅ agregar trabajo en un renglón (`PLAN_AGREGAR_TRABAJO.md`, PR #41) · 5 un solo total + Fórmulas con el botón
+arriba y buscador (`PLAN_UN_SOLO_TOTAL.md`, en curso: el precio de cada trabajo es su directo pasado por el Coeficiente
+de pase, calculado en un solo lugar; cada presupuesto guarda sus porcentajes) · 6 exportar (resto) · 7 coherencia con Cargar obra y tildes · 8 celular. La guía de Ayuda de este camino,
 después de la 5.
 
 *Ginkgo, diferencias (06/10):* página de seguimiento para Sol https://claude.ai/artifact/2aCjCgazrgST4HfvSbfeT5 (grupos A:

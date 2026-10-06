@@ -3,11 +3,12 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { BarChart2, Download } from 'lucide-react'
 import { budgetApi } from '../lib/api'
 import { fmtCurrency } from '../lib/format'
+import { escaleraDe, indirectosCompletos, pctsEscalera } from '../lib/cascada'
 import CostSummaryBar from '../components/ui/CostSummaryBar'
 import ViewModeSelector from '../components/ui/ViewModeSelector'
 import { groupByFloor, groupByMaterial, groupByWorkType } from '../lib/viewModes'
 import type { ViewMode } from '../lib/viewModes'
-import type { AnalysisResponse, Budget, BudgetItem, TreeNode } from '../types'
+import type { AnalysisResponse, Budget, BudgetItem, IndirectConfig, TreeNode } from '../types'
 
 interface SectionRow {
   name: string
@@ -16,6 +17,7 @@ interface SectionRow {
   directo: number
   indirecto: number
   benef: number
+  impuestos: number
   neto: number
 }
 
@@ -63,22 +65,31 @@ function buildSectionsFromTree(nodes: TreeNode[]): SectionRow[] {
       directo: node.directo_total,
       indirecto: node.indirecto_total,
       benef: node.beneficio_total,
+      impuestos: impuestosDe(node),
       neto: node.neto_total,
     }
   })
 }
 
+/** Impuestos guardados; en datos viejos sin ese campo, lo que va del subtotal con beneficio al precio sin IVA. */
+function impuestosDe(i: Pick<BudgetItem, 'impuestos_total' | 'neto_total' | 'directo_total' | 'indirecto_total' | 'beneficio_total'>) {
+  if (typeof i.impuestos_total === 'number') return i.impuestos_total
+  return Math.max(0, (i.neto_total ?? 0) - (i.directo_total ?? 0) - (i.indirecto_total ?? 0) - (i.beneficio_total ?? 0))
+}
+
 function sumItems(items: BudgetItem[]) {
-  let mat = 0, mo = 0, directo = 0, indirecto = 0, benef = 0, neto = 0
+  let mat = 0, mo = 0, directo = 0, indirecto = 0, benef = 0, impuestos = 0, neto = 0
   for (const i of items) {
+    if (i.notas === 'Seccion') continue
     mat += i.mat_total
     mo += i.mo_total
     directo += i.directo_total
     indirecto += i.indirecto_total
     benef += i.beneficio_total
+    impuestos += impuestosDe(i)
     neto += i.neto_total
   }
-  return { mat, mo, directo, indirecto, benef, neto }
+  return { mat, mo, directo, indirecto, benef, impuestos, neto }
 }
 
 export default function Analysis() {
@@ -90,6 +101,7 @@ export default function Analysis() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [viewMode, setViewMode] = useState<ViewMode>('rubro')
+  const [indirects, setIndirects] = useState<IndirectConfig | null>(null)
 
   useEffect(() => {
     if (!id) return
@@ -99,11 +111,13 @@ export default function Analysis() {
       budgetApi.get(id),
       budgetApi.getItems(id).catch(() => [] as BudgetItem[]),
       budgetApi.getAnalysis(id).catch(() => null),
+      budgetApi.getIndirects(id).catch(() => null),
     ])
-      .then(([b, items, analysis]) => {
+      .then(([b, items, analysis, ind]) => {
         setBudget(b)
         setAllItems(items)
         setData(analysis)
+        setIndirects(ind)
       })
       .catch((err) => {
         setError(err instanceof Error ? err.message : 'Error al cargar el presupuesto')
@@ -144,13 +158,17 @@ export default function Analysis() {
   }
 
   const budgetName = budget?.name ?? 'Presupuesto'
-  const itemsCount = data?.items_count ?? allItems.length
-  const netoTotal = data?.neto_total ?? 0
-  const matTotal = data?.mat_total ?? 0
-  const moTotal = data?.mo_total ?? 0
-  const directoTotal = data?.directo_total ?? 0
-  const indirectoTotal = data?.indirecto_total ?? 0
-  const beneficioTotal = data?.beneficio_total ?? 0
+  const trabajos = allItems.filter((i) => i.notas !== 'Seccion')
+  const itemsCount = data?.items_count ?? trabajos.length
+  // El resumen del servidor (lo guardado, sumado); si no llegó, la suma de los trabajos
+  const escalera = escaleraDe(data ? [data] : trabajos, indirects ? indirectosCompletos(indirects).iva_pct : null)
+  const netoTotal = escalera.neto
+  const matTotal = escalera.mat
+  const moTotal = escalera.mo
+  const directoTotal = escalera.directo
+  const indirectoTotal = escalera.indirecto
+  const beneficioTotal = escalera.beneficio
+  const impuestosTotal = escalera.impuestos
 
   return (
     <div className="p-4 fade-in h-full flex flex-col">
@@ -193,9 +211,15 @@ export default function Analysis() {
         )}
 
         {/* Summary bar — same CostSummaryBar as Editor */}
-        <div className="rounded-xl border border-gray-100 shadow-sm mb-3 overflow-hidden">
-          <CostSummaryBar mat={matTotal} mo={moTotal} directo={directoTotal} indirecto={indirectoTotal} neto={netoTotal} />
-        </div>
+        {!loading && (
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm mb-3 p-3">
+            <CostSummaryBar
+              escalera={escalera}
+              pcts={pctsEscalera(indirects)}
+              titulo={<>Todo el presupuesto · {itemsCount} {itemsCount === 1 ? 'trabajo' : 'trabajos'}</>}
+            />
+          </div>
+        )}
       </div>
 
       {/* Scrollable table area */}
@@ -215,13 +239,14 @@ export default function Analysis() {
                 <th className="px-3 py-2 text-right font-semibold text-[11px] tracking-wide">Directo</th>
                 <th className="px-3 py-2 text-right font-semibold text-[11px] tracking-wide">Indirecto</th>
                 <th className="px-3 py-2 text-right font-semibold text-[11px] tracking-wide">Beneficio</th>
-                <th className="px-3 py-2 text-right font-bold text-[11px] tracking-wide">Neto</th>
+                <th className="px-3 py-2 text-right font-semibold text-[11px] tracking-wide">Impuestos</th>
+                <th className="px-3 py-2 text-right font-bold text-[11px] tracking-wide">Precio sin IVA</th>
               </tr>
             </thead>
             <tbody>
               {sections.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-3 py-8 text-center text-gray-400">
+                  <td colSpan={8} className="px-3 py-8 text-center text-gray-400">
                     No hay datos para agrupar con esta vista.
                   </td>
                 </tr>
@@ -234,6 +259,7 @@ export default function Analysis() {
                     <td className="px-3 py-2 cost-cell text-blue-700 font-medium">{fmtCurrency(s.directo)}</td>
                     <td className="px-3 py-2 cost-cell">{fmtCurrency(s.indirecto)}</td>
                     <td className="px-3 py-2 cost-cell">{fmtCurrency(s.benef)}</td>
+                    <td className="px-3 py-2 cost-cell">{fmtCurrency(s.impuestos)}</td>
                     <td className="px-3 py-2 cost-cell font-bold">{fmtCurrency(s.neto)}</td>
                   </tr>
                 ))
@@ -247,6 +273,7 @@ export default function Analysis() {
                 <td className="px-3 py-2.5 cost-cell text-blue-700 font-bold">{fmtCurrency(directoTotal)}</td>
                 <td className="px-3 py-2.5 cost-cell text-[#E8663C] font-bold">{fmtCurrency(indirectoTotal)}</td>
                 <td className="px-3 py-2.5 cost-cell text-[#143D34] font-extrabold text-sm">{fmtCurrency(beneficioTotal)}</td>
+                <td className="px-3 py-2.5 cost-cell text-[#143D34] font-extrabold text-sm">{fmtCurrency(impuestosTotal)}</td>
                 <td className="px-3 py-2.5 cost-cell text-[#143D34] font-extrabold text-sm">{fmtCurrency(netoTotal)}</td>
               </tr>
             </tfoot>

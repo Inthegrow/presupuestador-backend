@@ -91,6 +91,7 @@ ROUTE_ROLES: dict[tuple[str, str], str] = {
     # Indirectos generales (configuración de la empresa)
     ("GET", "/indirects/general"): MEMBER,
     ("PATCH", "/indirects/general"): ADMIN,
+    ("POST", "/indirects/general/afectados"): ADMIN,
     # Catálogos
     ("POST", "/catalogs/upload-csv"): EDITOR,
     ("POST", "/catalogs/upload-excel"): EDITOR,

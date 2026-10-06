@@ -1,10 +1,7 @@
 import { useState } from 'react'
 import type { ReactNode, Ref } from 'react'
 import { Search } from 'lucide-react'
-
-function sinTildes(t: string): string {
-  return t.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-}
+import { palabrasDe, tieneTodas } from '../../lib/buscar'
 
 // Una fórmula de la lista (en Cargar obra viene del catálogo del Maestro, en el detalle de las fórmulas de la empresa)
 export interface FormulaBuscable {
@@ -68,13 +65,10 @@ export default function BuscadorFormulas<R extends FormulaBuscable, Q extends Fo
     if (textoDeAfuera === undefined) setQPropio(t)
     onTexto?.(t)
   }
-  const texto = sinTildes(q.trim().toLowerCase())
   // Cada palabra escrita tiene que estar (en cualquier orden): "hueco 18" encuentra "Hueco del 18"
-  const palabras = texto.split(/\s+/).filter(Boolean)
-  const filtradas = recetas.filter((r) => {
-    const donde = sinTildes(`${r.nombre} ${r.categoria || ''}`.toLowerCase())
-    return palabras.every((p) => donde.includes(p))
-  })
+  const palabras = palabrasDe(q)
+  const texto = palabras.join(' ')
+  const filtradas = recetas.filter((r) => tieneTodas(palabras, r.nombre, r.categoria))
   const grupos: Record<string, R[]> = {}
   for (const r of filtradas) (grupos[r.categoria || 'Otras'] ||= []).push(r)
 

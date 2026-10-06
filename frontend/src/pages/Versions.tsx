@@ -3,10 +3,17 @@ import { useParams } from 'react-router-dom'
 import { RefreshCw, Eye, GitCompare, Plus, CalendarClock } from 'lucide-react'
 import { budgetApi } from '../lib/api'
 import { useAuth } from '../contexts/AuthContext'
-import { fmtCurrency, fmtDate } from '../lib/format'
+import { fmtDate, fmtPesos } from '../lib/format'
 import type { Budget, BudgetVersion, PriceUpdateResult } from '../types'
 
-type VersionRow = BudgetVersion & { neto: number; label: string; author: string; date: string }
+// neto: precio sin IVA de la versión (null = el servidor no lo mandó: no se inventa un $0)
+type VersionRow = BudgetVersion & { neto: number | null; label: string; date: string }
+
+function netoDe(v: BudgetVersion): number | null {
+  if (typeof v.neto_total === 'number' && Number.isFinite(v.neto_total)) return v.neto_total
+  const viejo = (v.data as Record<string, unknown> | null)?.neto_total
+  return typeof viejo === 'number' && Number.isFinite(viejo) ? viejo : null
+}
 
 // La API contesta "409: {...json...}": mostrar solo el mensaje
 function errorText(e: unknown): string {
@@ -28,12 +35,12 @@ export default function Versions() {
   const [priceError, setPriceError] = useState<string | null>(null)
 
   function mapVersions(data: BudgetVersion[]): VersionRow[] {
-    return data.map((v) => ({
+    // La más nueva primero (la "Actual"), aunque el servidor las mande en otro orden
+    return [...data].sort((a, b) => (b.version ?? 0) - (a.version ?? 0)).map((v) => ({
       ...v,
-      neto: (v.data as Record<string, number>)?.neto_total ?? 0,
-      label: v.notas || `v${v.version}`,
-      author: 'Carlos',
-      date: new Date(v.created_at).toLocaleDateString('es-AR'),
+      neto: netoDe(v),
+      label: v.notas || '',
+      date: v.created_at ? new Date(v.created_at).toLocaleDateString('es-AR') : '',
     }))
   }
 
@@ -173,10 +180,10 @@ export default function Versions() {
         <div className="max-w-2xl space-y-3">
           {versions.map((v, i) => {
             const isCurrent = i === 0
-            const deltaNeto = current && !isCurrent ? v.neto - current.neto : 0
-            const deltaPct = current && !isCurrent && current.neto !== 0
-              ? ((v.neto - current.neto) / current.neto) * 100
-              : 0
+            // Diferencia de esta versión contra la actual (solo si se conocen los dos precios)
+            const comparable = !isCurrent && current && v.neto !== null && current.neto !== null
+            const deltaNeto = comparable ? (v.neto as number) - (current.neto as number) : 0
+            const deltaPct = comparable && current.neto !== 0 ? (deltaNeto / (current.neto as number)) * 100 : null
 
             return (
               <div
@@ -186,15 +193,23 @@ export default function Versions() {
                 <div className="p-4 flex justify-between items-center">
                   <div>
                     <div className="font-semibold text-sm text-gray-900">
-                      v{v.version} — {v.label}
+                      v{v.version}{v.label ? ` — ${v.label}` : ''}
                     </div>
                     <div className="text-[10px] text-gray-400 mt-0.5">
-                      {v.author} · {v.date}{v.precios_al ? ` · Precios al ${fmtDate(v.precios_al)}` : ''} · Neto: {fmtCurrency(v.neto)}
+                      {[v.date && `Guardada el ${v.date}`, v.precios_al && `Precios al ${fmtDate(v.precios_al)}`].filter(Boolean).join(' · ')}
                     </div>
-                    {!isCurrent && deltaNeto !== 0 && (
-                      <div className={`text-[10px] mt-0.5 ${deltaNeto < 0 ? 'text-red-500' : 'text-green-600'}`}>
-                        {deltaNeto < 0 ? '' : '+'}
-                        {fmtCurrency(deltaNeto)} ({deltaPct >= 0 ? '+' : ''}{deltaPct.toFixed(1)}%) vs v{current.version}
+                    <div className="text-xs text-gray-700 mt-1" data-testid="version-precio" data-valor={v.neto ?? ''}>
+                      Precio sin IVA: <span className="font-semibold tabular-nums">{v.neto === null ? '—' : fmtPesos(v.neto)}</span>
+                    </div>
+                    {comparable && (
+                      <div className={`text-[11px] mt-0.5 ${deltaNeto === 0 ? 'text-gray-400' : 'text-gray-600'}`}>
+                        {deltaNeto === 0
+                          ? `Igual que v${current.version}`
+                          : <>
+                              {deltaNeto > 0 ? '+' : '−'}{fmtPesos(Math.abs(deltaNeto))}
+                              {deltaPct !== null && ` (${deltaPct > 0 ? '+' : '−'}${Math.abs(deltaPct).toLocaleString('es-AR', { maximumFractionDigits: 1 })}%)`}
+                              {' '}contra v{current.version}
+                            </>}
                       </div>
                     )}
                   </div>
@@ -221,7 +236,7 @@ export default function Versions() {
 
       <div className="mt-4 max-w-2xl bg-amber-50 border border-amber-200 rounded-xl p-4 text-xs text-amber-800">
         <p className="font-semibold mb-1">Acerca de las versiones</p>
-        <p>Cada version guarda una copia completa del presupuesto. Podes comparar netos entre versiones y restaurar cualquier punto anterior.</p>
+        <p>Cada versión guarda una copia completa del presupuesto, con su precio sin IVA. Al lado de cada una ves cuánto cambió contra la actual.</p>
       </div>
     </div>
   )

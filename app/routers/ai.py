@@ -1153,7 +1153,9 @@ async def insert_ai_suggestions(
                 continue
             total_inserted += 1
             new_item_id = result.data[0]["id"]
-            created_items.append(result.data[0])
+            # The same dict gets its direct cost below, so the cascade at the end prices it
+            row["id"] = new_item_id
+            created_items.append(row)
 
             # Create resources if the item has them
             item_resources_count = 0
@@ -1224,20 +1226,14 @@ async def insert_ai_suggestions(
     if created_items:
         try:
             from app.budget_prices import budget_config
-            from app.calculations import calc_cascade_indirects
+            from app.calculations import CASCADE_FIELDS, price_item
             config = budget_config(db, org_id, budget_result.data)
 
             for item_row in created_items:
-                if float(item_row.get("directo_total", 0)) > 0:
-                    updated = calc_cascade_indirects(dict(item_row), config)
-                    db.table("budget_items").update({
-                        "indirecto_total": updated["indirecto_total"],
-                        "beneficio_total": updated["beneficio_total"],
-                        "impuestos_total": updated.get("impuestos_total", 0),
-                        "neto_total": updated["neto_total"],
-                        "iva_total": updated.get("iva_total", 0),
-                        "total_final": updated.get("total_final", 0),
-                    }).eq("id", item_row["id"]).execute()
+                updated = price_item(dict(item_row), config)
+                db.table("budget_items").update(
+                    {k: updated[k] for k in CASCADE_FIELDS}
+                ).eq("id", item_row["id"]).execute()
         except Exception:
             logger.warning("Failed to apply cascade indirects after AI insertion", exc_info=True)
 

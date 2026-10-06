@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Trash2 } from 'lucide-react'
 import { useAuth } from '../../contexts/AuthContext'
 import type { Budget } from '../../types'
-import { fmtCurrency } from '../../lib/format'
+import { fmtPesos } from '../../lib/format'
 import { budgetApi } from '../../lib/api'
 
 const STATUS_LABELS: Record<string, string> = {
@@ -175,17 +175,17 @@ export default function BudgetCard({ budget, directTotal, netoTotal, subtitle, t
             ))}
           </div>
         )}
-        <div className="mt-4 pt-3 border-t flex justify-between items-end">
+        <div className="mt-4 pt-3 border-t flex justify-between items-end gap-x-3 gap-y-1 flex-wrap">
           <div>
-            <div className="text-[10px] text-gray-400">Directo</div>
-            <div className="font-semibold text-gray-800 text-sm">
-              {directTotal !== undefined ? fmtCurrency(directTotal) : '—'}
+            <div className="text-[10px] text-gray-400">Costo directo</div>
+            <div className="font-semibold text-gray-800 text-sm tabular-nums">
+              {directTotal !== undefined ? fmtPesos(directTotal) : '—'}
             </div>
           </div>
-          <div className="text-right">
-            <div className="text-[10px] text-gray-400">Neto Total</div>
-            <div className="font-bold text-[#2D8D68] text-lg">
-              {netoTotal !== undefined ? fmtCurrency(netoTotal) : '—'}
+          <div className="text-right ml-auto" data-testid="tarjeta-precio-sin-iva" data-valor={netoTotal ?? ''}>
+            <div className="text-[10px] text-gray-400">Precio sin IVA</div>
+            <div className="font-bold text-[#2D8D68] text-lg tabular-nums">
+              {netoTotal !== undefined ? fmtPesos(netoTotal) : '—'}
             </div>
           </div>
         </div>

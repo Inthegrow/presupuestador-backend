@@ -7,6 +7,7 @@ Uso (desde la raíz del repo):
 Los dos Excel se bajan de Drive (ver HANDOFF, sección 7). La primera corrida tarda ~30 s y deja un caché JSON en EXCEL_DIR.
 El usuario falso es admin de TERRAC SA. Con FAKE_DOS_EMPRESAS=1 tiene dos empresas: TERRAC SA (leader) y
 "Obra Demo" vacía (admin); GET /me devuelve las dos y el header X-Org-Id decide (sin header: 428 "Elegí la empresa").
+Para las pruebas: POST /__fake/insert/<tabla> con una lista de filas las mete tal cual (scripts/e2e_formulas.cjs).
 """
 from __future__ import annotations
 
@@ -23,7 +24,7 @@ os.environ.setdefault("ALLOWED_ORIGINS", "http://localhost:5179,http://127.0.0.1
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import openpyxl  # noqa: E402
-from fastapi import Header  # noqa: E402
+from fastapi import Body, Header  # noqa: E402
 
 from app.auth import get_user_session, resolve_org  # noqa: E402
 from app.maestro_import import TIPO_LABELS, parse_workbook  # noqa: E402
@@ -143,6 +144,12 @@ def main() -> None:
     from app.main import create_app
     application = create_app()
     application.dependency_overrides[get_user_session] = fake_session
+
+    @application.post("/__fake/insert/{table}")
+    def fake_insert(table: str, rows: list[dict] = Body(...)) -> list[dict]:
+        """Solo para las pruebas: mete filas tal cual en la base falsa (ej. una fórmula con número, que la API no deja crear)."""
+        return fake.table(table).insert([{"org_id": ORG, **r} for r in rows]).execute().data
+
     import uvicorn
     uvicorn.run(application, host="127.0.0.1", port=8000, log_level="warning")
 

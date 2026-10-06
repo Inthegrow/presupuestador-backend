@@ -1,10 +1,11 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Edit3, ChevronRight, Plus, CheckCircle, AlertCircle, X, Loader2, LayoutGrid, MousePointerClick, Command, RefreshCw } from 'lucide-react'
-import { budgetApi } from '../lib/api'
+import { budgetApi, mensajeDeError } from '../lib/api'
 import { useAuth } from '../contexts/AuthContext'
-import { fmtCurrency, fmtNumber } from '../lib/format'
-import type { Budget, TreeNode, BudgetItem } from '../types'
+import { fmtCurrency, fmtNumber, fmtPesos } from '../lib/format'
+import { escaleraDe, indirectosCompletos, pctsEscalera } from '../lib/cascada'
+import type { Budget, TreeNode, BudgetItem, IndirectConfig } from '../types'
 import TreeView from '../components/ui/TreeView'
 import DataTable from '../components/ui/DataTable'
 import CostSummaryBar from '../components/ui/CostSummaryBar'
@@ -17,14 +18,6 @@ import { estadoEnTabla } from '../lib/semaforo'
 import { regroupItems } from '../lib/viewModes'
 import type { ViewMode } from '../lib/viewModes'
 
-
-const MARKUP_LINKS = [
-  { label: 'Estr', pct: 15 },
-  { label: 'Jef', pct: 8 },
-  { label: 'Log', pct: 5 },
-  { label: 'Herr', pct: 3 },
-  { label: 'Benef', pct: 10 },
-]
 
 const FIELD_LABELS: Record<string, string> = {
   cantidad: 'Cantidad',
@@ -59,10 +52,14 @@ export default function Editor() {
   // Precios que faltan en cada trabajo, y de qué trabajos se preguntó (null: la consulta falló o no volvió)
   const [faltantes, setFaltantes] = useState<{ porItem: Record<string, number>; recursosPorItem: Record<string, number>; ids: Set<string> } | null>(null)
   const faltantesReq = useRef(0)
-  const [indirectConfig, setIndirectConfig] = useState<{estructura_pct: number, jefatura_pct: number, logistica_pct: number, herramientas_pct: number} | null>(null)
+  // Los % de la obra (para mostrarlos al lado de cada renglón). null = cargando o no se pudieron leer
+  const [indirectConfig, setIndirectConfig] = useState<IndirectConfig | null>(null)
+  const [indirectFallo, setIndirectFallo] = useState(false)
 
   const [recalculating, setRecalculating] = useState(false)
-  const [autoRecalculating, setAutoRecalculating] = useState(false)
+  // Error del último "Recálculo completo" (queda a la vista hasta cerrarlo o volver a probar)
+  const [recalcError, setRecalcError] = useState<string[] | null>(null)
+  const [savingVersion, setSavingVersion] = useState(false)
   const [showStatusMenu, setShowStatusMenu] = useState(false)
   const [statusChanging, setStatusChanging] = useState(false)
 
@@ -125,9 +122,10 @@ export default function Editor() {
   const addToast = useCallback((message: string, type: 'success' | 'error' = 'success') => {
     const tid = ++toastIdCounter
     setToasts((prev) => [...prev, { id: tid, message, type }])
+    // Los errores quedan más tiempo: hay que poder leerlos
     setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== tid))
-    }, 4000)
+    }, type === 'error' ? 9000 : 4000)
   }, [])
 
   const removeToast = useCallback((tid: number) => {
@@ -209,67 +207,71 @@ export default function Editor() {
       })
       .catch(() => {/* keep empty state */})
       .finally(() => setLoading(false))
+    setIndirectFallo(false)
     budgetApi.getIndirects(id).then(config => {
       if (config) setIndirectConfig(config)
-    }).catch(() => {})
+      else setIndirectFallo(true)
+    }).catch(() => setIndirectFallo(true))
   }, [id, refreshData, getItemsForNode, cargarFaltantes])
 
+  // Recálculo completo: la misma cuenta que "Recalcular" de Coeficiente de pase (fórmulas, desperdicio, redondeo e
+  // indirectos). Si falla, o si alguna fórmula no se pudo calcular, queda escrito en rojo arriba de la tabla.
   async function handleRecalculate() {
     if (!id || recalculating) return
     setRecalculating(true)
+    setRecalcError(null)
     try {
-      await budgetApi.recalculate(id)
-      await budgetApi.applyIndirects(id)
+      const r = await budgetApi.cascadeRecalculate(id)
       const data = await refreshData()
       // Refresca también la lista visible del rubro elegido (si no, la tabla queda con los números viejos)
       if (data && selectedNode) setItems(getItemsForNode(selectedNode, data.items))
       if (data) cargarFaltantes(data.items)
+      const errores = Array.isArray(r?.errores) ? r.errores : []
+      if (errores.length > 0) setRecalcError(errores)
+      else addToast('Listo: precios recalculados')
     } catch (err) {
-      console.error('Error recalculating:', err)
+      setRecalcError([mensajeDeError(err, 'No se pudo recalcular. Probá de nuevo.')])
     } finally {
       setRecalculating(false)
     }
   }
 
-  // Handle inline cell edit — PATCH → auto-apply indirects → refresh
+  async function handleSaveVersion() {
+    if (!id || savingVersion) return
+    setSavingVersion(true)
+    try {
+      const v = await budgetApi.createVersion(id)
+      addToast(v?.version ? `Versión v${v.version} guardada` : 'Versión guardada')
+    } catch (err) {
+      addToast(`No se guardó la versión: ${mensajeDeError(err)}`, 'error')
+    } finally {
+      setSavingVersion(false)
+    }
+  }
+
+  // Edición en la tabla: el servidor guarda y hace la cuenta completa de ese trabajo (indirectos, beneficio,
+  // impuestos, IVA) y devuelve el trabajo ya calculado. Si falla, se dice y la celda queda en rojo.
   const handleEditItem = useCallback(async (itemId: string, field: string, oldValue: number, newValue: number) => {
-    if (!id) throw new Error('No budget ID')
+    if (!id) throw new Error('Falta el presupuesto')
 
     const fieldLabel = FIELD_LABELS[field] ?? field
     const formatVal = field === 'cantidad' ? (v: number) => fmtNumber(v, 2) : fmtCurrency
 
-    // 1. PATCH the item
-    const result = await budgetApi.updateItem(id, itemId, { [field]: newValue })
-    const updatedItem = (result as unknown as { item: BudgetItem }).item
-    if (!updatedItem) throw new Error('No updated item in response')
+    let updatedItem: BudgetItem | undefined
+    try {
+      const result = await budgetApi.updateItem(id, itemId, { [field]: newValue })
+      updatedItem = (result as unknown as { item?: BudgetItem })?.item
+      if (!updatedItem) throw new Error('El servidor no devolvió el trabajo actualizado')
+    } catch (err) {
+      addToast(`No se guardó ${fieldLabel.toLowerCase()}: ${mensajeDeError(err)}`, 'error')
+      throw err
+    }
 
-    // Optimistic update — show new directo_total immediately
-    setAllItems((prev) =>
-      prev.map((item) => (item.id === itemId ? { ...item, ...updatedItem } : item)),
-    )
-    setItems((prev) =>
-      prev.map((item) => (item.id === itemId ? { ...item, ...updatedItem } : item)),
-    )
+    const nuevo = updatedItem
+    setAllItems((prev) => prev.map((item) => (item.id === itemId ? { ...item, ...nuevo } : item)))
+    setItems((prev) => prev.map((item) => (item.id === itemId ? { ...item, ...nuevo } : item)))
 
     addToast(`${fieldLabel} actualizado: ${formatVal(oldValue)} → ${formatVal(newValue)}`)
-
-    // 2. Auto-apply indirects (non-blocking — runs in background)
-    setAutoRecalculating(true)
-    try {
-      await budgetApi.applyIndirects(id)
-      // 3. Refresh to show updated indirecto_total / neto_total
-      const freshItems = await budgetApi.getItems(id)
-      setAllItems(freshItems)
-      setItems((prev) => {
-        // Keep same items visible — just update values
-        const freshById = new Map(freshItems.map((i) => [i.id, i]))
-        return prev.map((item) => freshById.get(item.id) ?? item)
-      })
-    } catch {
-      // Non-fatal — values will be correct on next manual recalc
-    } finally {
-      setAutoRecalculating(false)
-    }
   }, [id, addToast])
 
   /** Suggest next section code */
@@ -465,22 +467,15 @@ export default function Editor() {
     ? `${selectedNode.code ? selectedNode.code + ' ' : ''}${selectedNode.description ?? ''}`
     : '\u2014'
 
-  const mat = items.reduce((s, i) => s + i.mat_total, 0)
-  const mo = items.reduce((s, i) => s + i.mo_total, 0)
-  const directo = items.reduce((s, i) => s + i.directo_total, 0)
-  const indirecto = items.reduce((s, i) => s + i.indirecto_total, 0)
-  const neto = items.reduce((s, i) => s + i.neto_total, 0)
-
-  const indirectoPct = indirectConfig
-    ? Math.round(indirectConfig.estructura_pct + indirectConfig.jefatura_pct + indirectConfig.logistica_pct + indirectConfig.herramientas_pct)
-    : null
-
-  const markupLinks = indirectConfig ? [
-    { label: 'Estructura', pct: Math.round(indirectConfig.estructura_pct) },
-    { label: 'Jefatura', pct: Math.round(indirectConfig.jefatura_pct) },
-    { label: 'Logística', pct: Math.round(indirectConfig.logistica_pct) },
-    { label: 'Herramientas', pct: Math.round(indirectConfig.herramientas_pct) },
-  ] : MARKUP_LINKS
+  // Totales: la suma de lo que guardó el servidor en cada trabajo (los rubros no suman)
+  const trabajos = useMemo(() => allItems.filter((i) => i.notas !== 'Seccion'), [allItems])
+  const ivaPct = indirectConfig ? indirectosCompletos(indirectConfig).iva_pct : null
+  const escalera = useMemo(() => escaleraDe(trabajos, ivaPct), [trabajos, ivaPct])
+  const pcts = pctsEscalera(indirectConfig)
+  // Lo elegido en el árbol
+  const trabajosElegidos = items.filter((i) => i.notas !== 'Seccion')
+  const directo = trabajosElegidos.reduce((s, i) => s + (i.directo_total ?? 0), 0)
+  const netoElegido = trabajosElegidos.reduce((s, i) => s + (i.neto_total ?? 0), 0)
 
   return (
     <div className="p-4 fade-in h-full flex flex-col">
@@ -536,7 +531,7 @@ export default function Editor() {
       `}</style>
 
       {/* Breadcrumb */}
-      <div className="flex items-center gap-1.5 text-xs mb-1">
+      <div className="flex items-center flex-wrap gap-1.5 text-xs mb-1">
         <span
           className="text-gray-400 cursor-pointer hover:text-[#2D8D68] transition-colors"
           onClick={() => navigate('/app/dashboard')}
@@ -556,8 +551,8 @@ export default function Editor() {
       </div>
 
       {/* Title bar */}
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-3">
+      <div className="flex items-center justify-between gap-x-4 gap-y-2 flex-wrap mb-3">
+        <div className="flex items-center gap-3 flex-wrap min-w-0">
           <div className="w-1 h-7 bg-gradient-to-b from-[#2D8D68] to-[#2D8D68]/40 rounded-full" />
           <h1 className="text-xl font-extrabold text-gray-900">
             {budget?.name?.toUpperCase() ?? 'PRESUPUESTO'}
@@ -590,18 +585,13 @@ export default function Editor() {
             )}
           </div>
         </div>
-        <div className="flex gap-2 items-center">
-          {autoRecalculating && (
-            <span className="flex items-center gap-1 text-[10px] text-[#2D8D68] font-medium px-2 py-1 bg-[#E8F5EE] rounded-full">
-              <Loader2 size={10} className="animate-spin" />
-              Recalculando...
-            </span>
-          )}
+        <div className="flex gap-2 items-center flex-wrap">
           {puedeEditar && (
             <button
               onClick={handleRecalculate}
               disabled={recalculating}
-              className="bg-white border text-gray-700 px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-gray-50 flex items-center gap-1.5 transition-colors disabled:opacity-50"
+              title="Vuelve a calcular todos los trabajos: fórmulas, precios y Coeficiente de pase"
+              className="bg-white border border-gray-200 text-gray-700 px-3.5 py-1.5 rounded-xl text-xs font-medium hover:bg-gray-50 hover:shadow-sm flex items-center gap-1.5 transition-all duration-200 disabled:opacity-50"
             >
               <RefreshCw size={13} className={recalculating ? 'animate-spin' : ''} />
               {recalculating ? 'Recalculando...' : 'Recálculo completo'}
@@ -627,10 +617,11 @@ export default function Editor() {
           </button>
           {puedeEditar && (
             <button
-              onClick={() => id && budgetApi.createVersion(id)}
-              className="bg-gradient-to-r from-[#2D8D68] to-[#1B5E4B] hover:from-[#1B5E4B] hover:to-[#143D34] text-white font-semibold px-5 py-1.5 rounded-xl text-xs transition-all duration-200 shadow-sm hover:shadow-md"
+              onClick={handleSaveVersion}
+              disabled={savingVersion}
+              className="disabled:opacity-60 bg-gradient-to-r from-[#2D8D68] to-[#1B5E4B] hover:from-[#1B5E4B] hover:to-[#143D34] text-white font-semibold px-5 py-1.5 rounded-xl text-xs transition-all duration-200 shadow-sm hover:shadow-md"
             >
-              Guardar version
+              {savingVersion ? 'Guardando…' : 'Guardar versión'}
             </button>
           )}
         </div>
@@ -640,6 +631,37 @@ export default function Editor() {
         <div className="flex items-center gap-2 text-sm text-gray-400 mb-3">
           <div className="w-4 h-4 border-2 border-[#2D8D68] border-t-transparent rounded-full animate-spin" />
           Cargando...
+        </div>
+      )}
+
+      {recalcError && (
+        <div role="alert" data-testid="error-recalculo" className="mb-3 flex items-start gap-2 bg-red-50 border border-red-200 text-red-700 rounded-xl px-4 py-3 text-xs">
+          <AlertCircle size={15} className="flex-shrink-0 mt-0.5 text-red-500" />
+          <div className="flex-1 min-w-0">
+            <p className="font-semibold">El recálculo no terminó bien</p>
+            <ul className="mt-1 space-y-0.5">
+              {recalcError.slice(0, 6).map((e, i) => <li key={i}>{e}</li>)}
+              {recalcError.length > 6 && <li>y {recalcError.length - 6} más.</li>}
+            </ul>
+          </div>
+          <button onClick={handleRecalculate} disabled={recalculating} className="font-semibold underline hover:text-red-900 disabled:opacity-50">
+            Probar de nuevo
+          </button>
+          <button onClick={() => setRecalcError(null)} aria-label="Cerrar" className="opacity-60 hover:opacity-100">
+            <X size={14} />
+          </button>
+        </div>
+      )}
+
+      {/* Del costo directo al precio: todo el presupuesto, con lo guardado en cada trabajo */}
+      {!loading && (
+        <div className="mb-3 bg-white rounded-2xl shadow-sm border border-gray-100 px-3 pt-2.5 pb-1.5">
+          <CostSummaryBar
+            escalera={escalera}
+            pcts={pcts}
+            titulo={<>Todo el presupuesto · {trabajos.length} {trabajos.length === 1 ? 'trabajo' : 'trabajos'}</>}
+          />
+          <MarkupChainDisplay config={indirectConfig} budgetId={id} fallo={indirectFallo} />
         </div>
       )}
 
@@ -740,19 +762,19 @@ export default function Editor() {
           <div className="bg-gradient-to-r from-gray-50 to-white border-b px-5 py-3 flex justify-between items-center">
             <div>
               <h2 className="font-bold text-gray-900 text-sm">{selectedLabel}</h2>
-              <p className="text-[10px] text-gray-400 mt-0.5 flex items-center gap-1.5">
+              <p className="text-[10px] text-gray-400 mt-0.5 flex items-center gap-x-1.5 flex-wrap">
                 <span className="inline-flex items-center gap-0.5">
                   <span className="w-1.5 h-1.5 rounded-full bg-[#2D8D68] inline-block" />
-                  {items.length} items
+                  {trabajosElegidos.length} {trabajosElegidos.length === 1 ? 'trabajo' : 'trabajos'}
                 </span>
                 <span className="text-gray-300">|</span>
-                <span>{fmtCurrency(directo)} costo directo</span>
+                <span>Costo directo {fmtPesos(directo)}</span>
+                <span className="text-gray-300">|</span>
+                <span className="font-semibold text-[#1B5E4B]" data-testid="precio-sin-iva-elegido">Precio sin IVA {fmtPesos(netoElegido)}</span>
               </p>
             </div>
           </div>
 
-          <CostSummaryBar mat={mat} mo={mo} directo={directo} indirecto={indirecto} neto={neto} indirectoPct={indirectoPct ?? undefined} />
-          <MarkupChainDisplay directo={directo} neto={neto} links={markupLinks} budgetId={id} />
 
           {puedeEditar && id && (
             <AgregarTrabajo
@@ -848,7 +870,7 @@ export default function Editor() {
           </div>
           <div className="px-5 py-2.5 bg-gradient-to-r from-[#E8F5EE] to-[#E8F5EE]/50 text-[10px] text-[#1B5E4B] border-t flex items-center gap-1.5 flex-shrink-0">
             <span className="w-1 h-1 rounded-full bg-[#2D8D68] inline-block" />
-            Click en celdas punteadas para editar. Totales se recalculan automaticamente por el coeficiente de pase.
+            Tocá las celdas punteadas para editar. Cada cambio recalcula el precio del trabajo con el Coeficiente de pase.
           </div>
         </div>
       </div>

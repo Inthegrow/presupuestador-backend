@@ -1,58 +1,111 @@
-import { fmtCurrency } from '../../lib/format'
+import type { ReactNode } from 'react'
+import { fmtPesos } from '../../lib/format'
+import { fmtPct } from '../../lib/cascada'
+import type { Escalera, PctsEscalera } from '../../lib/cascada'
 
 interface Props {
-  mat: number
-  mo: number
-  directo: number
-  indirecto: number
-  neto: number
-  indirectoPct?: number
+  // Los totales guardados, ya sumados (lib/cascada.ts → escaleraDe)
+  escalera: Escalera
+  // Los % de la obra; null mientras cargan o si no se pudieron leer: entonces no se muestra ningún %
+  pcts: PctsEscalera | null
+  // Qué se está sumando (ej. "Todo el presupuesto · 42 trabajos")
+  titulo?: ReactNode
 }
 
-export default function CostSummaryBar({ mat, mo, directo, indirecto, neto, indirectoPct }: Props) {
+function Chip({ pct, testId }: { pct: number | undefined; testId?: string }) {
+  if (pct === undefined) return null
   return (
-    <div className="grid grid-cols-5 gap-3 p-4 border-b bg-gradient-to-b from-white to-gray-50/50">
-      {/* Materiales */}
-      <div className="relative overflow-hidden rounded-xl p-3 text-center shadow-sm border border-blue-100 bg-gradient-to-br from-blue-50 to-white">
-        <div className="absolute top-0 left-0 w-full h-0.5 bg-gradient-to-r from-blue-400 to-blue-200" />
-        <div className="text-[10px] font-semibold text-blue-500 uppercase tracking-wider mb-1">Materiales</div>
-        <div className="font-bold text-lg text-blue-800 tabular-nums">{fmtCurrency(mat)}</div>
-      </div>
+    <span
+      data-testid={testId}
+      className="text-[10px] font-bold px-1.5 rounded-full bg-gray-100 text-gray-600 normal-case tracking-normal tabular-nums"
+    >
+      {fmtPct(pct)}%
+    </span>
+  )
+}
 
-      {/* Mano de Obra */}
-      <div className="relative overflow-hidden rounded-xl p-3 text-center shadow-sm border border-purple-100 bg-gradient-to-br from-purple-50 to-white">
-        <div className="absolute top-0 left-0 w-full h-0.5 bg-gradient-to-r from-purple-400 to-purple-200" />
-        <div className="text-[10px] font-semibold text-purple-500 uppercase tracking-wider mb-1">Mano de Obra</div>
-        <div className="font-bold text-lg text-purple-800 tabular-nums">{fmtCurrency(mo)}</div>
+function Peldano({
+  signo, label, pct, pctTestId, valor, testId, detalle,
+}: {
+  signo?: string
+  label: string
+  pct?: number
+  pctTestId?: string
+  valor: number
+  testId: string
+  detalle?: ReactNode
+}) {
+  return (
+    <div className="rounded-xl border border-gray-100 bg-white px-2.5 py-2.5 min-w-0" data-testid={testId} data-valor={valor}>
+      <div className="flex items-center flex-wrap gap-x-1.5 gap-y-0.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wide">
+        {signo && <span className="text-gray-300 font-bold" aria-hidden>{signo}</span>}
+        <span>{label}</span>
+        <Chip pct={pct} testId={pctTestId} />
       </div>
-
-      {/* Directo */}
-      <div className="relative overflow-hidden rounded-xl p-3 text-center shadow-sm border border-[#2D8D68]/20 bg-gradient-to-br from-[#E8F5EE] to-white">
-        <div className="absolute top-0 left-0 w-full h-0.5 bg-gradient-to-r from-[#2D8D68] to-[#2D8D68]/40" />
-        <div className="text-[10px] font-semibold text-[#2D8D68] uppercase tracking-wider mb-1">Directo</div>
-        <div className="font-bold text-lg text-[#143D34] tabular-nums">{fmtCurrency(directo)}</div>
-      </div>
-
-      {/* Indirecto */}
-      <div className="relative overflow-hidden rounded-xl p-3 text-center shadow-sm border border-[#E8663C]/20 bg-gradient-to-br from-orange-50 to-white">
-        <div className="absolute top-0 left-0 w-full h-0.5 bg-gradient-to-r from-[#E8663C] to-[#E8663C]/40" />
-        <div className="text-[10px] font-semibold text-[#E8663C] uppercase tracking-wider mb-1 flex items-center justify-center gap-1">
-          Indirecto
-          {indirectoPct ? (
-            <span className="bg-[#E8663C]/10 text-[#E8663C] text-[9px] px-1.5 py-0 rounded-full font-bold">
-              {indirectoPct}%
-            </span>
-          ) : null}
-        </div>
-        <div className="font-bold text-lg text-[#E8663C] tabular-nums">{fmtCurrency(indirecto)}</div>
-      </div>
-
-      {/* Neto — hero card */}
-      <div className="relative overflow-hidden rounded-xl p-3 text-center shadow-md border border-[#E0A33A]/30 bg-gradient-to-br from-[#FDF6E3] via-[#FEF9EE] to-white">
-        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-[#E0A33A] to-[#E0A33A]/50" />
-        <div className="text-[10px] font-bold text-[#9D7A32] uppercase tracking-wider mb-1">Neto</div>
-        <div className="font-extrabold text-xl text-[#9D7A32] tabular-nums">{fmtCurrency(neto)}</div>
-      </div>
+      <div className="font-bold text-sm @xs:text-[15px] @4xl:text-sm @6xl:text-[15px] text-gray-900 tabular-nums mt-0.5 [overflow-wrap:anywhere]">{fmtPesos(valor)}</div>
+      {detalle && <div className="text-[10px] text-gray-400 mt-0.5 leading-snug">{detalle}</div>}
     </div>
+  )
+}
+
+/**
+ * La escalera del precio, con lo guardado: Costo directo → + Indirectos → + Beneficio → + Impuestos
+ * = Precio sin IVA → + IVA = Precio con IVA. Los renglones suman (Impuestos es lo que va del subtotal al precio).
+ * Se acomoda al ancho de su caja: 6 columnas, 3, 2 o 1.
+ */
+export default function CostSummaryBar({ escalera: e, pcts, titulo }: Props) {
+  return (
+    <section className="@container" data-testid="escalera" aria-label="Del costo directo al precio">
+      {titulo && <div className="text-[11px] text-gray-500 mb-1.5">{titulo}</div>}
+      <div className="grid grid-cols-1 @xs:grid-cols-2 @2xl:grid-cols-3 @4xl:grid-cols-[repeat(4,minmax(0,1fr))_repeat(2,minmax(0,1.15fr))] gap-2">
+        <Peldano
+          label="Costo directo"
+          valor={e.directo}
+          testId="escalera-directo"
+          detalle={e.mat || e.mo ? `Materiales ${fmtPesos(e.mat)} · Mano de obra ${fmtPesos(e.mo)}` : undefined}
+        />
+        <Peldano signo="+" label="Indirectos" pct={pcts?.indirecto} pctTestId="pct-indirectos" valor={e.indirecto} testId="escalera-indirectos" />
+        <Peldano signo="+" label="Beneficio" pct={pcts?.beneficio} valor={e.beneficio} testId="escalera-beneficio" />
+        <Peldano
+          signo="+"
+          label="Impuestos"
+          pct={pcts?.impuestos}
+          valor={e.impuestos}
+          testId="escalera-impuestos"
+          detalle="Ingresos Brutos y cheque"
+        />
+
+        {/* Precio sin IVA: el número que manda */}
+        <div
+          className="rounded-xl px-3 py-2.5 min-w-0 bg-gradient-to-br from-[#2D8D68] to-[#1B5E4B] text-white shadow-sm"
+          data-testid="precio-sin-iva"
+          data-valor={e.neto}
+        >
+          <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-white/80">
+            <span aria-hidden>=</span> Precio sin IVA
+          </div>
+          <div className="font-extrabold text-sm @3xs:text-base @xs:text-lg @4xl:text-base @6xl:text-lg tabular-nums mt-0.5 [overflow-wrap:anywhere]">{fmtPesos(e.neto)}</div>
+        </div>
+
+        {/* Precio con IVA */}
+        <div
+          className="rounded-xl px-3 py-2.5 min-w-0 bg-[#E8F5EE] border border-[#2D8D68]/25"
+          data-testid="precio-con-iva"
+          data-valor={e.total_final ?? ''}
+        >
+          <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-[#1B5E4B]">
+            <span aria-hidden className="text-[#2D8D68]/60">+</span> Precio con IVA
+          </div>
+          <div className="font-extrabold text-sm @3xs:text-base @xs:text-lg @4xl:text-base @6xl:text-lg text-[#143D34] tabular-nums mt-0.5 [overflow-wrap:anywhere]">
+            {e.total_final === null ? '—' : fmtPesos(e.total_final)}
+          </div>
+          <div className="text-[10px] text-[#2D8D68] mt-0.5">
+            {e.iva === null
+              ? 'Falta saber el % de IVA'
+              : <>IVA{pcts ? ` ${fmtPct(pcts.iva)}%` : ''}: {fmtPesos(e.iva)}</>}
+          </div>
+        </div>
+      </div>
+    </section>
   )
 }

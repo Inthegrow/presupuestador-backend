@@ -138,6 +138,9 @@ export interface IndirectConfig {
   desperdicio_pct?: number | null // desperdicio general de la organización
   general?: Partial<IndirectConfig> // valores generales, para comparar
   propios?: boolean // true = la obra tiene sus propios %
+  indirecto_pct?: number // suma de los 5 conceptos de indirectos (lo calcula el servidor)
+  coeficiente?: number // precio sin IVA por cada $1 de costo directo
+  actualizados?: number // al guardar: cuántos presupuestos se recalcularon
 }
 
 export interface BudgetVersion {
@@ -148,6 +151,7 @@ export interface BudgetVersion {
   created_at: string
   precios_al?: string | null
   notas?: string | null
+  neto_total?: number | null // precio sin IVA de esa versión
 }
 
 export interface PriceUpdateResult extends CascadeResult {
@@ -273,6 +277,7 @@ export interface TemplateResource {
 export interface Template {
   id: string
   org_id: string
+  codigo?: string | null // número de la fórmula en el Maestro (ej. "6.11"); las creadas a mano no tienen
   nombre: string
   descripcion?: string
   unidad?: string

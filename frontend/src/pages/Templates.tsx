@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
-import { Library, ChevronDown, ChevronRight, Trash2, Plus, Pencil } from 'lucide-react'
-import { templateApi } from '../lib/api'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Library, ChevronDown, ChevronRight, Trash2, Plus, Pencil, Search, X, CheckCircle } from 'lucide-react'
+import { mensajeDeError, templateApi } from '../lib/api'
+import { compararFormulas, palabrasDe, tieneTodas } from '../lib/buscar'
 import { useAuth } from '../contexts/AuthContext'
 import TemplateEditor from '../components/ui/TemplateEditor'
 import type { Template, TemplateParam, TemplateResource } from '../types'
@@ -58,15 +59,19 @@ function TemplateCard({
   template,
   onDelete,
   onEdit,
+  resaltado,
 }: {
   template: Template
   onDelete: (id: string) => void
   onEdit: (t: Template) => void
+  // Recién creada o guardada: se marca un momento con este texto
+  resaltado?: string | null
 }) {
   const { puedeEditar } = useAuth()
   const [open, setOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
 
   const recursos = parseList(template.recursos)
   const parametros = parseList<TemplateParam>(template.parametros)
@@ -78,25 +83,41 @@ function TemplateCard({
       return
     }
     setDeleting(true)
+    setDeleteError(null)
     try {
       await templateApi.remove(template.id)
       onDelete(template.id)
-    } catch {
+    } catch (err) {
       setDeleting(false)
       setConfirmDelete(false)
+      setDeleteError(`No se pudo borrar: ${mensajeDeError(err)}`)
     }
   }
 
   return (
-    <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden hover:shadow-md transition-shadow">
+    <div
+      data-template-id={template.id}
+      data-testid="formula"
+      className={`bg-white rounded-xl border shadow-sm overflow-hidden hover:shadow-md transition-all duration-500 ${
+        resaltado ? 'border-[#2D8D68] ring-4 ring-[#2D8D68]/20' : 'border-gray-100'
+      }`}
+    >
       {/* Card header */}
       <div
-        className="p-4 flex items-start justify-between cursor-pointer hover:bg-gray-50 transition-colors"
+        className="p-4 flex flex-wrap items-start justify-between gap-x-3 gap-y-1 cursor-pointer hover:bg-gray-50 transition-colors"
         onClick={() => setOpen(!open)}
       >
-        <div className="flex-1 min-w-0 mr-3">
-          <div className="flex items-center gap-2 flex-wrap mb-1">
-            <span className="font-semibold text-sm text-gray-900">{template.nombre}</span>
+        <div className="grow basis-48 min-w-0">
+          {resaltado && (
+            <div role="status" className="mb-1.5 inline-flex items-center gap-1 text-[11px] font-semibold text-[#1B5E4B] bg-[#E8F5EE] rounded-full px-2 py-0.5">
+              <CheckCircle size={12} className="text-[#2D8D68]" /> {resaltado}
+            </div>
+          )}
+          <div className="flex items-baseline gap-x-2 gap-y-1 flex-wrap mb-1">
+            {template.codigo && (
+              <span className="text-xs text-gray-400 tabular-nums" data-testid="formula-codigo">{template.codigo}</span>
+            )}
+            <span className="font-semibold text-sm text-gray-900 break-words min-w-0">{template.nombre}</span>
             {template.unidad && (
               <span className="bg-blue-100 text-blue-700 rounded text-xs px-2 py-0.5 font-medium">
                 {template.unidad}
@@ -111,6 +132,7 @@ function TemplateCard({
           {template.descripcion && (
             <p className="text-xs text-gray-400 mt-0.5 truncate">{template.descripcion}</p>
           )}
+          {deleteError && <p role="alert" className="text-xs text-red-600 mt-1">{deleteError}</p>}
           <p className="text-xs text-gray-400 mt-1">
             {recursos.length} {recursos.length === 1 ? 'recurso' : 'recursos'}
             {parametros.length > 0 && (
@@ -124,7 +146,7 @@ function TemplateCard({
           </p>
         </div>
 
-        <div className="flex items-center gap-2 flex-shrink-0">
+        <div className="flex items-center gap-2 flex-shrink-0 ml-auto">
           {puedeEditar && (<>
           <button
             onClick={(e) => { e.stopPropagation(); onEdit(template) }}
@@ -219,125 +241,265 @@ function TemplateCard({
 
 // ─── Templates page ────────────────────────────────────────────────────────────
 
+const TODOS = 'Todos'
+
 export default function Templates() {
   const { puedeEditar } = useAuth()
   const [templates, setTemplates] = useState<Template[]>([])
-  const [categories, setCategories] = useState<string[]>([])
-  const [activeCategory, setActiveCategory] = useState<string>('Todos')
+  const [activeCategory, setActiveCategory] = useState<string>(TODOS)
+  const [q, setQ] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [intento, setIntento] = useState(0)
   // undefined = closed, null = new template
   const [editing, setEditing] = useState<Template | null | undefined>(undefined)
+  // La fórmula recién creada / guardada, para llevar la lista hasta ella y marcarla un momento
+  const [resaltada, setResaltada] = useState<{ id: string; texto: string } | null>(null)
+  const buscadorRef = useRef<HTMLInputElement>(null)
 
-  useEffect(() => {
-    templateApi.categories()
-      .then(setCategories)
-      .catch(() => {/* silently ignore */})
-  }, [])
-
+  // Todas las fórmulas de una vez: el rubro y la búsqueda filtran acá (y el contador sabe el total)
   useEffect(() => {
     setLoading(true)
     setError(null)
-    const categoria = activeCategory === 'Todos' ? undefined : activeCategory
-    templateApi.list(categoria)
-      .then((data) => setTemplates(data as Template[]))
-      .catch((err) => setError(err instanceof Error ? err.message : 'Error al cargar las fórmulas'))
+    templateApi.list()
+      .then((data) => setTemplates(Array.isArray(data) ? (data as Template[]) : []))
+      .catch((err) => setError(mensajeDeError(err, 'No pude traer las fórmulas.')))
       .finally(() => setLoading(false))
-  }, [activeCategory])
+  }, [intento])
+
+  // Los rubros salen de las fórmulas mismas (una fórmula nueva con un rubro nuevo lo agrega)
+  const categories = useMemo(
+    () => [...new Set(templates.map((t) => t.categoria).filter((c): c is string => !!c))].sort((a, b) => a.localeCompare(b, 'es')),
+    [templates],
+  )
+
+  const palabras = palabrasDe(q)
+  const visibles = useMemo(
+    () =>
+      templates
+        .filter((t) => activeCategory === TODOS || t.categoria === activeCategory)
+        .filter((t) => tieneTodas(palabras, t.codigo, t.nombre, t.categoria, t.descripcion))
+        .sort(compararFormulas),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [templates, activeCategory, palabras.join(' ')],
+  )
+  const hayFiltro = activeCategory !== TODOS || palabras.length > 0
+
+  // Llevar la lista hasta la fórmula resaltada y quitarle la marca después de un rato
+  useEffect(() => {
+    if (!resaltada) return
+    const raf = requestAnimationFrame(() => {
+      document.querySelector(`[data-template-id="${resaltada.id}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    })
+    const timer = setTimeout(() => setResaltada(null), 4500)
+    return () => {
+      cancelAnimationFrame(raf)
+      clearTimeout(timer)
+    }
+  }, [resaltada])
 
   function handleDelete(id: string) {
     setTemplates((prev) => prev.filter((t) => t.id !== id))
   }
 
   function handleSaved(saved: Template) {
+    const nueva = !templates.some((t) => t.id === saved.id)
     setTemplates((prev) =>
-      prev.some((t) => t.id === saved.id) ? prev.map((t) => (t.id === saved.id ? saved : t)) : [...prev, saved],
+      nueva ? [...prev, saved] : prev.map((t) => (t.id === saved.id ? saved : t)),
     )
     setEditing(undefined)
+    // Si el rubro elegido o la búsqueda la esconden, se limpian: tiene que quedar a la vista
+    if (activeCategory !== TODOS && saved.categoria !== activeCategory) setActiveCategory(TODOS)
+    if (palabras.length > 0 && !tieneTodas(palabras, saved.codigo, saved.nombre, saved.categoria, saved.descripcion)) setQ('')
+    setResaltada({ id: saved.id, texto: nueva ? 'Fórmula creada' : 'Cambios guardados' })
   }
 
+  const nuevaFormula = (ancho = false) =>
+    puedeEditar ? (
+      <button
+        onClick={() => setEditing(null)}
+        className={`bg-[#2D8D68] hover:bg-[#1B5E4B] text-white font-semibold px-4 py-2 rounded-xl text-sm flex items-center justify-center gap-1.5 shadow-sm transition-colors ${
+          ancho ? 'w-full sm:w-auto' : ''
+        }`}
+      >
+        <Plus size={16} /> Nueva fórmula
+      </button>
+    ) : null
+
   return (
-    <div className="p-6 fade-in">
-      {/* Header */}
-      <div className="flex items-center gap-2 text-[#2D8D68] text-[11px] font-bold tracking-wider mb-1">
-        <Library size={14} /> CONFIGURACIÓN
+    <div className="px-6 pb-6 fade-in">
+      {/* Cabecera fija: título, cuántas hay, el botón para crear y el buscador siempre a la vista */}
+      <div
+        data-testid="cabecera-formulas"
+        className="sticky top-0 z-20 -mx-6 px-6 pt-5 pb-3 bg-[#F5F6F8] border-b border-gray-200/80 shadow-[0_6px_12px_-10px_rgba(0,0,0,0.15)]"
+      >
+        <div className="max-w-3xl">
+          <div className="flex items-center gap-2 text-[#2D8D68] text-[11px] font-bold tracking-wider mb-1">
+            <Library size={14} /> CONFIGURACIÓN
+          </div>
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div className="flex items-center gap-x-3 gap-y-1 min-w-0 flex-wrap">
+              <div className="flex items-center gap-3">
+                <div className="w-1 h-7 bg-[#2D8D68] rounded-full flex-shrink-0" />
+                <h1 className="text-xl font-extrabold text-gray-900">FÓRMULAS</h1>
+              </div>
+              {!loading && !error && (
+                <span className="bg-[#E8F5EE] text-[#1B5E4B] text-xs font-medium px-2 py-0.5 rounded-full whitespace-nowrap">
+                  {templates.length} {templates.length === 1 ? 'fórmula' : 'fórmulas'}
+                </span>
+              )}
+            </div>
+            {nuevaFormula(true)}
+          </div>
+          <p className="hidden sm:block text-sm text-gray-500 mt-1 pl-4">
+            Qué materiales y cuánta mano de obra lleva una unidad de cada trabajo. Salen del Maestro y se pueden corregir acá.
+          </p>
+
+          {/* Buscador */}
+          <div className="mt-3 flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-3 py-2 shadow-sm focus-within:border-[#2D8D68] focus-within:ring-2 focus-within:ring-[#2D8D68]/20">
+            <Search size={15} className="text-gray-400 flex-shrink-0" />
+            <input
+              ref={buscadorRef}
+              type="search"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Escape') setQ('') }}
+              placeholder="Buscá una fórmula: nombre, rubro o número (ej. 6.11)"
+              aria-label="Buscá una fórmula: nombre, rubro o número"
+              className="flex-1 min-w-0 text-sm outline-none bg-transparent [&::-webkit-search-cancel-button]:hidden"
+            />
+            {q && (
+              <button
+                onClick={() => { setQ(''); buscadorRef.current?.focus() }}
+                aria-label="Borrar la búsqueda"
+                className="text-gray-400 hover:text-gray-700 p-0.5 rounded"
+              >
+                <X size={15} />
+              </button>
+            )}
+          </div>
+        </div>
       </div>
-      <div className="flex items-center gap-3 mb-1">
-        <div className="w-1 h-7 bg-[#2D8D68] rounded-full" />
-        <h1 className="text-xl font-extrabold text-gray-900">FÓRMULAS</h1>
-        <span className="bg-[#E8F5EE] text-[#1B5E4B] text-xs font-medium px-2 py-0.5 rounded-full">
-          {templates.length} {templates.length === 1 ? 'fórmula' : 'fórmulas'}
-        </span>
-      </div>
-      <p className="text-sm text-gray-500 mb-6 pl-4">
-        Qué materiales y cuánta mano de obra lleva una unidad de cada trabajo. Salen del Maestro y se pueden corregir acá.
-      </p>
 
-      {/* Category filter pills */}
-      {categories.length > 0 && (
-        <div className="flex flex-wrap gap-2 mb-5">
-          {['Todos', ...categories].map((cat) => (
-            <button
-              key={cat}
-              onClick={() => setActiveCategory(cat)}
-              className={`text-xs px-3 py-1 rounded-full font-medium transition-colors ${
-                activeCategory === cat
-                  ? 'bg-[#2D8D68] text-white'
-                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-              }`}
-            >
-              {cat}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* Loading */}
-      {loading && (
-        <div className="flex items-center gap-2 text-sm text-gray-400 mb-4">
-          <div className="w-4 h-4 border-2 border-[#2D8D68] border-t-transparent rounded-full animate-spin" />
-          Cargando fórmulas...
-        </div>
-      )}
-
-      {/* Error */}
-      {error && (
-        <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-4 text-sm text-red-700">
-          <p className="font-semibold mb-1">Error al cargar las fórmulas</p>
-          <p className="text-xs">{error}</p>
-        </div>
-      )}
-
-      {/* Content */}
-      <div className="max-w-3xl space-y-3">
-        {!loading && !error && templates.length === 0 && (
-          <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-8 text-center text-gray-400">
-            <Library size={32} className="mx-auto mb-3 text-gray-300" />
-            <p className="text-sm">No hay fórmulas cargadas.</p>
-            <p className="text-xs mt-1">
-              {activeCategory !== 'Todos'
-                ? `No hay fórmulas en la categoría "${activeCategory}".`
-                : 'Creá una con el botón "Nueva fórmula".'}
-            </p>
+      <div className="max-w-3xl pt-4">
+        {/* Rubros */}
+        {categories.length > 0 && (
+          <div className="flex flex-wrap gap-2 mb-3" role="group" aria-label="Rubro">
+            {[TODOS, ...categories].map((cat) => (
+              <button
+                key={cat}
+                onClick={() => setActiveCategory(cat)}
+                aria-pressed={activeCategory === cat}
+                className={`text-xs px-3 py-1 rounded-full font-medium transition-colors ${
+                  activeCategory === cat
+                    ? 'bg-[#2D8D68] text-white'
+                    : 'bg-white border border-gray-200 text-gray-600 hover:border-[#2D8D68] hover:text-[#2D8D68]'
+                }`}
+              >
+                {cat === TODOS ? 'Todos los rubros' : cat}
+              </button>
+            ))}
           </div>
         )}
 
-        {templates.map((t) => (
-          <TemplateCard key={t.id} template={t} onDelete={handleDelete} onEdit={setEditing} />
-        ))}
-
-        {puedeEditar && (
-          <button
-            onClick={() => setEditing(null)}
-            className="w-full border-2 border-dashed border-gray-200 text-gray-500 hover:border-[#2D8D68] hover:text-[#2D8D68] py-3 rounded-xl font-semibold text-sm transition-colors flex items-center justify-center gap-2"
-          >
-            <Plus size={16} /> Nueva fórmula
-          </button>
+        {/* Cuántas se ven */}
+        {!loading && !error && templates.length > 0 && (
+          <p className="text-xs text-gray-500 mb-3" data-testid="contador-formulas" aria-live="polite">
+            {hayFiltro
+              ? `${visibles.length} de ${templates.length} ${templates.length === 1 ? 'fórmula' : 'fórmulas'}`
+              : `${templates.length} ${templates.length === 1 ? 'fórmula' : 'fórmulas'}`}
+            {activeCategory !== TODOS && <span className="text-gray-400"> · en {activeCategory}</span>}
+          </p>
         )}
+
+        {/* Loading */}
+        {loading && (
+          <div className="flex items-center gap-2 text-sm text-gray-400 mb-4">
+            <div className="w-4 h-4 border-2 border-[#2D8D68] border-t-transparent rounded-full animate-spin" />
+            Cargando fórmulas...
+          </div>
+        )}
+
+        {/* Error */}
+        {error && (
+          <div role="alert" className="bg-red-50 border border-red-200 rounded-xl p-4 mb-4 text-sm text-red-700">
+            <p className="font-semibold mb-1">No pude traer las fórmulas</p>
+            <p className="text-xs">{error}</p>
+            <button
+              onClick={() => setIntento((n) => n + 1)}
+              className="mt-2 text-xs font-semibold bg-white border border-red-200 rounded-lg px-3 py-1.5 hover:bg-red-100"
+            >
+              Probar de nuevo
+            </button>
+          </div>
+        )}
+
+        <div className="space-y-3">
+          {/* Sin ninguna fórmula cargada */}
+          {!loading && !error && templates.length === 0 && (
+            <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-8 text-center text-gray-500">
+              <Library size={32} className="mx-auto mb-3 text-gray-300" />
+              <p className="text-sm font-medium text-gray-700">No hay fórmulas cargadas.</p>
+              <p className="text-xs mt-1 mb-4">
+                {puedeEditar ? 'Creá la primera: qué materiales y cuánta mano de obra lleva una unidad del trabajo.' : 'Las carga quien edita.'}
+              </p>
+              <div className="flex justify-center">{nuevaFormula()}</div>
+            </div>
+          )}
+
+          {/* Hay fórmulas, pero el filtro no deja ninguna */}
+          {!loading && !error && templates.length > 0 && visibles.length === 0 && (
+            <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-8 text-center text-gray-500" data-testid="sin-resultados">
+              <Search size={28} className="mx-auto mb-3 text-gray-300" />
+              <p className="text-sm text-gray-700">
+                {palabras.length > 0
+                  ? <>Ninguna fórmula dice «{q.trim()}»{activeCategory !== TODOS ? <> en {activeCategory}</> : null}.</>
+                  : <>No hay fórmulas en {activeCategory}.</>}
+              </p>
+              <p className="text-xs mt-1 mb-4">
+                {puedeEditar ? 'Probá con otra palabra o creá una nueva.' : 'Probá con otra palabra.'}
+              </p>
+              <div className="flex flex-wrap justify-center gap-2">
+                {nuevaFormula()}
+                {activeCategory !== TODOS && palabras.length > 0 && (
+                  <button
+                    onClick={() => setActiveCategory(TODOS)}
+                    className="bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 font-medium px-4 py-2 rounded-xl text-sm"
+                  >
+                    Buscar en todos los rubros
+                  </button>
+                )}
+                {palabras.length > 0 && (
+                  <button
+                    onClick={() => { setQ(''); buscadorRef.current?.focus() }}
+                    className="bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 font-medium px-4 py-2 rounded-xl text-sm"
+                  >
+                    Borrar la búsqueda
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {visibles.map((t) => (
+            <TemplateCard
+              key={t.id}
+              template={t}
+              onDelete={handleDelete}
+              onEdit={setEditing}
+              resaltado={resaltada?.id === t.id ? resaltada.texto : null}
+            />
+          ))}
+        </div>
       </div>
 
       {editing !== undefined && puedeEditar && (
-        <TemplateEditor template={editing} onSaved={handleSaved} onClose={() => setEditing(undefined)} />
+        <TemplateEditor
+          template={editing}
+          categoriaInicial={editing === null && activeCategory !== TODOS ? activeCategory : undefined}
+          onSaved={handleSaved}
+          onClose={() => setEditing(undefined)}
+        />
       )}
     </div>
   )

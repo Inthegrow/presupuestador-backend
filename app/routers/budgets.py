@@ -8,17 +8,21 @@ from uuid import UUID
 from fastapi import APIRouter, Body, Depends, HTTPException
 
 from app.auth import get_current_user, require_admin, require_editor
-from app.budget_prices import fetch_all, initial_indirects, precios_faltantes, today
+from app.budget_prices import budget_config, fetch_all, initial_indirects, precios_faltantes, today
 from app.calculations import (
+    PRICE_FIELDS,
     calc_budget_summary,
+    calc_item_from_resources,
     calc_item_totals,
+    is_section,
     pct_or_default,
-    recalc_all_items,
+    price_item,
 )
 from app.db import get_data_db
 from app.formulas import FormulaError
 from app.obra_import import plain
 from app.recipes import ORIGEN_RECURSO, has_formula, merge_params, param_defaults, requantify_row
+from app.routers.analysis import _get_budget, _run_cascade, apply_catalog
 from app.routers.obras import _human
 from app.routers.templates import (
     A_MEDIAS,
@@ -49,6 +53,8 @@ logger = logging.getLogger(__name__)
 
 # Fields that are user-editable (not calculated). Used for audit trail.
 AUDITABLE_FIELDS = {"cantidad", "mat_unitario", "mo_unitario", "description", "unidad", "code", "notas_calculo"}
+# A PATCH with one of these recalculates the item's direct cost and its price
+COST_FIELDS = ("cantidad", "mat_unitario", "mo_unitario")
 
 router = APIRouter()
 
@@ -59,6 +65,12 @@ _RESOURCE_COPY_FIELDS = (
     "formula", "rendimiento", "desperdicio_origen", "lo_compra_cliente",
     "redondear", "unidad_compra", "cantidad_redondeo", "precio_fecha", "template_id",
 )
+
+
+def _budget_config(db, budget_id: str, org_id: str) -> dict:
+    """Cascade config of one budget (read once per request; org values when it is not found)."""
+    rows = db.table("budgets").select("*").eq("id", budget_id).eq("org_id", org_id).execute().data or []
+    return budget_config(db, org_id, rows[0] if isinstance(rows, list) and rows else None)
 
 
 def _get_items(budget_id: str, org_id: str) -> list[dict]:
@@ -118,6 +130,7 @@ async def create_full_budget(payload: CreateFullBudget, user: dict = Depends(req
     budget_id = budget["id"]
 
     # 2. Create sections and their child items
+    config = budget_config(db, org_id, budget)
     sort_order = 0
     sections_created = 0
     items_created = 0
@@ -155,14 +168,14 @@ async def create_full_budget(payload: CreateFullBudget, user: dict = Depends(req
                 "notas": None,
                 "sort_order": sort_order,
             }
-            calculated = calc_item_totals(item_row)
+            calculated = price_item(calc_item_totals(item_row), config)
             db.table("budget_items").insert(calculated).execute()
             items_created += 1
             sort_order += 1
 
     # 3. Build summary
     all_items = _get_items(budget_id, org_id)
-    summary = calc_budget_summary(all_items)
+    summary = calc_budget_summary(all_items, pct_or_default(config, "iva_pct", 21))
 
     return {
         "budget": budget,
@@ -247,6 +260,7 @@ async def create_items(
     user: dict = Depends(require_editor),
 ):
     db = get_data_db()
+    config = _budget_config(db, str(budget_id), user["org_id"])
     to_insert = []
     for i, item in enumerate(items):
         raw = {
@@ -259,13 +273,11 @@ async def create_items(
             "cantidad": item.cantidad,
             "mat_unitario": item.mat_unitario or 0,
             "mo_unitario": item.mo_unitario or 0,
-            "indirecto_total": item.indirecto_total or 0,
-            "beneficio_total": item.beneficio_total or 0,
             "notas": item.notas,
             "sort_order": i,
         }
-        calculated = calc_item_totals(raw)
-        to_insert.append(calculated)
+        # A work entered by hand gets the full price, like any other (indirects come from the cascade)
+        to_insert.append(price_item(calc_item_totals(raw), config))
     result = db.table("budget_items").insert(to_insert).execute()
     return {"inserted": len(result.data)}
 
@@ -298,20 +310,20 @@ async def update_item(
     if "parent_id" in update_data:
         v = update_data["parent_id"]
         update_data["parent_id"] = str(v) if v else None
+    # Totals are never taken from the client: they follow from the direct cost
+    for field in PRICE_FIELDS:
+        if field not in COST_FIELDS:
+            update_data.pop(field, None)
 
-    # Merge existing data with updates, then recalculate totals
-    merged = {**existing.data, **update_data}
-    recalculated = calc_item_totals(merged)
-
-    # Extract only the cost fields that were recalculated
-    cost_fields = ("mat_total", "mo_total", "directo_total", "neto_total")
-    for field in cost_fields:
-        update_data[field] = recalculated[field]
-    # Also ensure indirecto_total and beneficio_total are rounded
-    if "indirecto_total" in update_data:
-        update_data["indirecto_total"] = recalculated["indirecto_total"]
-    if "beneficio_total" in update_data:
-        update_data["beneficio_total"] = recalculated["beneficio_total"]
+    # Only a cost field changes the numbers (a note or a name never does)
+    config = None
+    if any(field in update_data for field in COST_FIELDS):
+        config = _budget_config(db, bid, org_id)
+        recalculated = calc_item_totals({**existing.data, **update_data})
+        price_item(recalculated, config)
+        for field in PRICE_FIELDS:
+            if field in recalculated:
+                update_data[field] = recalculated[field]
 
     changes = {}
     for field, new_val in update_data.items():
@@ -327,7 +339,7 @@ async def update_item(
     # Recetas: resources with formula / rendimiento follow the new quantity
     if "cantidad" in changes:
         try:
-            _requantify_item(db, {**existing.data, **update_data}, org_id)
+            _requantify_item(db, {**existing.data, **update_data}, org_id, config)
         except FormulaError as exc:
             logger.warning("Formula error recalculating item %s: %s", iid, exc)
 
@@ -532,7 +544,7 @@ def _next_item_code(rubro: dict, items: list[dict]) -> str | None:
 def _rubro_for(items: list[dict], parent_id: str | None, categoria: str) -> dict | None:
     """The rubro chosen in the tree (it must be a section of this budget), else the one named
     like the recipe's categoria (without capitals or accents), else None (to be created)."""
-    secciones = sorted((i for i in items if i.get("notas") == SECCION),
+    secciones = sorted((i for i in items if is_section(i)),
                        key=lambda i: (i.get("sort_order") is None, i.get("sort_order") or 0))
     if parent_id:
         rubro = next((i for i in secciones if str(i["id"]) == parent_id.strip()), None)
@@ -668,7 +680,7 @@ async def get_budget_missing_prices(budget_id: UUID, user: dict = Depends(get_cu
     if not db.table("budgets").select("id").eq("id", bid).eq("org_id", org_id).execute().data:
         raise HTTPException(404, "Presupuesto no encontrado")
 
-    ids = [str(i["id"]) for i in _budget_items(db, bid, org_id) if i.get("notas") != SECCION]
+    ids = [str(i["id"]) for i in _budget_items(db, bid, org_id) if not is_section(i)]
     por_item: dict[str, list[dict]] = {i: [] for i in ids}
     for start in range(0, len(ids), RESOURCES_CHUNK):
         chunk = ids[start:start + RESOURCES_CHUNK]
@@ -716,55 +728,40 @@ def _recipe_flags(data: dict) -> dict:
     }
 
 
-def _recalc_item_from_resources(db, item_id: str, org_id: str) -> None:
-    """Fetch all resources for an item and recalculate its unit prices."""
-    resources_result = (
+def _recalc_item_from_resources(db, item_id: str, org_id: str, config: dict) -> dict | None:
+    """Recalculate an item from all its resources and price it (price_item with ``config``).
+
+    Same rule as the full recalculation (_run_cascade): every resource tipo, what the
+    client buys at $0, then the cascade. Returns the written values (None: no item).
+    """
+    resources = (
         db.table("item_resources")
         .select("*")
         .eq("item_id", item_id)
         .eq("org_id", org_id)
         .execute()
+        .data or []
     )
-    resources = [r for r in (resources_result.data or []) if not r.get("lo_compra_cliente")]
-
-    mat_sum = sum(r.get("subtotal") or 0 for r in resources if r.get("tipo") == "material")
-    mo_sum = sum(r.get("subtotal") or 0 for r in resources if r.get("tipo") == "mano_obra")
-    eq_sum = sum(r.get("subtotal") or 0 for r in resources if r.get("tipo") == "equipo")
-    mat_ind_sum = sum(r.get("subtotal") or 0 for r in resources if r.get("tipo") == "mo_material")
-    sub_sum = sum(r.get("subtotal") or 0 for r in resources if r.get("tipo") == "subcontrato")
-
-    item_result = (
+    item = (
         db.table("budget_items")
-        .select("cantidad, indirecto_total, beneficio_total")
+        .select("*")
         .eq("id", item_id)
-        .single()
+        .eq("org_id", org_id)
         .execute()
+        .data or []
     )
-    if not item_result.data:
-        return
+    if not item:
+        return None
 
-    item = item_result.data
-    qty = item.get("cantidad") or 1
-
-    mat_unitario = round(mat_sum / qty, 2)
-    mo_unitario = round((mo_sum + eq_sum + mat_ind_sum + sub_sum) / qty, 2)
-    mat_total = round(mat_unitario * qty, 2)
-    mo_total = round(mo_unitario * qty, 2)
-    directo_total = mat_total + mo_total
-    neto_total = directo_total + (item.get("indirecto_total") or 0) + (item.get("beneficio_total") or 0)
-
-    db.table("budget_items").update({
-        "mat_unitario": mat_unitario,
-        "mo_unitario": mo_unitario,
-        "mat_total": mat_total,
-        "mo_total": mo_total,
-        "directo_total": round(directo_total, 2),
-        "neto_total": round(neto_total, 2),
-    }).eq("id", item_id).execute()
+    priced = price_item(calc_item_from_resources(dict(item[0]), resources), config)
+    patch = {k: priced[k] for k in PRICE_FIELDS if k in priced}
+    db.table("budget_items").update(patch).eq("id", item_id).eq("org_id", org_id).execute()
+    return patch
 
 
-def _requantify_item(db, item: dict, org_id: str) -> int:
-    """Re-evaluate formula / rendimiento resources of an item with its Q and parametros.
+def _requantify_item(db, item: dict, org_id: str, config: dict) -> int:
+    """Re-evaluate formula / rendimiento resources of an item with its Q and parametros,
+    then recalculate and price the item (``config``: cascade of its budget).
 
     Returns how many resources changed. Raises FormulaError on a bad formula
     (nothing is written in that case).
@@ -792,7 +789,7 @@ def _requantify_item(db, item: dict, org_id: str) -> int:
             "cantidad_efectiva": cantidad_efectiva,
             "subtotal": subtotal,
         }).eq("id", res["id"]).execute()
-    _recalc_item_from_resources(db, item["id"], org_id)
+    _recalc_item_from_resources(db, item["id"], org_id, config)
     return len(recalculated)
 
 
@@ -828,7 +825,8 @@ async def update_item_params(
     parametros = {**current, **payload.parametros}
 
     try:
-        updated = _requantify_item(db, {**item, "parametros": parametros}, org_id)
+        updated = _requantify_item(db, {**item, "parametros": parametros}, org_id,
+                                   _budget_config(db, str(budget_id), org_id))
     except FormulaError as exc:
         raise HTTPException(422, [str(exc)]) from exc
     db.table("budget_items").update({"parametros": parametros}).eq("id", iid).execute()
@@ -889,7 +887,7 @@ async def create_resource(
     if not result.data:
         raise HTTPException(500, "Error al crear recurso")
 
-    _recalc_item_from_resources(db, iid, org_id)
+    _recalc_item_from_resources(db, iid, org_id, _budget_config(db, str(budget_id), org_id))
     return result.data[0]
 
 
@@ -956,7 +954,7 @@ async def update_resource(
     if not result.data:
         raise HTTPException(500, "Error al actualizar recurso")
 
-    _recalc_item_from_resources(db, iid, org_id)
+    _recalc_item_from_resources(db, iid, org_id, _budget_config(db, str(budget_id), org_id))
     return result.data[0]
 
 
@@ -999,7 +997,7 @@ async def delete_resource(
         raise HTTPException(404, "Recurso no encontrado")
 
     db.table("item_resources").delete().eq("id", rid).execute()
-    _recalc_item_from_resources(db, iid, org_id)
+    _recalc_item_from_resources(db, iid, org_id, _budget_config(db, str(budget_id), org_id))
 
 
 @router.post("/{budget_id}/items/{item_id}/resources/bulk")
@@ -1057,7 +1055,7 @@ async def bulk_create_resources(
     if not result.data:
         raise HTTPException(500, "Error al crear recursos")
 
-    _recalc_item_from_resources(db, iid, org_id)
+    _recalc_item_from_resources(db, iid, org_id, _budget_config(db, str(budget_id), org_id))
     return result.data
 
 
@@ -1117,23 +1115,15 @@ async def assign_catalog_to_budget(
     catalog_id: UUID,
     user: dict = Depends(require_editor),
 ):
-    """Assign a price catalog to a budget: match resource codes and update prices."""
+    """Assign a price catalog to a budget: match resource codes, update prices and
+    recalculate it like "Actualizar precios" (every resource tipo, what the client buys
+    at $0, the cascade of the budget)."""
     db = get_data_db()
     org_id = user["org_id"]
     bid = str(budget_id)
     cid = str(catalog_id)
 
-    # Verify budget
-    budget = (
-        db.table("budgets")
-        .select("id")
-        .eq("id", bid)
-        .eq("org_id", org_id)
-        .single()
-        .execute()
-    )
-    if not budget.data:
-        raise HTTPException(404, "Presupuesto no encontrado")
+    budget = _get_budget(db, bid, org_id)
 
     # Verify catalog
     catalog = (
@@ -1147,109 +1137,10 @@ async def assign_catalog_to_budget(
     if not catalog.data:
         raise HTTPException(404, "Catalogo no encontrado")
 
-    # Load catalog entries indexed by codigo
-    entries_result = (
-        db.table("catalog_entries")
-        .select("codigo, precio_sin_iva, tipo")
-        .eq("catalog_id", cid)
-        .eq("org_id", org_id)
-        .execute()
-    )
-    price_map: dict[str, dict] = {}
-    for entry in (entries_result.data or []):
-        codigo = (entry.get("codigo") or "").strip()
-        precio = entry.get("precio_sin_iva")
-        if codigo and precio is not None:
-            price_map[codigo] = {"precio": float(precio), "tipo": entry.get("tipo")}
-
-    if not price_map:
-        raise HTTPException(404, "Catalogo sin entradas con precios")
-
-    # Get all budget items
-    items = _get_items(bid, org_id)
-    if not items:
-        raise HTTPException(404, "Presupuesto sin items")
-
-    item_ids = [item["id"] for item in items]
-
-    # Get all resources, match codes, update prices
-    updated_count = 0
-    for item_id in item_ids:
-        resources = (
-            db.table("item_resources")
-            .select("*")
-            .eq("item_id", item_id)
-            .eq("org_id", org_id)
-            .execute()
-        )
-        for resource in (resources.data or []):
-            codigo = (resource.get("codigo") or "").strip()
-            if codigo not in price_map:
-                continue
-
-            new_precio = price_map[codigo]["precio"]
-            cantidad_eff = resource.get("cantidad_efectiva") or resource.get("cantidad") or 0
-            new_subtotal = round(new_precio * float(cantidad_eff), 2)
-
-            db.table("item_resources").update({
-                "precio_unitario": new_precio,
-                "subtotal": new_subtotal,
-            }).eq("id", resource["id"]).execute()
-            updated_count += 1
-
-    # Recalculate item totals from resources
-    for item_id in item_ids:
-        resources = (
-            db.table("item_resources")
-            .select("tipo, subtotal")
-            .eq("item_id", item_id)
-            .eq("org_id", org_id)
-            .execute()
-        )
-        mat_total = 0.0
-        mo_total = 0.0
-        for r in (resources.data or []):
-            subtotal = r.get("subtotal") or 0
-            if r.get("tipo") == "material":
-                mat_total += subtotal
-            elif r.get("tipo") == "mano_obra":
-                mo_total += subtotal
-
-        directo_total = mat_total + mo_total
-        item_data = (
-            db.table("budget_items")
-            .select("indirecto_total, beneficio_total, cantidad")
-            .eq("id", item_id)
-            .single()
-            .execute()
-        )
-        if not item_data.data:
-            continue
-
-        cantidad = item_data.data.get("cantidad") or 0
-        indirecto = item_data.data.get("indirecto_total") or 0
-        beneficio = item_data.data.get("beneficio_total") or 0
-        neto_total = directo_total + indirecto + beneficio
-
-        mat_unitario = round(mat_total / cantidad, 2) if cantidad else 0
-        mo_unitario = round(mo_total / cantidad, 2) if cantidad else 0
-
-        db.table("budget_items").update({
-            "mat_unitario": mat_unitario,
-            "mo_unitario": mo_unitario,
-            "mat_total": round(mat_total, 2),
-            "mo_total": round(mo_total, 2),
-            "directo_total": round(directo_total, 2),
-            "neto_total": round(neto_total, 2),
-        }).eq("id", item_id).execute()
-
-    # Build updated summary
-    all_items = _get_items(bid, org_id)
-    summary = calc_budget_summary(all_items)
-
+    result = apply_catalog(db, org_id, budget, cid)
     return {
-        "updated_count": updated_count,
-        "summary": summary,
+        "updated_count": result["matched"],
+        "summary": result["summary"],
     }
 
 
@@ -1281,7 +1172,7 @@ async def get_budget_full(budget_id: UUID, user: dict = Depends(get_current_user
 
     items = _get_items(bid, org_id)
     tree = build_tree(items)
-    analysis = calc_budget_summary(items)
+    analysis = calc_budget_summary(items, budget_config(db, org_id, budget.data)["iva_pct"])
 
     versions = (
         db.table("budget_versions")
@@ -1307,38 +1198,19 @@ async def recalculate_budget(
     budget_id: UUID,
     user: dict = Depends(require_editor),
 ):
-    """Recalculate all item totals in a budget.
+    """Full recalculation: the same as ``POST /{id}/cascade-recalculate`` (kept for compatibility).
 
-    Useful after bulk imports or price changes.
+    Returns the cascade result: items_total, items_updated, summary, ...
     """
     db = get_data_db()
     org_id = user["org_id"]
     bid = str(budget_id)
 
+    budget = _get_budget(db, bid, org_id)
     items = _get_items(bid, org_id)
     if not items:
         raise HTTPException(404, "Presupuesto sin items")
-
-    recalculated = recalc_all_items(items)
-
-    cost_fields = (
-        "mat_total", "mo_total", "directo_total",
-        "indirecto_total", "beneficio_total", "neto_total",
-    )
-    updated_count = 0
-    for original, recalc in zip(items, recalculated):
-        patch = {f: recalc[f] for f in cost_fields if original.get(f) != recalc[f]}
-        if patch:
-            db.table("budget_items").update(patch).eq("id", original["id"]).execute()
-            updated_count += 1
-
-    summary = calc_budget_summary(recalculated)
-
-    return {
-        "items_total": len(items),
-        "items_updated": updated_count,
-        "summary": summary,
-    }
+    return _run_cascade(db, org_id, budget, items)
 
 
 # ── Copy ───────────────────────────────────────────────────────────────────
@@ -1410,6 +1282,10 @@ async def copy_budget(
             "indirecto_total": item.get("indirecto_total") or 0,
             "beneficio_total": item.get("beneficio_total") or 0,
             "neto_total": item.get("neto_total") or 0,
+            # The copy keeps the same price: the whole cascade, as saved
+            "impuestos_total": item.get("impuestos_total"),
+            "iva_total": item.get("iva_total"),
+            "total_final": item.get("total_final"),
             "notas": item.get("notas"),
             "sort_order": item.get("sort_order") or 0,
             **{k: item[k] for k in _ITEM_RECIPE_FIELDS if k in item},

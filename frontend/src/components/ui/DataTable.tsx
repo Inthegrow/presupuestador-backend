@@ -205,7 +205,7 @@ export default function DataTable({ items, onEditItem, onViewDetail, onDeleteIte
             <th className="px-3 py-2 text-right font-semibold text-[11px] tracking-wide">Directo</th>
             <th className="px-3 py-2 text-right font-semibold text-[11px] tracking-wide">Indirecto</th>
             <th className="px-3 py-2 text-right font-semibold text-[11px] tracking-wide">Beneficio</th>
-            <th className="px-3 py-2 text-right font-bold text-[11px] tracking-wide">Neto</th>
+            <th className="px-3 py-2 text-right font-bold text-[11px] tracking-wide" title="Sin IVA. Incluye indirectos, beneficio e impuestos (Ingresos Brutos y cheque): por eso es más que Directo + Indirecto + Beneficio.">Precio sin IVA</th>
             <th className="px-3 py-2 w-16" />
           </tr>
         </thead>
@@ -297,7 +297,7 @@ export default function DataTable({ items, onEditItem, onViewDetail, onDeleteIte
         {items.length > 0 && (
           <tfoot className="sticky bottom-0 z-10">
             <tr className="bg-[#E8F5EE] font-semibold text-xs border-t border-[#2D8D68]/20">
-              <td colSpan={6} className="px-3 py-2.5 text-right text-[#2D8D68] uppercase text-[10px] tracking-wider font-bold">Total seccion</td>
+              <td colSpan={6} className="px-3 py-2.5 text-right text-[#2D8D68] uppercase text-[10px] tracking-wider font-bold">Total de lo elegido</td>
               <td className="px-3 py-2.5 cost-cell text-blue-700 font-bold">{fmtCurrency(totals.directo)}</td>
               <td className="px-3 py-2.5 cost-cell text-[#E8663C] font-bold">{fmtCurrency(totals.indirecto)}</td>
               <td className="px-3 py-2.5 cost-cell text-gray-600 font-bold">{fmtCurrency(totals.beneficio)}</td>

@@ -9,6 +9,8 @@ Cascade model (Excel-based):
 
 from __future__ import annotations
 
+import unicodedata
+
 from app.tree import safe_float
 
 
@@ -70,28 +72,91 @@ def calc_item_totals(item: dict) -> dict:
     }
 
 
-def calc_budget_summary(items: list[dict]) -> dict:
-    """Sum all items to produce budget-level totals.
+SECCION = "Seccion"
+
+# Fields the cascade writes on a work item (calc_cascade_indirects)
+CASCADE_FIELDS = (
+    "indirecto_total", "beneficio_total", "impuestos_total", "neto_total", "iva_total", "total_final",
+)
+# Every number of a work item that follows from its direct cost
+PRICE_FIELDS = ("mat_unitario", "mo_unitario", "mat_total", "mo_total", "directo_total", *CASCADE_FIELDS)
+
+
+# Every marker the app writes in budget_items.notas for a rubro / piso / section row,
+# compared without capitals or accents: "Seccion" (editor, create-full, Excel import,
+# Cargar obra rubros and pisos) and "Sección generada por IA" (from-ai).
+SECTION_MARKERS = frozenset({"seccion", "seccion generada por ia"})
+
+
+def _plain(text: object) -> str:
+    decomposed = unicodedata.normalize("NFKD", str(text or ""))
+    return "".join(c for c in decomposed if not unicodedata.combining(c)).strip().lower()
+
+
+def is_section(item: dict) -> bool:
+    """Rubro / piso / section rows are not works: they have no price of their own.
+
+    Decided by the explicit markers, not by structure: an imported Excel can hang a
+    priced work under another priced work (code 1.1 → 1.1.1), so "has children" does
+    not mean "is not a work".
+    """
+    return _plain(item.get("notas")) in SECTION_MARKERS
+
+
+def is_work_item(item: dict) -> bool:
+    return not is_section(item)
+
+
+def price_item(item: dict, config: dict) -> dict:
+    """The only rule for a work's price: its direct cost (already calculated) through
+    the cascade of its budget (``config`` = effective_indirects / budget_config).
+
+    Mutates and returns ``item``. Section rows are returned unchanged.
+    """
+    if is_section(item):
+        return item
+    return calc_cascade_indirects(item, config)
+
+
+def sale_totals(item: dict, iva_pct: float = 21) -> tuple[float, float, float]:
+    """(neto, iva, total_final) saved on an item.
+
+    Items saved before the cascade wrote IVA have null ``iva_total`` / ``total_final``:
+    their IVA is the IVA step of the cascade over their saved neto (never 0).
+    """
+    neto = _sf(item.get("neto_total"))
+    iva_raw = safe_float(item.get("iva_total"))
+    iva = round(neto * float(iva_pct) / 100, 2) if iva_raw is None else iva_raw
+    total_raw = safe_float(item.get("total_final"))
+    total = round(neto + iva, 2) if total_raw is None else total_raw
+    return neto, iva, total
+
+
+def calc_budget_summary(items: list[dict], iva_pct: float = 21) -> dict:
+    """Sum the saved totals of the work items (section rows are not counted).
 
     Returns a dict with keys:
-        mat_total, mo_total, directo_total, indirecto_total,
-        beneficio_total, neto_total, items_count.
+        mat_total, mo_total, directo_total, indirecto_total, beneficio_total,
+        impuestos_total, neto_total, iva_total, total_final, items_count.
+    ``iva_pct`` is only used for items saved without IVA (see sale_totals).
     """
-    mat_total = sum(_sf(i.get("mat_total")) for i in items)
-    mo_total = sum(_sf(i.get("mo_total")) for i in items)
-    directo_total = sum(_sf(i.get("directo_total")) for i in items)
-    indirecto_total = sum(_sf(i.get("indirecto_total")) for i in items)
-    beneficio_total = sum(_sf(i.get("beneficio_total")) for i in items)
-    neto_total = sum(_sf(i.get("neto_total")) for i in items)
+    works = [i for i in items if is_work_item(i)]
 
+    def total(key: str) -> float:
+        return round(sum(_sf(i.get(key)) for i in works), 2)
+
+    sales = [sale_totals(i, iva_pct) for i in works]
     return {
-        "mat_total": round(mat_total, 2),
-        "mo_total": round(mo_total, 2),
-        "directo_total": round(directo_total, 2),
-        "indirecto_total": round(indirecto_total, 2),
-        "beneficio_total": round(beneficio_total, 2),
-        "neto_total": round(neto_total, 2),
-        "items_count": len(items),
+        "mat_total": total("mat_total"),
+        "mo_total": total("mo_total"),
+        "directo_total": total("directo_total"),
+        "indirecto_total": total("indirecto_total"),
+        "beneficio_total": total("beneficio_total"),
+        "impuestos_total": total("impuestos_total"),
+        "neto_total": round(sum(s[0] for s in sales), 2),
+        "iva_total": round(sum(s[1] for s in sales), 2),
+        "total_final": round(sum(s[2] for s in sales), 2),
+        "items_count": len(works),
     }
 
 
@@ -238,3 +303,23 @@ def calc_cascade_indirects(item: dict, config: dict) -> dict:
     item["total_final"] = round(total_final, 2)
 
     return item
+
+
+def cascade_factors(config: dict) -> dict:
+    """What the screens show about a cascade config, so none of them adds it up on its own.
+
+    indirecto_pct: the 5 indirect concepts (imprevistos, estructura, jefatura, logística,
+    herramientas), with the defaults of calc_cascade_indirects.
+    coeficiente: price without IVA per 1 of direct cost (indirects → beneficio → taxes).
+    """
+    indirecto_pct = sum(
+        pct_or_default(config, key, default)
+        for key, default in (
+            ("imprevistos_pct", 3), ("estructura_pct", 15), ("jefatura_pct", 8),
+            ("logistica_pct", 5), ("herramientas_pct", 3),
+        )
+    )
+    beneficio = pct_or_default(config, "beneficio_pct", 10)
+    impuestos = pct_or_default(config, "ingresos_brutos_pct", 7) + pct_or_default(config, "imp_cheque_pct", 1.2)
+    coeficiente = (1 + indirecto_pct / 100) * (1 + beneficio / 100) * (1 + impuestos / 100)
+    return {"indirecto_pct": round(indirecto_pct, 4), "coeficiente": round(coeficiente, 4)}
