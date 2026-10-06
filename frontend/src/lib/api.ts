@@ -331,7 +331,35 @@ export function esConfirmarReemplazo(err: unknown): err is ApiError & { detail: 
   return !!d && typeof d === 'object' && d.codigo === 'CONFIRMAR_REEMPLAZO'
 }
 
+// Fórmula que la app sugiere para el nombre de un trabajo (GET /templates/sugerir)
+export interface TemplateSugerida {
+  id: string
+  codigo: string
+  nombre: string
+  unidad?: string | null
+  categoria?: string | null
+  porque?: string | null
+}
+
+export interface TemplatePropuesta extends TemplateSugerida {
+  origen: 'memoria' | 'regla'
+  factor: number | null
+}
+
+export interface TemplateParecida extends TemplateSugerida {
+  puntaje?: number
+}
+
+export interface TemplateSugerencias {
+  propuesta: TemplatePropuesta | null
+  parecidas: TemplateParecida[]
+}
+
 export const templateApi = {
+  sugerir: (descripcion: string, unidad?: string | null) =>
+    get<TemplateSugerencias>(
+      `/templates/sugerir?descripcion=${encodeURIComponent(descripcion)}&unidad=${encodeURIComponent(unidad || '')}`,
+    ),
   list: (categoria?: string) =>
     get<any[]>(`/templates${categoria ? `?categoria=${encodeURIComponent(categoria)}` : ''}`),
   categories: () => get<string[]>('/templates/categories'),

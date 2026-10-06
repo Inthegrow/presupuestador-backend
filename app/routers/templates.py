@@ -22,10 +22,17 @@ from app.calculations import (
 from app.catalog_prices import normalize_codigo, parse_fecha
 from app.db import get_data_db
 from app.formulas import FormulaError
-from app.obra_import import _scale, _scale_rendimiento, espesor_m_from, match_recipe, unit_key
+from app.obra_import import (
+    _scale,
+    _scale_rendimiento,
+    espesor_m_from,
+    match_recipe,
+    suggest_recipes,
+    unit_key,
+)
 from app.recipes import expand_resource, merge_params, param_defaults, validate_template
 from app.routers.analysis import _restore, _run_cascade, _snapshot
-from app.routers.obras import MOTIVOS, PriceBook
+from app.routers.obras import MOTIVOS, PriceBook, _human, _memoria, _proposal, _templates
 from app.schemas import TemplateApply, TemplateCreate, TemplatePreview, TemplateUpdate
 
 logger = logging.getLogger(__name__)
@@ -175,6 +182,58 @@ async def list_categories(user: dict = Depends(get_current_user)):
     result = db.table("item_templates").select("categoria").eq("org_id", org_id).execute()
     cats = sorted(set(r["categoria"] for r in (result.data or []) if r.get("categoria")))
     return cats
+
+
+MAX_PARECIDAS = 3
+
+
+def _formula_view(tmpl: dict) -> dict:
+    return {k: tmpl.get(k) for k in ("id", "codigo", "nombre", "unidad", "categoria")}
+
+
+def sugerir_formula(
+    descripcion: str, unidad: str, templates: dict[str, dict], memoria: dict[str, dict]
+) -> dict:
+    """The recipe Cargar obra would propose for a task (memoria > regla) and up to 3 similar ones.
+
+    Only a decision with one recipe is a proposal; when the rule combines several, they go
+    first among the similar ones ("Cargar obra usa A + B para este trabajo").
+    """
+    descripcion = (descripcion or "").strip()
+    if not descripcion:
+        return {"propuesta": None, "parecidas": []}
+    base = _proposal({"descripcion": descripcion, "unidad": unidad, "cantidad": 1, "codigo": ""},
+                     templates, memoria)
+    pares = [p for p in (base or {}).get("pares") or [] if str(p[0]) in templates]
+    propuesta, parecidas = None, []
+    if base and len(pares) == 1 and len(base["pares"]) == 1:
+        codigo, factor = str(pares[0][0]), pares[0][1]
+        propuesta = {**_formula_view(templates[codigo]), "origen": base["origen"],
+                     "porque": base["porque"], "factor": factor}
+    elif base and len(base["pares"]) > 1 and pares:
+        nombres = " + ".join(_human((templates.get(str(p[0])) or {}).get("nombre") or p[0])
+                             for p in base["pares"])
+        porque = f"Cargar obra usa {nombres} para este trabajo"
+        parecidas = [{**_formula_view(templates[str(p[0])]), "porque": porque, "puntaje": 1.0}
+                     for p in pares]
+    combinadas = len(parecidas)
+    vistos = {p["codigo"] for p in parecidas} | ({propuesta["codigo"]} if propuesta else set())
+    top = MAX_PARECIDAS + len(vistos)
+    for codigo, puntaje, porque in suggest_recipes(descripcion, templates, top=top):
+        if codigo not in vistos:
+            parecidas.append({**_formula_view(templates[codigo]), "porque": porque,
+                              "puntaje": puntaje})
+    return {"propuesta": propuesta, "parecidas": parecidas[:max(MAX_PARECIDAS, combinadas)]}
+
+
+@router.get("/sugerir")
+async def sugerir(descripcion: str = "", unidad: str = "", user: dict = Depends(get_current_user)):
+    """The "Quizás sea:" of the formula window: Cargar obra's proposal plus similar recipes."""
+    if not (descripcion or "").strip():
+        return {"propuesta": None, "parecidas": []}
+    db = get_data_db()
+    org_id = user["org_id"]
+    return sugerir_formula(descripcion, unidad, _templates(db, org_id), _memoria(db, org_id))
 
 
 @router.get("/{template_id}")

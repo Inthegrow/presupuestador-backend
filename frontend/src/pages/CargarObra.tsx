@@ -1,13 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { AlertTriangle, CheckCircle, ChevronDown, ChevronUp, ClipboardCheck, Search, Trash2 } from 'lucide-react'
+import { AlertTriangle, CheckCircle, ChevronDown, ChevronUp, ClipboardCheck, Trash2 } from 'lucide-react'
 import FileUpload from '../components/ui/FileUpload'
+import BuscadorFormulas from '../components/ui/BuscadorFormulas'
 import { catalogApi, obraApi } from '../lib/api'
 import { borrarBorrador, duenoBorrador, guardarBorrador, leerBorrador } from '../lib/borrador'
 import type { Borrador } from '../lib/borrador'
 import { useAuth } from '../contexts/AuthContext'
 import type { ObraAnalisis, ObraAsignaciones, ObraCarga, ObraPrecio, ObraPropuesta, ObraRecetaCatalogo, ObraTarea } from '../lib/api'
 import { fmtCurrency, fmtDate, unidadEnPalabras } from '../lib/format'
+import { ESTILO } from '../lib/semaforo'
 import type { PriceCatalog } from '../types'
 
 const AUTH_ENABLED = import.meta.env.VITE_AUTH_ENABLED === 'true'
@@ -301,88 +303,7 @@ function PrecioRow({
   )
 }
 
-// ─── Buscador de fórmulas ───────────────────────────────────────────────────────
-
-function RecetaBuscador({
-  recetas, sinPrecioExcel, enCero, onElegir, onSinReceta, onCerrar,
-}: {
-  recetas: ObraRecetaCatalogo[]
-  // The whole Excel has no prices: "use the Excel price" would load everything at $0
-  sinPrecioExcel: boolean
-  // This task's row says $0 in a priced Excel: Sol does not quote it, leaving it at $0 is valid
-  enCero: boolean
-  onElegir: (r: ObraRecetaCatalogo) => void
-  onSinReceta: () => void
-  onCerrar: () => void
-}) {
-  const [q, setQ] = useState('')
-  const texto = q.trim().toLowerCase()
-  const filtradas = recetas.filter((r) =>
-    !texto || `${r.nombre} ${r.categoria || ''}`.toLowerCase().includes(texto))
-  const grupos: Record<string, ObraRecetaCatalogo[]> = {}
-  for (const r of filtradas) (grupos[r.categoria || 'Otras'] ||= []).push(r)
-
-  return (
-    <div className="mt-3 border rounded-xl bg-white shadow-sm">
-      <div className="flex items-center gap-2 px-3 py-2 border-b">
-        <Search size={14} className="text-gray-400" />
-        <input
-          autoFocus
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="Buscá como hablás: revoque, pintura, contrapiso…"
-          className="flex-1 text-sm outline-none"
-        />
-        <button onClick={onCerrar} className="text-xs text-gray-500 hover:text-gray-800">Cerrar</button>
-      </div>
-      <p className="px-3 py-1.5 text-[11px] text-gray-500 border-b">
-        Elegí la fórmula correcta para este trabajo.{sinPrecioExcel ? '' : enCero ? ' Si no lo cotizás, dejalo en $0.' : ' Si ninguna sirve, usá el precio del Excel.'}
-      </p>
-      <div className="max-h-64 overflow-y-auto">
-        {!sinPrecioExcel && (
-          <button
-            onClick={onSinReceta}
-            className="w-full text-left px-3 py-2 text-[#143D34] bg-[#E8F5EE] hover:bg-[#d8eee2]"
-          >
-            <span className="block text-sm font-medium">
-              {enCero ? 'Dejarlo en $0 como en el Excel (sin fórmula)' : 'Usar el precio del Excel (sin fórmula)'}
-            </span>
-            <span className="block text-[11px] text-gray-500 font-normal">
-              {enCero
-                ? 'Tu Excel no lo cotiza: la app no suma nada por este trabajo.'
-                : 'Se carga con lo que cobró tu Excel; la app no desglosa materiales.'}
-            </span>
-          </button>
-        )}
-        {Object.entries(grupos).map(([cat, items]) => (
-          <div key={cat}>
-            <div className="px-3 pt-2 pb-1 text-[11px] font-bold text-gray-500 uppercase tracking-wide">{cat}</div>
-            {items.map((r) => (
-              <button
-                key={r.codigo}
-                onClick={() => onElegir(r)}
-                className="w-full text-left px-3 py-1.5 text-sm hover:bg-gray-50 flex items-baseline gap-2"
-              >
-                <span className="text-gray-800">{r.nombre}</span>
-                <span className="text-xs text-gray-500">({r.unidad || 's/u'})</span>
-                <span className="text-[10px] text-gray-400 ml-auto">{r.codigo}</span>
-              </button>
-            ))}
-          </div>
-        ))}
-        {filtradas.length === 0 && <div className="px-3 py-3 text-xs text-gray-500">No encontré nada con esa palabra.</div>}
-      </div>
-    </div>
-  )
-}
-
 // ─── Tarjeta de un trabajo ─────────────────────────────────────────────────────
-
-const ESTILO = {
-  verde: { borde: 'border-l-[#2D8D68]', chip: 'bg-[#E8F5EE] text-[#2D8D68]', texto: 'Listo' },
-  amarillo: { borde: 'border-l-amber-400', chip: 'bg-amber-50 text-amber-700', texto: 'Para confirmar' },
-  rojo: { borde: 'border-l-red-500', chip: 'bg-red-50 text-red-600', texto: 'Falta resolver' },
-}
 
 function TareaCard({
   t, recetas, excelConPrecios, pendiente, bloqueada, onConfirmar, onElegir, onSinReceta, onValor, onCorregirPrecios,
@@ -518,13 +439,26 @@ function TareaCard({
       )}
 
       {buscando && (
-        <RecetaBuscador
+        <BuscadorFormulas
           recetas={recetas}
-          sinPrecioExcel={!excelConPrecios}
-          enCero={t.total_excel <= 0}
           onCerrar={() => setBuscando(false)}
-          onSinReceta={() => { setBuscando(false); onSinReceta() }}
           onElegir={(r) => { setBuscando(false); onElegir(r) }}
+          ayuda={`Elegí la fórmula correcta para este trabajo.${!excelConPrecios ? '' : t.total_excel <= 0 ? ' Si no lo cotizás, dejalo en $0.' : ' Si ninguna sirve, usá el precio del Excel.'}`}
+          extra={excelConPrecios && (
+            <button
+              onClick={() => { setBuscando(false); onSinReceta() }}
+              className="w-full text-left px-3 py-2 text-[#143D34] bg-[#E8F5EE] hover:bg-[#d8eee2]"
+            >
+              <span className="block text-sm font-medium">
+                {t.total_excel <= 0 ? 'Dejarlo en $0 como en el Excel (sin fórmula)' : 'Usar el precio del Excel (sin fórmula)'}
+              </span>
+              <span className="block text-[11px] text-gray-500 font-normal">
+                {t.total_excel <= 0
+                  ? 'Tu Excel no lo cotiza: la app no suma nada por este trabajo.'
+                  : 'Se carga con lo que cobró tu Excel; la app no desglosa materiales.'}
+              </span>
+            </button>
+          )}
         />
       )}
     </div>
