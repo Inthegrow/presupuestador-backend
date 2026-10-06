@@ -258,7 +258,7 @@ export const budgetApi = {
   copy: (id: string) => post<Budget>(`/budgets/${id}/copy`),
 
   // Excel import/export
-  importExcel: (formData: FormData) => postFile<{ budget_id: string; budget_name: string; items_inserted: number; resources_inserted: number; catalog_entries: number; date_codes_corrected: number; catalog_id: string | null; catalog_reused: boolean; catalog_name: string | null; precios_actualizados: number; precios_nuevos: number }>('/budgets/import-excel', formData),
+  importExcel: (formData: FormData) => postFile<{ budget_id: string; budget_name: string; items_inserted: number; resources_inserted: number; catalog_entries: number; date_codes_corrected: number; catalog_id: string | null; catalog_reused: boolean; catalog_name: string | null; precios_actualizados: number; precios_nuevos: number; neto_excel?: number | null; neto_app?: number | null }>('/budgets/import-excel', formData),
   exportExcel: (id: string) => getBlob(`/budgets/${id}/export/excel`),
   // vista 'cliente': PDF con el precio de venta por trabajo, sin costos internos
   exportPdf: (id: string, vista?: 'cliente') =>
@@ -276,8 +276,12 @@ export const budgetApi = {
     patch<IndirectConfig>(`/budgets/${id}/indirects`, data),
   // Valores generales (con los que arranca cada obra nueva)
   getGeneralIndirects: () => get<IndirectConfig>('/indirects/general'),
-  updateGeneralIndirects: (data: Partial<IndirectConfig>) =>
+  // aplicar: true = además de guardar, recalcula los presupuestos que usan los generales (responde `actualizados`)
+  updateGeneralIndirects: (data: Partial<IndirectConfig> & { aplicar?: boolean }) =>
     patch<IndirectConfig>('/indirects/general', data),
+  // Qué presupuestos cambiarían de precio con estos generales (mismo cuerpo que el PATCH)
+  generalAfectados: (data: Partial<IndirectConfig>) =>
+    post<{ presupuestos: { id: string; nombre: string }[] }>('/indirects/general/afectados', data),
   applyIndirects: (id: string) =>
     post<{ items_updated: number; total_neto: number }>(`/budgets/${id}/indirects`),
 

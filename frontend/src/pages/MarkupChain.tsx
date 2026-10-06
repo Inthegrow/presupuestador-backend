@@ -1,24 +1,25 @@
 import { useEffect, useState } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
-import { Settings } from 'lucide-react'
-import { budgetApi } from '../lib/api'
+import { AlertTriangle, CheckCircle, Settings } from 'lucide-react'
+import { budgetApi, mensajeDeError } from '../lib/api'
 import { useAuth } from '../contexts/AuthContext'
-import { cascadaIndirectos, indirectosCompletos } from '../lib/cascada'
+import { INDIRECTOS_DEFECTO, cascadaIndirectos, fmtPct, indirectosCompletos, pctIndirectos } from '../lib/cascada'
 import { fmtNumber } from '../lib/format'
 import type { CascadeResult, IndirectConfig } from '../types'
 
-const DEFAULT_CONFIG: IndirectConfig = {
-  id: '',
-  org_id: '',
-  imprevistos_pct: 3,
-  estructura_pct: 15,
-  jefatura_pct: 8,
-  logistica_pct: 5,
-  herramientas_pct: 3,
-  beneficio_pct: 25,
-  ingresos_brutos_pct: 7,
-  imp_cheque_pct: 1.2,
-  iva_pct: 21,
+// Solo para tener la forma mientras carga: nunca se guarda sin haber leído los valores reales (ver `cargaFallo`)
+const DEFAULT_CONFIG: IndirectConfig = { id: '', org_id: '', ...INDIRECTOS_DEFECTO }
+
+/** Presupuestos que cambian de precio con los generales nuevos (lo que contesta /indirects/general/afectados) */
+interface Afectado {
+  id: string
+  nombre: string
+}
+
+function listaNombres(ps: Afectado[], max = 5): string {
+  const nombres = ps.slice(0, max).map((p) => p.nombre || 'Sin nombre')
+  if (ps.length > max) return `${nombres.join(', ')} y ${ps.length - max} más`
+  return nombres.join(', ')
 }
 
 interface FieldDef {
@@ -36,8 +37,8 @@ const INDIRECTO_FIELDS: FieldDef[] = [
 ]
 
 const IMPUESTO_FIELDS: FieldDef[] = [
-  { key: 'ingresos_brutos_pct', label: 'Ingresos Brutos', hint: 'sobre Neto con Beneficio' },
-  { key: 'imp_cheque_pct', label: 'Impuesto al Cheque', hint: 'sobre Neto con Beneficio' },
+  { key: 'ingresos_brutos_pct', label: 'Ingresos Brutos', hint: 'sobre el subtotal con beneficio' },
+  { key: 'imp_cheque_pct', label: 'Impuesto al Cheque', hint: 'sobre el subtotal con beneficio' },
 ]
 
 function PctInput({
@@ -107,8 +108,14 @@ export default function MarkupChain() {
   const puedeGuardar = id ? puedeEditar : esAdmin
   const [cfg, setCfg] = useState<IndirectConfig>(DEFAULT_CONFIG)
   const [saving, setSaving] = useState(false)
-  const [saved, setSaved] = useState(false)
+  // Lo que pasó al guardar: "Listo: …" en verde o el error en rojo
+  const [saveMsg, setSaveMsg] = useState<{ tipo: 'ok' | 'error'; texto: string } | null>(null)
+  // Guardar los generales cambia el precio de otros presupuestos: primero se pregunta
+  const [confirmar, setConfirmar] = useState<Afectado[] | null>(null)
   const [loading, setLoading] = useState(true)
+  // No se pudieron leer los % guardados: no se deja guardar (se guardarían valores inventados)
+  const [cargaFallo, setCargaFallo] = useState<string | null>(null)
+  const [intento, setIntento] = useState(0)
   // Waste: general (org) and this budget. '' = not set / inherit
   const [orgWaste, setOrgWaste] = useState('')
   const [budgetWaste, setBudgetWaste] = useState('')
@@ -120,6 +127,8 @@ export default function MarkupChain() {
   const [recalcError, setRecalcError] = useState<string | null>(null)
 
   useEffect(() => {
+    setLoading(true)
+    setCargaFallo(null)
     if (id) {
       budgetApi
         .get(id)
@@ -129,31 +138,22 @@ export default function MarkupChain() {
     // With a budget: its own % (they start as the general ones). Without: the general ones.
     ;(id ? budgetApi.getIndirects(id) : budgetApi.getGeneralIndirects())
       .then((data) => {
-        setCfg({
-          ...DEFAULT_CONFIG,
-          ...data,
-          // ensure new fields have defaults if backend returns null/undefined
-          imprevistos_pct: data.imprevistos_pct ?? DEFAULT_CONFIG.imprevistos_pct,
-          beneficio_pct: data.beneficio_pct ?? DEFAULT_CONFIG.beneficio_pct,
-          ingresos_brutos_pct: data.ingresos_brutos_pct ?? DEFAULT_CONFIG.ingresos_brutos_pct,
-          imp_cheque_pct: data.imp_cheque_pct ?? DEFAULT_CONFIG.imp_cheque_pct,
-          iva_pct: data.iva_pct ?? DEFAULT_CONFIG.iva_pct,
-        })
+        if (!data || typeof data !== 'object') throw new Error('El servidor no mandó los porcentajes')
+        // Lo que falte o venga vacío vale lo mismo que en la cuenta del servidor (INDIRECT_DEFAULTS)
+        setCfg({ ...DEFAULT_CONFIG, ...data, ...indirectosCompletos(data) })
         setGeneral(data.general ?? null)
         setOrgWaste(data.desperdicio_pct === null || data.desperdicio_pct === undefined ? '' : String(data.desperdicio_pct))
       })
-      .catch(() => {/* use defaults */})
+      .catch((err) => setCargaFallo(mensajeDeError(err, 'No pude leer los porcentajes guardados.')))
       .finally(() => setLoading(false))
-  }, [id])
+  }, [id, intento])
 
   function set(key: keyof IndirectConfig, val: number) {
     setCfg((prev) => ({ ...prev, [key]: val }))
   }
 
-  async function handleSave() {
-    setSaving(true)
-    try {
-      const pct = {
+  function cuerpo() {
+    return {
         imprevistos_pct: cfg.imprevistos_pct,
         estructura_pct: cfg.estructura_pct,
         jefatura_pct: cfg.jefatura_pct,
@@ -163,22 +163,69 @@ export default function MarkupChain() {
         ingresos_brutos_pct: cfg.ingresos_brutos_pct,
         imp_cheque_pct: cfg.imp_cheque_pct,
         iva_pct: cfg.iva_pct,
+    }
+  }
+
+  // Lo que se manda a los generales (sin presupuesto: con el desperdicio general; desde una obra: solo los %)
+  function cuerpoGeneral() {
+    return id ? cuerpo() : { ...cuerpo(), desperdicio_pct: wasteNum(orgWaste) ?? 0 }
+  }
+
+  const tocaGenerales = !id || alsoGeneral
+
+  /** Guardar: si cambian los generales, antes se pregunta qué presupuestos cambian de precio. */
+  async function handleSave() {
+    if (cargaFallo || loading || saving) return
+    setSaveMsg(null)
+    setConfirmar(null)
+    if (tocaGenerales) {
+      setSaving(true)
+      try {
+        const r = await budgetApi.generalAfectados(cuerpoGeneral())
+        // Esta obra pasa a tener sus propios %: no cuenta entre las que cambian por los generales
+        const lista = (Array.isArray(r?.presupuestos) ? r.presupuestos : []).filter((p) => p.id !== id)
+        if (lista.length > 0) {
+          setConfirmar(lista)
+          setSaving(false)
+          return
+        }
+      } catch (err) {
+        setSaveMsg({ tipo: 'error', texto: `No guardé nada: no pude ver qué presupuestos cambian. ${mensajeDeError(err)}` })
+        setSaving(false)
+        return
       }
-      const desperdicio_pct = wasteNum(orgWaste) ?? 0
+    }
+    await guardar()
+  }
+
+  async function guardar() {
+    setSaving(true)
+    setConfirmar(null)
+    setSaveMsg(null)
+    const partes: string[] = []
+    try {
       if (id) {
-        // Only this budget: the other budgets keep their numbers
-        const data = await budgetApi.updateIndirects(id, { ...pct, desperdicio_pct })
+        // Los % de esta obra: el servidor la recalcula al guardar
+        const data = await budgetApi.updateIndirects(id, { ...cuerpo(), desperdicio_pct: wasteNum(orgWaste) ?? 0 })
         setGeneral(data.general ?? null)
-        if (alsoGeneral) setGeneral(await budgetApi.updateGeneralIndirects(pct))
         // null = this budget inherits the general / template value
         await budgetApi.update(id, { desperdicio_pct: wasteNum(budgetWaste) })
-      } else {
-        await budgetApi.updateGeneralIndirects({ ...pct, desperdicio_pct })
+        partes.push('precios actualizados')
       }
-      setSaved(true)
-      setTimeout(() => setSaved(false), 3000)
-    } catch {
-      // ignore
+      if (tocaGenerales) {
+        const data = await budgetApi.updateGeneralIndirects({ ...cuerpoGeneral(), aplicar: true })
+        if (id) setGeneral(data)
+        const n = typeof data?.actualizados === 'number' ? data.actualizados : 0
+        partes.push(
+          n === 0
+            ? id ? 'valores generales guardados' : 'ningún presupuesto cambió de precio'
+            : `${n} ${n === 1 ? 'presupuesto actualizado' : 'presupuestos actualizados'}`,
+        )
+      }
+      setSaveMsg({ tipo: 'ok', texto: `Listo: ${partes.join('; ')}.` })
+    } catch (err) {
+      const hecho = partes.length > 0 ? ` (sí se guardó: ${partes.join('; ')})` : ''
+      setSaveMsg({ tipo: 'error', texto: `No se pudo guardar${hecho}. ${mensajeDeError(err)}` })
     }
     setSaving(false)
   }
@@ -190,15 +237,13 @@ export default function MarkupChain() {
     try {
       setRecalc(await budgetApi.cascadeRecalculate(id))
     } catch (err) {
-      setRecalcError(err instanceof Error ? err.message : 'Error al recalcular')
+      setRecalcError(mensajeDeError(err, 'No se pudo recalcular. Probá de nuevo.'))
     }
     setRecalculating(false)
   }
 
-  const subtotalIndirectosPct = INDIRECTO_FIELDS.reduce(
-    (s, f) => s + ((cfg[f.key] as number) ?? 0),
-    0,
-  )
+  // Los 5 conceptos, con la misma cuenta que el resto de la app
+  const subtotalIndirectosPct = pctIndirectos(cfg)
 
   // Por cada $100 de costo directo, el precio sin IVA (misma cuenta que la cascada del servidor)
   const precioPor100 = cascadaIndirectos(100, indirectosCompletos(cfg)).neto
@@ -218,9 +263,29 @@ export default function MarkupChain() {
       </p>
       <p className="text-gray-500 text-sm mb-6 ml-4">
         {id
-          ? 'Porcentajes de esta obra. Arrancan con los valores generales; cambiarlos acá no toca las otras obras.'
-          : 'Los porcentajes que se suman al costo directo para llegar al precio final.'}
+          ? 'Porcentajes de esta obra. Arrancan con los valores generales; cambiarlos acá no toca las otras obras. Al guardar, los precios de esta obra se actualizan solos.'
+          : 'Los valores generales: los usan todos los presupuestos que no tienen porcentajes propios.'}
       </p>
+
+      {cargaFallo && (
+        <div role="alert" data-testid="carga-fallo" className="max-w-lg mb-4 bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-700">
+          <div className="flex items-start gap-2">
+            <AlertTriangle size={16} className="flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="font-semibold">No pude leer los porcentajes guardados</p>
+              <p className="text-xs mt-1">
+                Hasta leerlos no se puede guardar: se guardarían valores que no son los tuyos. {cargaFallo}
+              </p>
+              <button
+                onClick={() => setIntento((n) => n + 1)}
+                className="mt-2 text-xs font-semibold bg-white border border-red-200 rounded-lg px-3 py-1.5 hover:bg-red-100"
+              >
+                Probar de nuevo
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {loading && (
         <div className="flex items-center gap-2 text-sm text-gray-400 mb-4">
@@ -230,12 +295,12 @@ export default function MarkupChain() {
       )}
 
       <div className="max-w-lg">
-        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+        {!cargaFallo && <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
           {/* Header */}
           <div className="bg-[#E8F5EE] px-6 py-4 border-b border-[#2D8D68]/20">
             <h2 className="text-[#143D34] font-bold text-base">Parámetros de costos</h2>
             <p className="text-[#2D8D68] text-xs mt-0.5">
-              Directo → + Indirectos → + Beneficio → + Impuestos → + IVA = Total Final
+              Costo directo → + Indirectos → + Beneficio → + Impuestos = Precio sin IVA → + IVA = Precio con IVA
             </p>
           </div>
 
@@ -260,7 +325,7 @@ export default function MarkupChain() {
             {/* Subtotal indirectos */}
             <div className="flex items-center justify-between mt-3 pt-3 border-t border-dashed border-gray-200">
               <span className="text-sm font-semibold text-gray-600">Subtotal Indirectos:</span>
-              <span className="text-sm font-bold text-[#E8663C]">{subtotalIndirectosPct.toFixed(1)} %</span>
+              <span className="text-sm font-bold text-[#E8663C]">{fmtPct(subtotalIndirectosPct)} %</span>
             </div>
 
             {/* ── BENEFICIO ── */}
@@ -268,10 +333,10 @@ export default function MarkupChain() {
             <div className="flex items-center justify-between">
               <div>
                 <span className="text-sm text-gray-700">Beneficio</span>
-                <span className="ml-2 text-[11px] text-gray-400">(sobre Subt. con Indirectos)</span>
+                <span className="ml-2 text-[11px] text-gray-400">(sobre el subtotal con indirectos)</span>
               </div>
               <PctInput
-                value={cfg.beneficio_pct ?? 25}
+                value={cfg.beneficio_pct ?? INDIRECTOS_DEFECTO.beneficio_pct}
                 onChange={(v) => set('beneficio_pct', v)}
                 readOnly={!puedeGuardar}
               />
@@ -302,7 +367,7 @@ export default function MarkupChain() {
             <div className="flex items-center justify-between">
               <div>
                 <span className="text-sm text-gray-700">IVA</span>
-                <span className="ml-2 text-[11px] text-gray-400">(sobre Neto)</span>
+                <span className="ml-2 text-[11px] text-gray-400">(sobre el precio sin IVA)</span>
               </div>
               <PctInput
                 value={cfg.iva_pct ?? 21}
@@ -358,7 +423,7 @@ export default function MarkupChain() {
             </div>
 
             {/* Save */}
-            <div className="mt-6 flex items-center justify-end gap-4">
+            <div className="mt-6 flex items-center justify-end gap-x-4 gap-y-2 flex-wrap">
               {id && esAdmin && (
                 <label className="flex items-center gap-2 text-xs text-gray-600">
                   <input type="checkbox" checked={alsoGeneral} onChange={(e) => setAlsoGeneral(e.target.checked)} />
@@ -368,21 +433,67 @@ export default function MarkupChain() {
               {puedeGuardar && (
               <button
                 onClick={handleSave}
-                disabled={saving}
+                disabled={saving || loading || !!confirmar}
                 className="bg-[#2D8D68] hover:bg-[#1B5E4B] disabled:opacity-60 text-white font-semibold px-6 py-2.5 rounded-xl text-sm transition-colors flex items-center gap-2 shadow-sm"
               >
                 {saving && (
                   <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
                 )}
-                {saved ? 'Guardado' : 'Guardar cambios'}
+                {saving ? 'Guardando…' : 'Guardar cambios'}
               </button>
               )}
             </div>
-          </div>
-        </div>
 
-        {/* Recalculate the whole budget */}
-        {puedeEditar && (
+            {/* Antes de cambiar el precio de otros presupuestos, se pregunta (en la página, no en una ventanita) */}
+            {confirmar && (
+              <div role="alertdialog" aria-labelledby="confirmar-titulo" data-testid="confirmar-afectados" className="mt-4 rounded-xl border border-amber-300 bg-amber-50 p-4">
+                <p id="confirmar-titulo" className="text-sm text-amber-900">
+                  Esto cambia el precio de{' '}
+                  <strong>{confirmar.length} {confirmar.length === 1 ? 'presupuesto' : 'presupuestos'}</strong> que{' '}
+                  {confirmar.length === 1 ? 'usa' : 'usan'} estos porcentajes: {listaNombres(confirmar)}. ¿Seguir?
+                </p>
+                <p className="text-[11px] text-amber-800/80 mt-1">
+                  Los presupuestos con porcentajes propios no cambian.
+                </p>
+                <div className="mt-3 flex gap-2 flex-wrap">
+                  <button
+                    autoFocus
+                    onClick={() => void guardar()}
+                    className="bg-[#2D8D68] hover:bg-[#1B5E4B] text-white font-semibold px-5 py-2 rounded-xl text-sm"
+                  >
+                    Seguir
+                  </button>
+                  <button
+                    onClick={() => setConfirmar(null)}
+                    className="bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 font-medium px-5 py-2 rounded-xl text-sm"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {saveMsg && (
+              <div
+                role={saveMsg.tipo === 'error' ? 'alert' : 'status'}
+                data-testid="resultado-guardar"
+                className={`mt-4 flex items-start gap-2 rounded-xl px-4 py-3 text-sm ${
+                  saveMsg.tipo === 'ok'
+                    ? 'bg-[#E8F5EE] text-[#1B5E4B] border border-[#2D8D68]/20'
+                    : 'bg-red-50 text-red-700 border border-red-200'
+                }`}
+              >
+                {saveMsg.tipo === 'ok'
+                  ? <CheckCircle size={16} className="flex-shrink-0 mt-0.5 text-[#2D8D68]" />
+                  : <AlertTriangle size={16} className="flex-shrink-0 mt-0.5" />}
+                <span>{saveMsg.texto}</span>
+              </div>
+            )}
+          </div>
+        </div>}
+
+        {/* Recalculate the whole budget (solo con una obra abierta) */}
+        {puedeEditar && id && (
         <div className="mt-4 bg-white rounded-xl border border-gray-100 shadow-sm p-4">
           <div className="flex items-center justify-between gap-3">
             <div>
@@ -443,25 +554,25 @@ export default function MarkupChain() {
             </div>
             <div className="flex items-center gap-2 ml-3">
               <span className="text-gray-300">+</span>
-              <span className="text-[#E8663C] font-medium">Indirectos ({subtotalIndirectosPct.toFixed(1)}%)</span>
+              <span className="text-[#E8663C] font-medium">Indirectos ({fmtPct(subtotalIndirectosPct)}%)</span>
               <span className="text-gray-400">= Subtotal 02</span>
             </div>
             <div className="flex items-center gap-2 ml-3">
               <span className="text-gray-300">+</span>
-              <span className="text-amber-600 font-medium">Beneficio ({(cfg.beneficio_pct ?? 25).toFixed(1)}%)</span>
+              <span className="text-amber-600 font-medium">Beneficio ({fmtPct(cfg.beneficio_pct ?? INDIRECTOS_DEFECTO.beneficio_pct)}%)</span>
               <span className="text-gray-400">= Subtotal 03</span>
             </div>
             <div className="flex items-center gap-2 ml-3">
               <span className="text-gray-300">+</span>
               <span className="text-rose-600 font-medium">
-                Impuestos ({((cfg.ingresos_brutos_pct ?? 7) + (cfg.imp_cheque_pct ?? 1.2)).toFixed(1)}%)
+                Impuestos ({fmtPct((cfg.ingresos_brutos_pct ?? 7) + (cfg.imp_cheque_pct ?? 1.2))}%)
               </span>
-              <span className="text-gray-400">= Neto</span>
+              <span className="text-gray-400">= Precio sin IVA</span>
             </div>
             <div className="flex items-center gap-2 ml-3">
               <span className="text-gray-300">+</span>
-              <span className="text-[#143D34] font-medium">IVA ({(cfg.iva_pct ?? 21).toFixed(1)}%)</span>
-              <span className="text-gray-400">= Total Final</span>
+              <span className="text-[#143D34] font-medium">IVA ({fmtPct(cfg.iva_pct ?? 21)}%)</span>
+              <span className="text-gray-400">= Precio con IVA</span>
             </div>
           </div>
         </div>

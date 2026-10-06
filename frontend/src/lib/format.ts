@@ -18,6 +18,15 @@ export function fmtCurrency(value: number | null | undefined): string {
 }
 
 /**
+ * Pesos enteros, sin abreviar: 142_213_456.7 → "$142.213.457". Para los totales que se comparan entre pantallas.
+ */
+export function fmtPesos(value: number | null | undefined): string {
+  const v = value ?? 0
+  const abs = Math.round(Math.abs(v))
+  return `${v < 0 && abs !== 0 ? '-' : ''}$${abs.toLocaleString('es-AR', { maximumFractionDigits: 0 })}`
+}
+
+/**
  * Format a number with Argentine locale (dot thousands, comma decimal).
  * e.g. 2663.25 → "2.663,25"
  */

@@ -19,9 +19,10 @@ import {
   Library,
   AlertTriangle,
 } from 'lucide-react'
-import { budgetApi, templateApi, esFaltaConversion, esConfirmarReemplazo, esFalloAplicar } from '../lib/api'
+import { budgetApi, templateApi, esFaltaConversion, esConfirmarReemplazo, esFalloAplicar, mensajeDeError } from '../lib/api'
 import type { FaltaConversion, PrecioFaltante, TemplateSugerencias } from '../lib/api'
 import { useAuth } from '../contexts/AuthContext'
+import { escaleraDe, fmtPct, indirectosCompletos, pctsEscalera } from '../lib/cascada'
 import { fmtCurrency, fmtNumber, fmtPercent, unidadEnPalabras } from '../lib/format'
 import { ESTILO, estadoDeTrabajo, precioPorUnidad } from '../lib/semaforo'
 import BuscadorFormulas from '../components/ui/BuscadorFormulas'
@@ -133,6 +134,7 @@ function ResourceRow({ resource, tipo, onSave, onDelete, startEditing, onEditDon
   const [editing, setEditing] = useState(startEditing)
   const [draft, setDraft] = useState<Partial<ItemResource>>({})
   const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
 
   useEffect(() => {
@@ -155,11 +157,14 @@ function ResourceRow({ resource, tipo, onSave, onDelete, startEditing, onEditDon
 
   const handleSave = async () => {
     setSaving(true)
+    setSaveError(null)
     try {
       await onSave(resource.id, draft)
       setEditing(false)
       setDraft({})
       onEditDone()
+    } catch (err) {
+      setSaveError(`No se guardó: ${mensajeDeError(err)}`)
     } finally {
       setSaving(false)
     }
@@ -204,7 +209,7 @@ function ResourceRow({ resource, tipo, onSave, onDelete, startEditing, onEditDon
           <td className="px-2 py-1.5">
             <input className={numCls} type="number" step="1" min="0" value={draft.precio_unitario ?? 0} onChange={(e) => set('precio_unitario', parseFloat(e.target.value) || 0)} />
           </td>
-          <td className="px-2 py-1.5 text-right text-xs text-gray-400">—</td>
+          <td className="px-2 py-1.5 text-right text-xs text-gray-400">{saveError ? <span role="alert" className="text-red-600">{saveError}</span> : '—'}</td>
           <td className="px-2 py-1.5">
             <div className="flex items-center gap-1 justify-center">
               <button disabled={saving} onClick={handleSave} className="p-1 bg-[#2D8D68] hover:bg-[#1E6B4E] text-white rounded disabled:opacity-50 transition-colors">
@@ -263,7 +268,7 @@ function ResourceRow({ resource, tipo, onSave, onDelete, startEditing, onEditDon
         <td className="px-2 py-1.5">
           <input className={numCls} type="number" step="1" min="0" value={draft.precio_unitario ?? 0} onChange={(e) => set('precio_unitario', parseFloat(e.target.value) || 0)} />
         </td>
-        <td className="px-2 py-1.5 text-right text-xs text-gray-400">—</td>
+        <td className="px-2 py-1.5 text-right text-xs text-gray-400">{saveError ? <span role="alert" className="text-red-600">{saveError}</span> : '—'}</td>
         <td className="px-2 py-1.5">
           <div className="flex items-center gap-1 justify-center">
             <button disabled={saving} onClick={handleSave} className="p-1 bg-[#2D8D68] hover:bg-[#1E6B4E] text-white rounded disabled:opacity-50 transition-colors">
@@ -597,78 +602,71 @@ interface GrandTotalProps {
 }
 
 function GrandTotal({ item, indirects, recursos }: GrandTotalProps) {
-  const matTotal = recursos.filter((r) => r.tipo === 'material').reduce((s, r) => s + (r.subtotal ?? 0), 0)
-  const moTotal = recursos.filter((r) => r.tipo === 'mano_obra').reduce((s, r) => s + (r.subtotal ?? 0), 0)
-  const eqTotal = recursos.filter((r) => r.tipo === 'equipo').reduce((s, r) => s + (r.subtotal ?? 0), 0)
-  const matIndTotal = recursos.filter((r) => r.tipo === 'mo_material').reduce((s, r) => s + (r.subtotal ?? 0), 0)
-  const subTotal = recursos.filter((r) => r.tipo === 'subcontrato').reduce((s, r) => s + (r.subtotal ?? 0), 0)
-  const directo = matTotal + moTotal + eqTotal + matIndTotal + subTotal
+  const sumaTipo = (tipo: ItemResource['tipo']) =>
+    recursos.filter((r) => r.tipo === tipo).reduce((s, r) => s + (r.subtotal ?? 0), 0)
+  const matTotal = sumaTipo('material')
+  const moTotal = sumaTipo('mano_obra')
+  const eqTotal = sumaTipo('equipo')
+  const matIndTotal = sumaTipo('mo_material')
+  const subTotal = sumaTipo('subcontrato')
 
-  // Prefer item's calculated values if available, otherwise derive from indirects config
-  const indirectoTotal = item.indirecto_total ?? 0
-  const beneficioTotal = item.beneficio_total ?? 0
-  const impuestosTotal = item.impuestos_total ?? 0
-  const netoTotal = item.neto_total ?? 0
-  const ivaTotal = item.iva_total ?? 0
-  const totalFinal = item.total_final ?? 0
+  // Lo guardado por el servidor (la misma cuenta para todo el presupuesto). Los % solo si se pudieron leer.
+  const pcts = pctsEscalera(indirects)
+  const e = escaleraDe([item], indirects ? indirectosCompletos(indirects).iva_pct : null)
+  const sinPrecio = e.neto === 0 && e.directo > 0
 
-  const indirectoPct = indirects
-    ? (indirects.estructura_pct || 0) + (indirects.jefatura_pct || 0) + (indirects.logistica_pct || 0) + (indirects.herramientas_pct || 0)
-    : 0
-  const beneficioPct = indirects?.beneficio_pct ?? 10
-  const impuestosPct = (indirects?.ingresos_brutos_pct ?? 7) + (indirects?.imp_cheque_pct ?? 1.2)
-  const ivaPct = indirects?.iva_pct ?? 21
-
-  const Row = ({ label, value, sub, highlight }: { label: string; value: number; sub?: string; highlight?: boolean }) => (
-    <div className={`flex items-center justify-between py-1.5 px-4 ${highlight ? 'bg-[#E8F5EE] rounded-lg' : ''}`}>
-      <span className={`text-xs ${highlight ? 'font-bold text-[#143D34]' : 'text-gray-600'}`}>
+  const Row = ({ label, value, sub, highlight, fuerte, testId }: {
+    label: string; value: number | null; sub?: string; highlight?: boolean; fuerte?: boolean; testId?: string
+  }) => (
+    <div
+      className={`flex items-center justify-between gap-3 py-1.5 px-4 ${highlight ? 'bg-[#E8F5EE] rounded-lg mx-2 px-2' : ''}`}
+      data-testid={testId}
+      data-valor={value ?? ''}
+    >
+      <span className={`text-xs ${highlight || fuerte ? 'font-bold text-[#143D34]' : 'text-gray-600'}`}>
         {label}
-        {sub && <span className="ml-1 text-[10px] text-gray-400">({sub})</span>}
+        {sub && <span className="ml-1 text-[10px] text-gray-400 font-normal">({sub})</span>}
       </span>
-      <span className={`font-bold tabular-nums ${highlight ? 'text-[#2D8D68] text-base' : 'text-xs text-gray-900'}`}>
-        {fmtARS(value)}
+      <span className={`font-bold tabular-nums whitespace-nowrap ${highlight ? 'text-[#2D8D68] text-base' : fuerte ? 'text-sm text-[#143D34]' : 'text-xs text-gray-900'}`}>
+        {value === null ? '—' : fmtARS(value)}
       </span>
     </div>
   )
 
   return (
-    <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+    <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden" data-testid="resumen-costos">
       <div className="bg-[#E8F5EE]/30 px-4 py-2.5 border-b flex items-center gap-2">
         <Calculator size={14} className="text-[#2D8D68]" />
-        <span className="font-bold text-sm text-[#2D8D68]">Resumen de Costos</span>
+        <span className="font-bold text-sm text-[#2D8D68]">Del costo al precio</span>
       </div>
       <div className="py-2 space-y-0.5">
-        {/* Resource breakdown */}
-        {matTotal > 0 && <Row label="+ MAT (Materiales)" value={matTotal} />}
-        {moTotal > 0 && <Row label="+ MO (Mano de Obra)" value={moTotal} />}
-        {eqTotal > 0 && <Row label="+ EQ (Equipos)" value={eqTotal} />}
-        {matIndTotal > 0 && <Row label="+ Mat.Ind (Materiales Indirectos)" value={matIndTotal} />}
-        {subTotal > 0 && <Row label="+ Sub (Subcontratos)" value={subTotal} />}
-        <div className="mx-4 my-1 border-t border-dashed border-gray-200" />
-        <Row label="= Costo Directo" value={directo} />
-        {indirectoTotal > 0 && <Row label="+ Indirectos" value={indirectoTotal} sub={`${indirectoPct.toFixed(1)}%`} />}
-        {beneficioTotal > 0 && <Row label="+ Beneficio" value={beneficioTotal} sub={`${beneficioPct}%`} />}
-        {impuestosTotal > 0 && <Row label="+ Impuestos" value={impuestosTotal} sub={`${impuestosPct.toFixed(1)}%`} />}
-        {netoTotal > 0 && (
+        {/* De qué está hecho el costo directo */}
+        {matTotal > 0 && <Row label="Materiales" value={matTotal} />}
+        {moTotal > 0 && <Row label="Mano de obra" value={moTotal} />}
+        {eqTotal > 0 && <Row label="Equipos" value={eqTotal} />}
+        {matIndTotal > 0 && <Row label="Materiales indirectos" value={matIndTotal} />}
+        {subTotal > 0 && <Row label="Subcontratos" value={subTotal} />}
+        {recursos.length > 0 && <div className="mx-4 my-1 border-t border-dashed border-gray-200" />}
+        <Row label="Costo directo" value={e.directo} fuerte testId="detalle-directo" />
+        {sinPrecio ? (
+          <div className="px-4 py-2 text-[11px] text-amber-700">
+            Este trabajo todavía no tiene el precio calculado. Tocá «Recálculo completo» en el editor.
+          </div>
+        ) : (
           <>
+            <Row label="+ Indirectos" value={e.indirecto} sub={pcts ? `${fmtPct(pcts.indirecto)}%` : undefined} testId="detalle-indirectos" />
+            <Row label="+ Beneficio" value={e.beneficio} sub={pcts ? `${fmtPct(pcts.beneficio)}%` : undefined} testId="detalle-beneficio" />
+            <Row
+              label="+ Impuestos"
+              value={e.impuestos}
+              sub={`Ingresos Brutos y cheque${pcts ? `, ${fmtPct(pcts.impuestos)}%` : ''}`}
+              testId="detalle-impuestos"
+            />
             <div className="mx-4 my-1 border-t border-dashed border-gray-200" />
-            <Row label="= NETO" value={netoTotal} />
-          </>
-        )}
-        {ivaTotal > 0 && <Row label="+ IVA" value={ivaTotal} sub={`${ivaPct}%`} />}
-        {totalFinal > 0 && (
-          <>
-            <div className="mx-4 my-1 border-t-2 border-gray-300" />
-            <Row label="= TOTAL FINAL" value={totalFinal} highlight />
-          </>
-        )}
-        {/* Fallback if totals not calculated yet */}
-        {netoTotal === 0 && directo > 0 && (
-          <>
-            <div className="mx-4 my-1 border-t-2 border-gray-300" />
-            <div className="px-4 py-2 text-[10px] text-gray-400 italic">
-              Los totales con indirectos y beneficio se calculan al recalcular el presupuesto.
-            </div>
+            <Row label="= Precio sin IVA" value={e.neto} fuerte testId="detalle-precio-sin-iva" />
+            <Row label="+ IVA" value={e.iva} sub={pcts ? `${fmtPct(pcts.iva)}%` : undefined} testId="detalle-iva" />
+            <div className="mx-4 my-1 border-t-2 border-gray-200" />
+            <Row label="= Precio con IVA" value={e.total_final} highlight testId="detalle-precio-con-iva" />
           </>
         )}
       </div>
@@ -1005,6 +1003,9 @@ export default function ItemDetail() {
   const [editingMemoria, setEditingMemoria] = useState(false)
   const [memoriaDraft, setMemoriaDraft] = useState('')
   const [memoriaSaving, setMemoriaSaving] = useState(false)
+  const [memoriaError, setMemoriaError] = useState<string | null>(null)
+  // No se pudieron traer los números nuevos después de un cambio (el cambio sí se guardó)
+  const [refreshError, setRefreshError] = useState(false)
   const [templateModalOpen, setTemplateModalOpen] = useState(false)
   // Materiales sin precio, tal como los calcula el servidor sobre lo guardado
   const [faltantes, setFaltantes] = useState<PrecioFaltante[]>([])
@@ -1069,6 +1070,8 @@ export default function ItemDetail() {
     }
   }, [id, itemId, refrescarFaltantes])
 
+  // Después de tocar recursos, parámetros, fórmula o la memoria: el servidor ya hizo la cuenta del trabajo,
+  // así que se traen el trabajo y sus recursos tal como quedaron guardados.
   const reloadResources = useCallback(async () => {
     if (!id || !itemId) return
     try {
@@ -1079,8 +1082,9 @@ export default function ItemDetail() {
       setRecursos(Array.isArray(res) ? res : [])
       const it = Array.isArray(items) ? items.find((i) => i.id === itemId) ?? null : null
       if (it) setItem(it)
+      setRefreshError(false)
     } catch {
-      // silent
+      setRefreshError(true)
     }
     refrescarFaltantes()
   }, [id, itemId, refrescarFaltantes])
@@ -1307,6 +1311,13 @@ export default function ItemDetail() {
       </div>
 
       {/* Grand total */}
+      {refreshError && (
+        <div role="alert" className="mb-2 flex items-center gap-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+          <AlertTriangle size={14} className="flex-shrink-0" />
+          <span className="flex-1">El cambio se guardó, pero no pude traer los números nuevos de este trabajo.</span>
+          <button onClick={() => reloadResources()} className="font-semibold underline">Probá de nuevo</button>
+        </div>
+      )}
       {item && (
         <div className="mb-6">
           <GrandTotal item={item} indirects={indirects} recursos={recursos} />
@@ -1349,19 +1360,18 @@ export default function ItemDetail() {
                     onClick={async () => {
                       if (!id || !itemId) return
                       setMemoriaSaving(true)
+                      setMemoriaError(null)
                       try {
-                        const result = await budgetApi.updateItem(id, itemId, { notas_calculo: memoriaDraft } as Partial<BudgetItem>)
-                        if (result && typeof result === 'object' && 'item' in result) {
-                          setItem((result as { item: BudgetItem }).item)
-                        } else {
-                          setItem((prev) => prev ? { ...prev, notas_calculo: memoriaDraft } : prev)
-                        }
+                        await budgetApi.updateItem(id, itemId, { notas_calculo: memoriaDraft } as Partial<BudgetItem>)
+                        setItem((prev) => prev ? { ...prev, notas_calculo: memoriaDraft } : prev)
                         setEditingMemoria(false)
+                        // El trabajo como quedó guardado (un texto no cambia los números)
+                        await reloadResources()
                         budgetApi.getItemAudits(id, itemId)
                           .then((data) => setAudits(Array.isArray(data) ? data : []))
                           .catch(() => {})
-                      } catch {
-                        // silently fail
+                      } catch (err) {
+                        setMemoriaError(`No se guardó la memoria: ${mensajeDeError(err)}`)
                       } finally {
                         setMemoriaSaving(false)
                       }
@@ -1380,6 +1390,7 @@ export default function ItemDetail() {
                     Cancelar
                   </button>
                 </div>
+                {memoriaError && <p role="alert" className="text-xs text-red-600">{memoriaError}</p>}
               </div>
             ) : (
               <div>

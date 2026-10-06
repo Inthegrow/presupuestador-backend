@@ -113,7 +113,7 @@ export default function Dashboard() {
       <div className="grid grid-cols-3 gap-3 mb-6">
         <KpiCard icon={<LayoutGrid size={16} strokeWidth={1.5} className="text-[#2D8D68]" />} bg="bg-[#E8F5EE]" value={String(budgets.length)} label="OBRAS" />
         <KpiCard icon={<TrendingUp size={16} strokeWidth={1.5} className="text-blue-600" />} bg="bg-blue-50" value={String(totalItems)} label="TRABAJOS CARGADOS" valueClass="text-blue-600" />
-        <KpiCard icon={<DollarSign size={16} strokeWidth={1.5} className="text-[#2D8D68]" />} bg="bg-[#E8F5EE]" value={totalNeto > 0 ? fmtCurrency(totalNeto) : '$0'} label="TOTAL DE LA CARTERA" />
+        <KpiCard icon={<DollarSign size={16} strokeWidth={1.5} className="text-[#2D8D68]" />} bg="bg-[#E8F5EE]" value={totalNeto > 0 ? fmtCurrency(totalNeto) : '$0'} label="TOTAL DE LA CARTERA, SIN IVA" />
       </div>
 
       {/* Search and filter */}
@@ -191,7 +191,7 @@ export default function Dashboard() {
               budget={b}
               directTotal={a?.directo_total}
               netoTotal={a?.neto_total}
-              subtitle={a ? `${a.items_count} ítems` : undefined}
+              subtitle={a ? `${a.items_count} ${a.items_count === 1 ? 'trabajo' : 'trabajos'}` : undefined}
               onDelete={() => loadBudgets()}
             />
           )
@@ -206,7 +206,7 @@ export default function Dashboard() {
             {budgets.slice(0, 5).map((b, i) => {
               const a = analyses[b.id]
               const dateStr = b.updated_at || b.created_at
-              const itemsText = a ? `${a.items_count} items` : ''
+              const itemsText = a ? `${a.items_count} ${a.items_count === 1 ? 'trabajo' : 'trabajos'}` : ''
               const STATUS_MAP: Record<string, string> = { draft: 'Borrador', active: 'Activo', approved: 'Aprobado', sent: 'Enviado', review: 'En Revisión' }
               const statusText = STATUS_MAP[b.status?.toLowerCase() || ''] || b.status || ''
               const detail = [statusText, itemsText].filter(Boolean).join(' - ')

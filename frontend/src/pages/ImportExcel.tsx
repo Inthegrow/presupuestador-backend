@@ -2,8 +2,17 @@ import { useState } from 'react'
 import { Upload, CheckCircle } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { budgetApi } from '../lib/api'
+import { fmtPesos } from '../lib/format'
 import { useAuth } from '../contexts/AuthContext'
 import FileUpload from '../components/ui/FileUpload'
+
+// "Tu Excel decía $X; con tu Coeficiente de pase da $Y": solo si los dos precios sin IVA difieren (en pesos)
+function diferenciaExcel(r: { neto_excel?: number | null; neto_app?: number | null }): { excel: number; app: number } | null {
+  const ex = r.neto_excel
+  const app = r.neto_app
+  if (typeof ex !== 'number' || typeof app !== 'number' || !Number.isFinite(ex) || !Number.isFinite(app)) return null
+  return Math.round(ex) === Math.round(app) ? null : { excel: ex, app }
+}
 
 // Qué pasó con la lista de precios del Excel (nada si no traía hojas de precios)
 function listaResumen(r: { catalog_reused: boolean; catalog_name: string | null; precios_actualizados: number; precios_nuevos: number }) {
@@ -20,18 +29,7 @@ export default function ImportExcel() {
   const [file, setFile] = useState<File | null>(null)
   const [importing, setImporting] = useState(false)
   const [error, setError] = useState('')
-  const [result, setResult] = useState<{
-    budget_id: string
-    budget_name: string
-    items_inserted: number
-    resources_inserted: number
-    catalog_entries: number
-    date_codes_corrected: number
-    catalog_reused: boolean
-    catalog_name: string | null
-    precios_actualizados: number
-    precios_nuevos: number
-  } | null>(null)
+  const [result, setResult] = useState<Awaited<ReturnType<typeof budgetApi.importExcel>> | null>(null)
 
   function handleFile(f: File) {
     setFile(f)
@@ -185,6 +183,21 @@ export default function ImportExcel() {
             {listaResumen(result) && (
               <p className="text-sm text-gray-700 mb-5">{listaResumen(result)}</p>
             )}
+
+            {(() => {
+              const d = diferenciaExcel(result)
+              if (!d) return null
+              return (
+                <div className="mb-5 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2" data-testid="diferencia-excel">
+                  <p className="text-sm text-amber-900">
+                    Tu Excel decía {fmtPesos(d.excel)}; con tu Coeficiente de pase da <strong>{fmtPesos(d.app)}</strong>.
+                  </p>
+                  <p className="text-[11px] text-amber-800/80 mt-0.5">
+                    Precios sin IVA. La app toma el costo directo de tu Excel y le suma indirectos, beneficio e impuestos con tus porcentajes.
+                  </p>
+                </div>
+              )
+            })()}
 
             <div className="flex gap-3">
               <button

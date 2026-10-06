@@ -85,3 +85,125 @@ export function cascadaIndirectos(directo: number, cfg: IndirectosPct): Cascada 
     total_final: centavos(totalFinal),
   }
 }
+
+const CLAVES_SOLO_INDIRECTOS = [
+  'imprevistos_pct',
+  'estructura_pct',
+  'jefatura_pct',
+  'logistica_pct',
+  'herramientas_pct',
+] as const
+
+type ConfigParcial = Partial<Record<ClaveIndirecto, number | null | undefined>>
+
+/** % de indirectos: los 5 conceptos (imprevistos + estructura + jefatura + logística + herramientas),
+ *  con los mismos valores por defecto que la cascada. Es el único "% indirecto" que muestra la app. */
+export function pctIndirectos(config: ConfigParcial | null | undefined): number {
+  const c = indirectosCompletos(config)
+  return Number(CLAVES_SOLO_INDIRECTOS.reduce((s, k) => s + c[k], 0).toFixed(4))
+}
+
+/** Los % que acompañan a cada renglón de la escalera. Sin config (todavía cargando o falló): null, sin números. */
+export interface PctsEscalera {
+  indirecto: number
+  beneficio: number
+  impuestos: number
+  iva: number
+}
+
+export function pctsEscalera(
+  config: (ConfigParcial & { indirecto_pct?: number | null }) | null | undefined,
+): PctsEscalera | null {
+  if (!config) return null
+  const c = indirectosCompletos(config)
+  const delServidor = config.indirecto_pct
+  return {
+    indirecto: typeof delServidor === 'number' && Number.isFinite(delServidor) ? delServidor : pctIndirectos(config),
+    beneficio: c.beneficio_pct,
+    impuestos: Number((c.ingresos_brutos_pct + c.imp_cheque_pct).toFixed(4)),
+    iva: c.iva_pct,
+  }
+}
+
+/** "34", "8,2", "10,5": un % para leer, sin ceros de más. */
+export function fmtPct(n: number): string {
+  return n.toLocaleString('es-AR', { maximumFractionDigits: 2 })
+}
+
+// ─── Escalera de totales (lo guardado, sumado) ──────────────────────────────────
+
+/** Los renglones que muestra la app, de arriba abajo. iva / total_final en null = no se puede saber sin inventar. */
+export interface Escalera {
+  mat: number
+  mo: number
+  directo: number
+  indirecto: number
+  beneficio: number
+  impuestos: number
+  neto: number
+  iva: number | null
+  total_final: number | null
+}
+
+type FilaGuardada = {
+  mat_total?: number | null
+  mo_total?: number | null
+  directo_total?: number | null
+  indirecto_total?: number | null
+  beneficio_total?: number | null
+  impuestos_total?: number | null
+  neto_total?: number | null
+  iva_total?: number | null
+  total_final?: number | null
+}
+
+function num(v: unknown): number {
+  return typeof v === 'number' && Number.isFinite(v) ? v : 0
+}
+
+function esNum(v: unknown): v is number {
+  return typeof v === 'number' && Number.isFinite(v)
+}
+
+/**
+ * Suma los totales GUARDADOS (los calculó el servidor). Nada se recalcula acá, salvo dos huecos de datos viejos:
+ * - Impuestos sin guardar: lo que va del subtotal con beneficio al precio sin IVA (así los renglones siempre suman).
+ * - IVA sin guardar: precio sin IVA × IVA% de la obra; si tampoco se sabe el IVA%, IVA y precio con IVA quedan en null
+ *   (la pantalla muestra "—" en vez de un número inventado).
+ */
+export function escaleraDe(filas: FilaGuardada[], ivaPct: number | null): Escalera {
+  const e: Escalera = { mat: 0, mo: 0, directo: 0, indirecto: 0, beneficio: 0, impuestos: 0, neto: 0, iva: 0, total_final: 0 }
+  for (const f of filas) {
+    const directo = num(f.directo_total)
+    const indirecto = num(f.indirecto_total)
+    const beneficio = num(f.beneficio_total)
+    const neto = num(f.neto_total)
+    e.mat += num(f.mat_total)
+    e.mo += num(f.mo_total)
+    e.directo += directo
+    e.indirecto += indirecto
+    e.beneficio += beneficio
+    e.neto += neto
+    e.impuestos += esNum(f.impuestos_total) ? f.impuestos_total : Math.max(0, neto - directo - indirecto - beneficio)
+    let iva: number | null = esNum(f.iva_total) ? f.iva_total : null
+    if (iva === null && ivaPct !== null) iva = centavos((neto * ivaPct) / 100)
+    if (iva === null && neto !== 0) {
+      e.iva = null
+      e.total_final = null
+    }
+    if (e.iva !== null) e.iva += iva ?? 0
+    if (e.total_final !== null) e.total_final += esNum(f.total_final) ? f.total_final : neto + (iva ?? 0)
+  }
+  const r = (n: number) => centavos(n)
+  return {
+    mat: r(e.mat),
+    mo: r(e.mo),
+    directo: r(e.directo),
+    indirecto: r(e.indirecto),
+    beneficio: r(e.beneficio),
+    impuestos: r(e.impuestos),
+    neto: r(e.neto),
+    iva: e.iva === null ? null : r(e.iva),
+    total_final: e.total_final === null ? null : r(e.total_final),
+  }
+}

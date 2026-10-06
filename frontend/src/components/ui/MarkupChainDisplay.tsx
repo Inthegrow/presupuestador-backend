@@ -1,110 +1,107 @@
 import { useState } from 'react'
 import { ChevronRight, Settings2 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
-import { fmtCurrency } from '../../lib/format'
-
-interface MarkupLink {
-  label: string
-  pct: number
-}
+import { cascadaIndirectos, fmtPct, indirectosCompletos, pctsEscalera } from '../../lib/cascada'
+import { fmtNumber } from '../../lib/format'
+import type { IndirectConfig } from '../../types'
 
 interface Props {
-  directo: number
-  neto: number
-  links: MarkupLink[]
+  // Los % de esta obra. null = todavía no llegaron (o no se pudieron leer): no se muestra ningún número
+  config: IndirectConfig | null
   budgetId?: string
+  // true = no se pudieron leer (en vez de "cargando")
+  fallo?: boolean
 }
 
-export default function MarkupChainDisplay({ directo, neto, links, budgetId }: Props) {
+const CONCEPTOS: { key: keyof IndirectConfig; label: string }[] = [
+  { key: 'imprevistos_pct', label: 'Imprevistos' },
+  { key: 'estructura_pct', label: 'Estructura' },
+  { key: 'jefatura_pct', label: 'Jefatura' },
+  { key: 'logistica_pct', label: 'Logística' },
+  { key: 'herramientas_pct', label: 'Herramientas' },
+]
+
+function Pill({ label, pct, fuerte = false }: { label: string; pct: number; fuerte?: boolean }) {
+  return (
+    <span
+      className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-[11px] border ${
+        fuerte ? 'bg-[#E8F5EE] border-[#2D8D68]/25 text-[#143D34] font-semibold' : 'bg-white border-gray-200 text-gray-600'
+      }`}
+    >
+      {label}
+      <span className="font-bold tabular-nums">{fmtPct(pct)}%</span>
+    </span>
+  )
+}
+
+/** El Coeficiente de pase de la obra, en una línea; abierto, de qué está hecho cada %. */
+export default function MarkupChainDisplay({ config, budgetId, fallo = false }: Props) {
   const [expanded, setExpanded] = useState(false)
   const navigate = useNavigate()
-
-  const totalPct = links.reduce((sum, l) => sum + l.pct, 0)
+  const pcts = pctsEscalera(config)
+  const completos = config ? indirectosCompletos(config) : null
+  // Precio sin IVA por cada $100 de costo directo (el servidor lo manda como coeficiente por $1)
+  const por100 = config
+    ? typeof config.coeficiente === 'number' && Number.isFinite(config.coeficiente)
+      ? config.coeficiente * 100
+      : cascadaIndirectos(100, indirectosCompletos(config)).neto
+    : null
 
   return (
-    <div className="px-4 py-2.5 bg-gradient-to-r from-gray-50 to-white border-b border-gray-100">
-      {/* Collapsed header - always visible */}
-      <div
-        className="flex items-center justify-between cursor-pointer select-none group"
-        onClick={() => setExpanded((v) => !v)}
-      >
-        <div className="flex items-center gap-2">
+    <div className="px-1 py-1.5" data-testid="coeficiente-pase">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          aria-expanded={expanded}
+          disabled={!pcts}
+          className="flex items-center gap-2 flex-wrap text-left group disabled:cursor-default"
+        >
           <ChevronRight
             size={14}
-            className={`text-gray-400 transition-transform duration-200 ${expanded ? 'rotate-90' : ''}`}
+            className={`text-gray-400 transition-transform duration-200 ${expanded ? 'rotate-90' : ''} ${pcts ? '' : 'opacity-0'}`}
           />
-          <span className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold group-hover:text-gray-600 transition-colors">
-            Coeficiente de pase
-          </span>
-          {!expanded && (
-            <span className="text-[10px] font-medium text-[#E8663C] bg-[#E8663C]/8 px-2 py-0.5 rounded-full">
-              {totalPct}% indirecto
+          <span className="text-[11px] font-semibold text-gray-600 group-hover:text-gray-900">Coeficiente de pase</span>
+          {pcts ? (
+            <span className="text-[11px] text-gray-500">
+              <span data-testid="pct-indirecto-linea">{fmtPct(pcts.indirecto)}% indirectos</span>
+              {' · '}{fmtPct(pcts.beneficio)}% beneficio{' · '}{fmtPct(pcts.impuestos)}% impuestos
+              {por100 !== null && (
+                <span className="text-gray-400"> — por cada $100 de costo directo, ${fmtNumber(por100)} sin IVA</span>
+              )}
+            </span>
+          ) : (
+            <span className={`text-[11px] ${fallo ? 'text-red-600' : 'text-gray-400'}`}>
+              {fallo ? 'No pude leer los porcentajes de esta obra.' : 'Cargando los porcentajes…'}
             </span>
           )}
-        </div>
-        <div className="flex items-center gap-2">
-          {!expanded && (
-            <span className="text-[10px] font-semibold text-[#9D7A32]">
-              NETO {fmtCurrency(neto)}
-            </span>
-          )}
-          <button
-            onClick={(e) => {
-              e.stopPropagation()
-              navigate(budgetId ? `/app/settings/markups?budget=${budgetId}` : '/app/settings/markups')
-            }}
-            className="flex items-center gap-1 text-[10px] text-gray-400 hover:text-[#2D8D68] font-medium transition-colors px-1.5 py-0.5 rounded-md hover:bg-[#E8F5EE]/50"
-          >
-            <Settings2 size={11} />
-            Configurar
-          </button>
-        </div>
+        </button>
+        <button
+          type="button"
+          onClick={() => navigate(budgetId ? `/app/settings/markups?budget=${budgetId}` : '/app/settings/markups')}
+          className="flex items-center gap-1 text-[11px] text-gray-500 hover:text-[#2D8D68] font-medium transition-colors px-2 py-1 rounded-lg hover:bg-[#E8F5EE]/60"
+        >
+          <Settings2 size={12} />
+          Cambiar porcentajes
+        </button>
       </div>
 
-      {/* Expandable pills chain */}
-      <div
-        className="overflow-hidden transition-all duration-300 ease-in-out"
-        style={{
-          maxHeight: expanded ? '120px' : '0px',
-          opacity: expanded ? 1 : 0,
-        }}
-      >
-        <div className="flex items-center gap-0 flex-wrap pt-2.5">
-          {/* Directo pill */}
-          <div className="flex items-center gap-0">
-            <span className="inline-flex items-center px-3 py-1.5 rounded-full text-xs font-bold bg-[#E8F5EE] text-[#143D34] border border-[#2D8D68]/20 shadow-sm">
-              {fmtCurrency(directo)}
-            </span>
-          </div>
-
-          {/* Markup links */}
-          {links.map((link) => (
-            <div key={link.label} className="flex items-center gap-0">
-              {/* Arrow connector */}
-              <svg width="24" height="12" viewBox="0 0 24 12" className="text-gray-300 flex-shrink-0">
-                <line x1="0" y1="6" x2="18" y2="6" stroke="currentColor" strokeWidth="1.5" />
-                <polygon points="16,2 22,6 16,10" fill="currentColor" />
-              </svg>
-              <span className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-full text-[11px] font-semibold bg-white text-gray-600 border border-gray-200 shadow-sm hover:shadow transition-shadow">
-                <span className="text-gray-400">+</span>
-                {link.label}
-                <span className="text-[10px] font-bold text-[#E8663C] bg-[#E8663C]/8 px-1.5 py-0 rounded-full">{link.pct}%</span>
-              </span>
-            </div>
+      {expanded && pcts && completos && (
+        <div className="flex items-center gap-1.5 flex-wrap pt-2 pl-6">
+          {CONCEPTOS.map((c) => (
+            <Pill key={c.key} label={c.label} pct={completos[c.key as keyof typeof completos]} />
           ))}
-
-          {/* Final arrow to Neto */}
-          <svg width="24" height="12" viewBox="0 0 24 12" className="text-[#E0A33A] flex-shrink-0">
-            <line x1="0" y1="6" x2="18" y2="6" stroke="currentColor" strokeWidth="1.5" />
-            <polygon points="16,2 22,6 16,10" fill="currentColor" />
-          </svg>
-
-          {/* Neto pill */}
-          <span className="inline-flex items-center px-3.5 py-1.5 rounded-full text-xs font-extrabold bg-gradient-to-r from-[#FDF6E3] to-[#FEF9EE] text-[#9D7A32] border border-[#E0A33A]/30 shadow-md">
-            NETO {fmtCurrency(neto)}
-          </span>
+          <span className="text-gray-300 text-xs" aria-hidden>=</span>
+          <Pill label="Indirectos" pct={pcts.indirecto} fuerte />
+          <span className="text-gray-300 text-xs" aria-hidden>·</span>
+          <Pill label="Beneficio" pct={pcts.beneficio} fuerte />
+          <span className="text-gray-300 text-xs" aria-hidden>·</span>
+          <Pill label="Ingresos Brutos" pct={completos.ingresos_brutos_pct} />
+          <Pill label="Cheque" pct={completos.imp_cheque_pct} />
+          <span className="text-gray-300 text-xs" aria-hidden>·</span>
+          <Pill label="IVA" pct={pcts.iva} />
         </div>
-      </div>
+      )}
     </div>
   )
 }

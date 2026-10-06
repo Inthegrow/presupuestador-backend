@@ -16,7 +16,7 @@ const TIPOS: { value: TemplateResource['tipo']; label: string }[] = [
 const ORIGEN_LABEL: Record<string, string> = {
   recurso: 'propio',
   presupuesto: 'del presupuesto',
-  plantilla: 'de la plantilla',
+  plantilla: 'de la fórmula',
   organizacion: 'general',
 }
 
@@ -95,15 +95,18 @@ export default function TemplateEditor({
   template,
   onSaved,
   onClose,
+  categoriaInicial,
 }: {
   template: Template | null // null = new template
   onSaved: (t: Template) => void
   onClose: () => void
+  // Fórmula nueva: arranca con este rubro (el que estaba elegido en la lista)
+  categoriaInicial?: string
 }) {
   const [nombre, setNombre] = useState(template?.nombre ?? '')
   const [descripcion, setDescripcion] = useState(template?.descripcion ?? '')
   const [unidad, setUnidad] = useState(template?.unidad ?? '')
-  const [categoria, setCategoria] = useState(template?.categoria ?? '')
+  const [categoria, setCategoria] = useState(template ? template.categoria ?? '' : categoriaInicial ?? '')
   const [desperdicio, setDesperdicio] = useState(str(template?.desperdicio_pct))
   const [params, setParams] = useState<TemplateParam[]>(parseList(template?.parametros))
   const [recursos, setRecursos] = useState<TemplateResource[]>(
@@ -185,7 +188,7 @@ export default function TemplateEditor({
         {/* Header */}
         <div className="bg-[#E8F5EE] px-5 py-4 flex items-center justify-between border-b border-[#C3E5D3] flex-shrink-0">
           <span className="font-bold text-[#143D34] text-base">
-            {template ? 'Editar plantilla' : 'Nueva plantilla'}
+            {template ? 'Editar fórmula' : 'Nueva fórmula'}
           </span>
           <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-[#C3E5D3] text-[#2D8D68]">
             <X size={16} />
