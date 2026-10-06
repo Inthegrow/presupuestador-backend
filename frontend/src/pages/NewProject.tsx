@@ -181,6 +181,42 @@ function normNombre(s: string): string {
  * Rubros con sus trabajos, juntando las fuentes (trabajos típicos, JSON y los armados a mano).
  * Dos rubros con el mismo nombre quedan en uno. Devuelve un error si algo no se puede crear.
  */
+// Valida el contenido real de un JSON de estructura (los tipos de TypeScript no lo hacen) y lo pasa a rubros.
+// Nombre y descripción tienen que ser texto; unidad, texto o nada; cantidad, número o nada.
+function leerRubrosJson(data: unknown): { rubros: Section[] } | { error: string } {
+  const formato = 'Formato esperado: [{"nombre": "Rubro", "items": [{"descripcion": "...", "unidad": "m2", "cantidad": 10}]}].'
+  if (!Array.isArray(data)) return { error: `El archivo JSON tiene que ser una lista de rubros. ${formato}` }
+  const vacio = (v: unknown) => v === undefined || v === null
+  const rubros: Section[] = []
+  for (let i = 0; i < data.length; i++) {
+    const r = data[i] as Record<string, unknown> | null
+    const donde = `Rubro ${i + 1}`
+    if (!r || typeof r !== 'object' || Array.isArray(r)) return { error: `${donde}: tiene que ser {"nombre": ..., "items": [...]}. ${formato}` }
+    if (!vacio(r.nombre) && typeof r.nombre !== 'string') return { error: `${donde}: el nombre tiene que ser texto.` }
+    if (!vacio(r.items) && !Array.isArray(r.items)) return { error: `${donde}: "items" tiene que ser una lista de trabajos.` }
+    const items: SectionItem[] = []
+    const lista = (r.items ?? []) as unknown[]
+    for (let k = 0; k < lista.length; k++) {
+      const it = lista[k] as Record<string, unknown> | null
+      const dondeT = `${donde}, trabajo ${k + 1}`
+      if (!it || typeof it !== 'object' || Array.isArray(it)) return { error: `${dondeT}: tiene que ser {"descripcion": ..., "unidad": ..., "cantidad": ...}.` }
+      if (!vacio(it.descripcion) && typeof it.descripcion !== 'string') return { error: `${dondeT}: la descripción tiene que ser texto.` }
+      if (!vacio(it.unidad) && typeof it.unidad !== 'string') return { error: `${dondeT}: la unidad tiene que ser texto.` }
+      if (!vacio(it.cantidad) && (typeof it.cantidad !== 'number' || !Number.isFinite(it.cantidad))) {
+        return { error: `${dondeT}: la cantidad tiene que ser un número.` }
+      }
+      items.push({
+        id: uid(),
+        descripcion: (it.descripcion as string | undefined) ?? '',
+        unidad: (it.unidad as string | undefined) ?? '',
+        cantidad: vacio(it.cantidad) ? '' : String(it.cantidad),
+      })
+    }
+    rubros.push({ id: uid(), nombre: (r.nombre as string | undefined) ?? '', items })
+  }
+  return { rubros }
+}
+
 function armarRubros(
   seleccion: SelectionState,
   jsonSections: Section[],
@@ -340,31 +376,24 @@ export default function NewProject() {
   // ─── JSON structure import ────────────────────────────────────────────────
 
   function handleJsonFile(f: File) {
-    setJsonFile(f)
-    setJsonSections([])
+    // Un archivo rechazado no reemplaza lo que ya estaba importado ni cuenta como importación
     const reader = new FileReader()
     reader.onload = (e) => {
+      let data: unknown
       try {
-        const data = JSON.parse(e.target?.result as string)
-        if (!Array.isArray(data)) {
-          setError('El archivo JSON tiene que ser una lista de rubros: [{"nombre": ..., "items": [...]}].')
-          return
-        }
-        const imported: Section[] = data.map((s: { nombre?: string; items?: { descripcion?: string; unidad?: string; cantidad?: number }[] }) => ({
-          id: uid(),
-          nombre: s.nombre ?? '',
-          items: (s.items ?? []).map((it) => ({
-            id: uid(),
-            descripcion: it.descripcion ?? '',
-            unidad: it.unidad ?? '',
-            cantidad: String(it.cantidad ?? ''),
-          })),
-        }))
-        setJsonSections(imported)
-        setError('')
+        data = JSON.parse(e.target?.result as string)
       } catch {
         setError('El archivo JSON no tiene un formato válido.')
+        return
       }
+      const leido = leerRubrosJson(data)
+      if ('error' in leido) {
+        setError(leido.error)
+        return
+      }
+      setJsonFile(f)
+      setJsonSections(leido.rubros)
+      setError('')
     }
     reader.readAsText(f)
   }

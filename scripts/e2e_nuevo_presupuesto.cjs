@@ -234,5 +234,30 @@ const TILDES = [
   check(await page.getByTestId('trabajos-creados').textContent() === '1' && await cuantos('Plano editor cancela') === 1, 'editor: crea sin los trabajos del plano, un solo presupuesto')
   await page.unroute('**/analyze-plan')
 
+  // 8. Importar JSON (Codex, PR #39): tipos inválidos se rechazan con error visible, sin romper el asistente
+  //    y sin pisar lo ya importado; un JSON válido arma sus rubros
+  const subirJson = async (nombre, contenido) => {
+    await page.locator('input[type="file"][accept=".json"]').setInputFiles({ name: nombre, mimeType: 'application/json', buffer: Buffer.from(contenido) })
+    await page.waitForTimeout(600)
+  }
+  await page.goto(`${B}/app/new-project`); await page.waitForTimeout(1500)
+  await page.getByLabel(/Nombre del presupuesto/).fill('JSON raro')
+  await page.getByRole('button', { name: /Siguiente/ }).click(); await page.waitForTimeout(500)
+  await page.getByRole('button', { name: /Importar JSON/ }).click(); await page.waitForTimeout(300)
+  await subirJson('nombre_numero.json', '[{"nombre":123,"items":[]}]')
+  check(await page.getByRole('alert').filter({ hasText: 'Rubro 1: el nombre tiene que ser texto.' }).count() === 1, 'JSON con nombre numérico: error visible')
+  check(await page.getByText('Estructura importada').count() === 0 && await page.getByRole('button', { name: /Importar JSON/ }).count() === 1, 'JSON con nombre numérico: no importa y el asistente sigue andando')
+  await subirJson('valido.json', '[{"nombre":"Pintura","items":[{"descripcion":"Pintura interior","unidad":"m2","cantidad":120}]}]')
+  check(await page.getByText(/Estructura importada: 1 rubros,\s*1 trabajos/).count() === 1 && await page.getByRole('alert').count() === 0, 'JSON válido: arma su rubro y borra el error')
+  await subirJson('descripcion_numero.json', '[{"nombre":"Rubro","items":[{"descripcion":123}]}]')
+  check(await page.getByRole('alert').filter({ hasText: 'Rubro 1, trabajo 1: la descripción tiene que ser texto.' }).count() === 1, 'JSON con descripción numérica: error visible')
+  check(await page.getByText(/Estructura importada: 1 rubros,\s*1 trabajos/).count() === 1, 'el JSON rechazado no pisa el que ya estaba importado')
+  await page.screenshot({ path: `${SHOTS}/14_json_rechazado.png` })
+  await page.getByRole('button', { name: /Siguiente/ }).click(); await page.waitForTimeout(800)
+  await page.getByRole('button', { name: /Crear presupuesto/i }).click(); await page.waitForTimeout(1500)
+  const jsonBud = (await j('GET', '/budgets')).find((x) => x.name === 'JSON raro')
+  const jsonItems = jsonBud ? await j('GET', `/budgets/${jsonBud.id}/items`) : []
+  check(!!jsonBud && jsonItems.some((i) => i.description === 'Pintura interior' && i.parent_id), 'crea el presupuesto con el JSON válido (trabajo dentro de su rubro)')
+
   console.log(`\n${ok} OK, ${bad} FALLAS`); await b.close(); if (bad) process.exit(1)
 })().catch((e) => { console.error(e); process.exit(1) })
