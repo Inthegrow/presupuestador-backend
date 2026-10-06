@@ -24,7 +24,13 @@ from fastapi.responses import StreamingResponse
 from app.auth import get_current_user, require_editor
 from app.budget_prices import budget_config, fetch_all, initial_indirects, today
 from app.catalog_prices import normalize_codigo, price_changed
-from app.calculations import fraction_to_pct, pct_or_default
+from app.calculations import (
+    calc_budget_summary,
+    fraction_to_pct,
+    is_section,
+    price_item,
+    sale_totals,
+)
 from app.db import get_data_db
 from app.routers.catalogs import record_history, start_history, update_entries
 from app.tree import get_parent_candidates, normalize_item_code, safe_float
@@ -439,13 +445,23 @@ async def import_excel(
         "precios_al": today().isoformat(),
     }).execute()
     budget_id = budget.data[0]["id"]
+    # The Excel brings the direct cost; the price is the cascade of this budget, like everywhere
+    config = budget_config(db, org_id, budget.data[0])
 
     # 4. Parse 01_C&P computation sheet
     items_inserted = 0
     resources_inserted = 0
+    neto_excel = 0.0
+    neto_app = 0.0
 
     if "01_C&P" in df_dict:
         parsed_items, date_codes_corrected = _parse_computation_sheet(df_dict["01_C&P"], budget_id, org_id)
+        for item in parsed_items:
+            if is_section(item):
+                continue
+            neto_excel += float(item.get("neto_total") or 0)
+            price_item(item, config)
+            neto_app += float(item.get("neto_total") or 0)
 
         # Insert items one by one to resolve parent_id references
         idx_to_db_id: dict[int, str] = {}
@@ -508,6 +524,9 @@ async def import_excel(
         "items_inserted": items_inserted,
         "resources_inserted": resources_inserted,
         "date_codes_corrected": date_codes_corrected if "01_C&P" in df_dict else 0,
+        # "Tu Excel decía $X; con tu Coeficiente de pase da $Y"
+        "neto_excel": round(neto_excel, 2),
+        "neto_app": round(neto_app, 2),
     }
 
 
@@ -523,7 +542,7 @@ async def export_budget_excel(
 
     budget = (
         db.table("budgets")
-        .select("id, name")
+        .select("*")
         .eq("id", bid)
         .eq("org_id", org_id)
         .single()
@@ -543,34 +562,11 @@ async def export_budget_excel(
     if not items.data:
         raise HTTPException(404, "Presupuesto sin items")
 
-    rows = []
-    for item in items.data:
-        rows.append({
-            "Codigo": item.get("code") or "",
-            "Descripcion": item.get("description") or "",
-            "Unidad": item.get("unidad") or "",
-            "Cantidad": item.get("cantidad") or "",
-            "MAT Unitario": item.get("mat_unitario") or 0,
-            "MO Unitario": item.get("mo_unitario") or 0,
-            "MAT Total": item.get("mat_total") or 0,
-            "MO Total": item.get("mo_total") or 0,
-            "Directo Total": item.get("directo_total") or 0,
-            "Indirecto Total": item.get("indirecto_total") or 0,
-            "Beneficio Total": item.get("beneficio_total") or 0,
-            "Neto Total": item.get("neto_total") or 0,
-            "Notas": item.get("notas") or "",
-        })
-
-    df = pd.DataFrame(rows)
-
-    # Add totals row
-    numeric_cols = [
-        "MAT Total", "MO Total", "Directo Total",
-        "Indirecto Total", "Beneficio Total", "Neto Total",
-    ]
+    iva_pct = budget_config(db, org_id, budget.data)["iva_pct"]
+    df = pd.DataFrame(excel_rows(items.data, iva_pct))
     total_row = {col: "" for col in df.columns}
     total_row["Codigo"] = "TOTAL"
-    for col in numeric_cols:
+    for col in EXCEL_TOTALS:
         total_row[col] = pd.to_numeric(df[col], errors="coerce").sum()
     df = pd.concat([df, pd.DataFrame([total_row])], ignore_index=True)
 
@@ -587,6 +583,47 @@ async def export_budget_excel(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+# Columns of the exported Excel that get a total (the same sums as calc_budget_summary)
+EXCEL_TOTALS = (
+    "MAT Total", "MO Total", "Directo Total", "Indirecto Total", "Beneficio Total",
+    "Impuestos Total", "Precio sin IVA", "IVA", "Precio con IVA",
+)
+
+
+def excel_rows(items: list[dict], iva_pct: float) -> list[dict]:
+    """Rows of the exported Excel: the saved numbers of each work (the whole cascade).
+
+    Section rows carry no amounts, so each totals column adds up to calc_budget_summary.
+    """
+    rows = []
+    for item in items:
+        section = is_section(item)
+        neto, iva, total = sale_totals(item, iva_pct)
+
+        def amount(value: object, section: bool = section) -> object:
+            return "" if section else float(value or 0)
+
+        rows.append({
+            "Codigo": item.get("code") or "",
+            "Descripcion": item.get("description") or "",
+            "Unidad": item.get("unidad") or "",
+            "Cantidad": item.get("cantidad") or "",
+            "MAT Unitario": amount(item.get("mat_unitario")),
+            "MO Unitario": amount(item.get("mo_unitario")),
+            "MAT Total": amount(item.get("mat_total")),
+            "MO Total": amount(item.get("mo_total")),
+            "Directo Total": amount(item.get("directo_total")),
+            "Indirecto Total": amount(item.get("indirecto_total")),
+            "Beneficio Total": amount(item.get("beneficio_total")),
+            "Impuestos Total": amount(item.get("impuestos_total")),
+            "Precio sin IVA": amount(neto),
+            "IVA": amount(iva),
+            "Precio con IVA": amount(total),
+            "Notas": item.get("notas") or "",
+        })
+    return rows
 
 
 # ── PDF Export ──────────────────────────────────────────────────────────────
@@ -637,40 +674,47 @@ def _apply_cfg_defaults(cfg: dict) -> dict:
     return result
 
 
-def _cascade_from_config(directo: float, cfg: dict) -> dict:
-    """Compute full cascade from a directo total and a config dict."""
-    imp = pct_or_default(cfg, "imprevistos_pct", 3)
-    est = pct_or_default(cfg, "estructura_pct", 15)
-    jef = pct_or_default(cfg, "jefatura_pct", 8)
-    log = pct_or_default(cfg, "logistica_pct", 5)
-    her = pct_or_default(cfg, "herramientas_pct", 3)
-    ben_pct = pct_or_default(cfg, "beneficio_pct", 10)
-    iibb = pct_or_default(cfg, "ingresos_brutos_pct", 7)
-    cheque = pct_or_default(cfg, "imp_cheque_pct", 1.2)
-    iva_pct = pct_or_default(cfg, "iva_pct", 21)
+def _split(total: float, weights: list[float]) -> list[float]:
+    """Split a saved amount by weights (the % of each concept), in cents, adding up exactly."""
+    cents = round(total * 100)
+    peso = sum(weights)
+    if not weights:
+        return []
+    if not peso:
+        return [0.0] * (len(weights) - 1) + [cents / 100]
+    parts = [round(cents * w / peso) for w in weights]
+    last = max(i for i, w in enumerate(weights) if w)
+    parts[last] += cents - sum(parts)
+    return [p / 100 for p in parts]
 
-    total_ind_pct = imp + est + jef + log + her
-    indirecto = round(directo * total_ind_pct / 100, 2)
-    subtotal_02 = directo + indirecto
-    beneficio = round(subtotal_02 * ben_pct / 100, 2)
-    subtotal_03 = subtotal_02 + beneficio
-    impuestos = round(subtotal_03 * (iibb + cheque) / 100, 2)
-    neto = subtotal_03 + impuestos
-    iva = round(neto * iva_pct / 100, 2)
-    total_final = neto + iva
 
+def pdf_totals(all_items: list[dict], cfg: dict) -> dict:
+    """Totals of the internal PDF: the saved sums (calc_budget_summary), never recalculated.
+
+    The % (labels) come from the budget's config; each amount is the saved one, split
+    by those % only where the DB keeps a single amount (the 5 indirects, IIBB + cheque).
+    Every subtotal is the sum of the rows above it.
+    """
+    summary = calc_budget_summary(all_items, cfg["iva_pct"])
+    ind_keys = ("imprevistos_pct", "estructura_pct", "jefatura_pct", "logistica_pct", "herramientas_pct")
+    ind_pcts = [float(cfg[k]) for k in ind_keys]
+    tax_pcts = [float(cfg["ingresos_brutos_pct"]), float(cfg["imp_cheque_pct"])]
+    directo = summary["directo_total"]
+    subtotal_02 = round(directo + summary["indirecto_total"], 2)
+    subtotal_03 = round(subtotal_02 + summary["beneficio_total"], 2)
     return {
-        "directo": directo,
-        "imp_pct": imp, "est_pct": est, "jef_pct": jef,
-        "log_pct": log, "her_pct": her,
-        "total_ind_pct": total_ind_pct, "indirecto": indirecto,
+        **summary,
+        "indirectos": dict(zip(ind_keys, _split(summary["indirecto_total"], ind_pcts))),
+        "ind_pcts": dict(zip(ind_keys, ind_pcts)),
+        "total_ind_pct": sum(ind_pcts),
+        "ben_pct": float(cfg["beneficio_pct"]),
+        "iibb_pct": tax_pcts[0],
+        "cheque_pct": tax_pcts[1],
+        "iibb": _split(summary["impuestos_total"], tax_pcts)[0],
+        "cheque": _split(summary["impuestos_total"], tax_pcts)[1],
+        "iva_pct": float(cfg["iva_pct"]),
         "subtotal_02": subtotal_02,
-        "ben_pct": ben_pct, "beneficio": beneficio,
         "subtotal_03": subtotal_03,
-        "iibb": iibb, "cheque": cheque, "impuestos": impuestos,
-        "neto": neto,
-        "iva_pct": iva_pct, "iva": iva,
-        "total_final": total_final,
     }
 
 
@@ -811,25 +855,19 @@ async def export_budget_pdf(
     if vista == "cliente":
         return _client_pdf_response(budget_data, all_items, cfg)
 
-    # ── Compute totals from leaf items (non-section rows) ────────────────────
-    leaf_items = [i for i in all_items if i.get("notas") != "Seccion" and float(i.get("cantidad") or 0) > 0]
-    # Also accept items that have directo_total > 0 even if cantidad is null (imported)
-    if not leaf_items:
-        leaf_items = [i for i in all_items if i.get("notas") != "Seccion"]
-
-    mat_total = sum(float(i.get("mat_total") or 0) for i in leaf_items)
-    mo_total = sum(float(i.get("mo_total") or 0) for i in leaf_items)
-    directo_total = sum(float(i.get("directo_total") or 0) for i in leaf_items)
-    indirecto_total = sum(float(i.get("indirecto_total") or 0) for i in leaf_items)
-    beneficio_total = sum(float(i.get("beneficio_total") or 0) for i in leaf_items)
-    neto_total = sum(float(i.get("neto_total") or 0) for i in leaf_items)
-    items_count = len(leaf_items)
-
-    # Cascade from config (for cascade summary page)
-    cascade = _cascade_from_config(directo_total, cfg)
-    # Use stored neto if available (items already have indirects applied), else use cascade
-    neto_display = neto_total if neto_total > 0 else cascade["neto"]
-    total_final_display = cascade["total_final"]
+    # ── Totals: the saved sums (the same numbers as the editor) ─────────────
+    totals = pdf_totals(all_items, cfg)
+    leaf_items = [i for i in all_items if not is_section(i)]
+    mat_total = totals["mat_total"]
+    mo_total = totals["mo_total"]
+    directo_total = totals["directo_total"]
+    indirecto_total = totals["indirecto_total"]
+    beneficio_total = totals["beneficio_total"]
+    impuestos_total = totals["impuestos_total"]
+    neto_display = totals["neto_total"]
+    iva_total = totals["iva_total"]
+    total_final_display = totals["total_final"]
+    items_count = totals["items_count"]
 
     # ── Build PDF ─────────────────────────────────────────────────────────────
     output = BytesIO()
@@ -908,8 +946,9 @@ async def export_budget_pdf(
     kpi_data = [
         kpi_cell("Items totales", str(items_count)),
         kpi_cell("Costo Directo", _fmt_ars(directo_total)),
-        kpi_cell("Indirectos + Beneficio", _fmt_ars(indirecto_total + beneficio_total)),
-        kpi_cell("NETO TOTAL", _fmt_ars(neto_display)),
+        kpi_cell("Indirectos + Beneficio + Impuestos",
+                 _fmt_ars(indirecto_total + beneficio_total + impuestos_total)),
+        kpi_cell("PRECIO SIN IVA", _fmt_ars(neto_display)),
     ]
 
     kpi_rows_mat = []
@@ -944,9 +983,12 @@ async def export_budget_pdf(
         ["Total Materiales", _fmt_ars(mat_total)],
         ["Total Mano de Obra", _fmt_ars(mo_total)],
         ["Costo Directo (01)", _fmt_ars(directo_total)],
-        ["Costos Indirectos", _fmt_ars(indirecto_total)],
-        ["Beneficio", _fmt_ars(beneficio_total)],
-        ["NETO TOTAL", _fmt_ars(neto_display)],
+        [f"Costos Indirectos ({_fmt_pct(totals['total_ind_pct'])})", _fmt_ars(indirecto_total)],
+        [f"Beneficio ({_fmt_pct(totals['ben_pct'])})", _fmt_ars(beneficio_total)],
+        ["Impuestos (IIBB + cheque)", _fmt_ars(impuestos_total)],
+        ["PRECIO SIN IVA", _fmt_ars(neto_display)],
+        [f"IVA ({_fmt_pct(totals['iva_pct'])})", _fmt_ars(iva_total)],
+        ["PRECIO CON IVA", _fmt_ars(total_final_display)],
     ]
 
     col_s1 = 9 * cm
@@ -962,7 +1004,12 @@ async def export_budget_pdf(
         ("BACKGROUND", (0, 2), (-1, 2), C_ROW_ALT),
         ("BACKGROUND", (0, 4), (-1, 4), C_ROW_ALT),
         ("BACKGROUND", (0, 6), (-1, 6), C_ROW_ALT),
-        # Last row (neto)
+        ("BACKGROUND", (0, 8), (-1, 8), C_ROW_ALT),
+        # Price without IVA
+        ("BACKGROUND", (0, 7), (-1, 7), C_HEADER),
+        ("TEXTCOLOR", (0, 7), (-1, 7), colors.white),
+        ("FONTNAME", (0, 7), (-1, 7), "Helvetica-Bold"),
+        # Last row (price with IVA)
         ("BACKGROUND", (0, -1), (-1, -1), C_HEADER),
         ("TEXTCOLOR", (0, -1), (-1, -1), colors.white),
         ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
@@ -1029,11 +1076,12 @@ async def export_budget_pdf(
         sections = [(None, leaf_items)]
 
     # Column layout for detail table
-    # Codigo | Descripcion | Unidad | Cantidad | P.Unit MAT | P.Unit MO | Directo | Indirecto | Beneficio | Neto
-    COL_W = [1.8*cm, 6.5*cm, 1.4*cm, 1.8*cm, 2.4*cm, 2.4*cm, 2.6*cm, 2.4*cm, 2.4*cm, 2.6*cm]
+    # Codigo | Descripcion | Unidad | Cantidad | P.Unit MAT | P.Unit MO | Directo | Indirecto | Beneficio
+    # | Impuestos | Precio sin IVA  (each row adds up: directo + indirecto + beneficio + impuestos)
+    COL_W = [1.6*cm, 5.4*cm, 1.2*cm, 1.7*cm, 2.1*cm, 2.1*cm, 2.4*cm, 2.2*cm, 2.2*cm, 2.2*cm, 2.5*cm]
     detail_header = [
         "Código", "Descripción", "Unid.", "Cantidad",
-        "P.Unit MAT", "P.Unit MO", "Directo", "Indirecto", "Beneficio", "Neto",
+        "P.Unit MAT", "P.Unit MO", "Directo", "Indirecto", "Beneficio", "Impuestos", "Precio s/IVA",
     ]
 
     table_rows: list = [detail_header]
@@ -1054,7 +1102,7 @@ async def export_budget_pdf(
                     "SecRow", parent=styles["Normal"],
                     fontSize=8, fontName="Helvetica-Bold", textColor=C_SECTION_TXT,
                 )),
-                "", "", "", "", "", "", "", "", "",
+                "", "", "", "", "", "", "", "", "", "",
             ])
             section_row_indices.append(row_idx)
             row_idx += 1
@@ -1062,11 +1110,11 @@ async def export_budget_pdf(
         sec_directo = 0.0
         sec_indirecto = 0.0
         sec_beneficio = 0.0
+        sec_impuestos = 0.0
         sec_neto = 0.0
 
         for item in children:
-            is_section = item.get("notas") == "Seccion"
-            if is_section:
+            if is_section(item):
                 continue
             cantidad = item.get("cantidad")
             cantidad_str = _fmt_ars(float(cantidad)).replace("$ ", "").replace(",00", "") if cantidad else "—"
@@ -1079,11 +1127,13 @@ async def export_budget_pdf(
             d = float(item.get("directo_total") or 0)
             ind = float(item.get("indirecto_total") or 0)
             ben = float(item.get("beneficio_total") or 0)
+            imp = float(item.get("impuestos_total") or 0)
             neto = float(item.get("neto_total") or 0)
 
             sec_directo += d
             sec_indirecto += ind
             sec_beneficio += ben
+            sec_impuestos += imp
             sec_neto += neto
 
             desc_para = Paragraph(item.get("description") or "—", cell_style)
@@ -1097,6 +1147,7 @@ async def export_budget_pdf(
                 _fmt_ars(d),
                 _fmt_ars(ind),
                 _fmt_ars(ben),
+                _fmt_ars(imp),
                 _fmt_ars(neto),
             ])
             row_idx += 1
@@ -1110,6 +1161,7 @@ async def export_budget_pdf(
                 _fmt_ars(sec_directo),
                 _fmt_ars(sec_indirecto),
                 _fmt_ars(sec_beneficio),
+                _fmt_ars(sec_impuestos),
                 _fmt_ars(sec_neto),
             ])
             subtotal_row_indices.append(row_idx)
@@ -1121,6 +1173,7 @@ async def export_budget_pdf(
         _fmt_ars(directo_total),
         _fmt_ars(indirecto_total),
         _fmt_ars(beneficio_total),
+        _fmt_ars(impuestos_total),
         _fmt_ars(neto_display),
     ])
     grand_total_row_idx = row_idx
@@ -1178,24 +1231,24 @@ async def export_budget_pdf(
     elements.append(PageBreak())
     elements.append(Paragraph("Cascada de Costos", section_heading_style))
 
-    c = cascade  # shorthand
-
+    t = totals  # saved sums; % from the budget's config
+    ind, pcts = t["indirectos"], t["ind_pcts"]
     cascade_rows = [
         ["Concepto", "%", "Monto"],
-        ["Subtotal 01 — Costos Directos", "", _fmt_ars(c["directo"])],
-        [f"+ Imprevistos", _fmt_pct(c["imp_pct"]), _fmt_ars(c["directo"] * c["imp_pct"] / 100)],
-        [f"+ Estructura", _fmt_pct(c["est_pct"]), _fmt_ars(c["directo"] * c["est_pct"] / 100)],
-        [f"+ Jefatura de Obra", _fmt_pct(c["jef_pct"]), _fmt_ars(c["directo"] * c["jef_pct"] / 100)],
-        [f"+ Logística", _fmt_pct(c["log_pct"]), _fmt_ars(c["directo"] * c["log_pct"] / 100)],
-        [f"+ Herramientas", _fmt_pct(c["her_pct"]), _fmt_ars(c["directo"] * c["her_pct"] / 100)],
-        ["= Subtotal 02 (con Indirectos)", _fmt_pct(c["total_ind_pct"]), _fmt_ars(c["subtotal_02"])],
-        [f"+ Beneficio", _fmt_pct(c["ben_pct"]), _fmt_ars(c["beneficio"])],
-        ["= Subtotal 03 (con Beneficio)", "", _fmt_ars(c["subtotal_03"])],
-        [f"+ Ingresos Brutos", _fmt_pct(c["iibb"]), _fmt_ars(c["subtotal_03"] * c["iibb"] / 100)],
-        [f"+ Impuesto al Cheque", _fmt_pct(c["cheque"]), _fmt_ars(c["subtotal_03"] * c["cheque"] / 100)],
-        ["= NETO (sin IVA)", "", _fmt_ars(c["neto"])],
-        [f"+ IVA", _fmt_pct(c["iva_pct"]), _fmt_ars(c["iva"])],
-        ["= TOTAL FINAL", "", _fmt_ars(c["total_final"])],
+        ["Subtotal 01 — Costos Directos", "", _fmt_ars(t["directo_total"])],
+        ["+ Imprevistos", _fmt_pct(pcts["imprevistos_pct"]), _fmt_ars(ind["imprevistos_pct"])],
+        ["+ Estructura", _fmt_pct(pcts["estructura_pct"]), _fmt_ars(ind["estructura_pct"])],
+        ["+ Jefatura de Obra", _fmt_pct(pcts["jefatura_pct"]), _fmt_ars(ind["jefatura_pct"])],
+        ["+ Logística", _fmt_pct(pcts["logistica_pct"]), _fmt_ars(ind["logistica_pct"])],
+        ["+ Herramientas", _fmt_pct(pcts["herramientas_pct"]), _fmt_ars(ind["herramientas_pct"])],
+        ["= Subtotal 02 (con Indirectos)", _fmt_pct(t["total_ind_pct"]), _fmt_ars(t["subtotal_02"])],
+        ["+ Beneficio", _fmt_pct(t["ben_pct"]), _fmt_ars(t["beneficio_total"])],
+        ["= Subtotal 03 (con Beneficio)", "", _fmt_ars(t["subtotal_03"])],
+        ["+ Ingresos Brutos", _fmt_pct(t["iibb_pct"]), _fmt_ars(t["iibb"])],
+        ["+ Impuesto al Cheque", _fmt_pct(t["cheque_pct"]), _fmt_ars(t["cheque"])],
+        ["= PRECIO SIN IVA", "", _fmt_ars(t["neto_total"])],
+        ["+ IVA", _fmt_pct(t["iva_pct"]), _fmt_ars(t["iva_total"])],
+        ["= PRECIO CON IVA", "", _fmt_ars(t["total_final"])],
     ]
 
     # Row indices that are subtotals or totals (bold + background)
@@ -1300,31 +1353,25 @@ def _top_section(item: dict, by_id: dict) -> tuple[dict | None, dict | None]:
 def client_pdf_data(all_items: list[dict], cfg: dict) -> dict:
     """Rows of the client PDF: per rubro, each work with its sale price; then the totals.
 
-    Total sin IVA = NETO (sin IVA) of the cascade the internal PDF shows
-    (_cascade_from_config(directo_total, cfg)["neto"]). Each work's price is its direct
-    cost × (that neto ÷ direct total), in cents; the rounding difference goes to the most
-    expensive work, so the works add up exactly to the total. Total con IVA = total sin
-    IVA + IVA of the cascade. Nothing else of the cascade (direct cost, indirects,
+    Each work's price is its saved price without IVA (``neto_total``, the same number as
+    the editor). Total sin IVA = Σ neto of the works (= calc_budget_summary), IVA = Σ IVA,
+    Total con IVA = Σ total_final; works saved without IVA get the IVA step of the cascade
+    over their neto (sale_totals). Nothing else of the cascade (direct cost, indirects,
     profit, percentages) is returned.
 
-    Works are the same rows the internal PDF totals (not "Seccion", cantidad > 0; when
-    there is none, every non-section row). Rubros are the top-level "Seccion" rows, with
-    every work below them (also the ones under a piso); works without a rubro go in
-    "Otros trabajos" (or in a group without title when there is no rubro at all).
+    The rows are the works (not "Seccion") with a quantity or a price: a work with
+    cantidad 0 and price 0 is not shown (it adds nothing). Rubros are the top-level
+    "Seccion" rows, with every work below them (also the ones under a piso); works without
+    a rubro go in "Otros trabajos" (or in a group without title when there is no rubro at all).
     """
-    leaf_items = [i for i in all_items if i.get("notas") != "Seccion" and float(i.get("cantidad") or 0) > 0]
-    if not leaf_items:
-        leaf_items = [i for i in all_items if i.get("notas") != "Seccion"]
-
-    directo_total = sum(float(i.get("directo_total") or 0) for i in leaf_items)
-    cascade = _cascade_from_config(directo_total, cfg)
-    total_cents = round(cascade["neto"] * 100)
-    ratio = cascade["neto"] / directo_total if directo_total else 0.0
-
-    cents = [round(float(i.get("directo_total") or 0) * ratio * 100) for i in leaf_items]
-    if cents:
-        mas_caro = max(range(len(cents)), key=lambda k: cents[k])
-        cents[mas_caro] += total_cents - sum(cents)
+    iva_pct = float(cfg.get("iva_pct") if cfg.get("iva_pct") is not None else 21)
+    works = [i for i in all_items if not is_section(i)]
+    sales = [sale_totals(i, iva_pct) for i in works]
+    leaf_items, cents = [], []
+    for item, (neto, _, _) in zip(works, sales):
+        if float(item.get("cantidad") or 0) > 0 or round(neto * 100):
+            leaf_items.append(item)
+            cents.append(round(neto * 100))
 
     by_id = {i.get("id"): i for i in all_items}
     grupos: dict[object, dict] = {}
@@ -1357,14 +1404,12 @@ def client_pdf_data(all_items: list[dict], cfg: dict) -> dict:
         titulo = grupo["titulo"] or ("Otros trabajos" if con_rubros else None)
         rubros.append({"titulo": titulo, "filas": grupo["filas"], "subtotal": grupo.pop("_cents") / 100})
 
-    total_sin_iva = total_cents / 100
-    iva = round(cascade["iva"], 2)
     return {
         "rubros": rubros,
-        "total_sin_iva": total_sin_iva,
-        "iva_pct": cascade["iva_pct"],
-        "iva": iva,
-        "total_con_iva": round(total_sin_iva + iva, 2),
+        "total_sin_iva": sum(round(neto * 100) for neto, _, _ in sales) / 100,
+        "iva_pct": iva_pct,
+        "iva": sum(round(iva * 100) for _, iva, _ in sales) / 100,
+        "total_con_iva": sum(round(total * 100) for _, _, total in sales) / 100,
     }
 
 

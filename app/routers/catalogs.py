@@ -13,6 +13,7 @@ from app.auth import get_current_user, require_admin, require_editor
 from app.budget_prices import HISTORY_CHUNK, fetch_all, today
 from app.catalog_prices import fecha_iso, history_row, price_changed, price_from_payload
 from app.db import get_data_db
+from app.routers.analysis import _get_budget, apply_catalog
 from app.schemas import CatalogTipo
 
 router = APIRouter()
@@ -764,17 +765,7 @@ async def apply_catalog_to_budget(
     bid = str(budget_id)
     cid = str(catalog_id)
 
-    # Verify budget belongs to org
-    budget = (
-        db.table("budgets")
-        .select("id")
-        .eq("id", bid)
-        .eq("org_id", org_id)
-        .single()
-        .execute()
-    )
-    if not budget.data:
-        raise HTTPException(404, "Presupuesto no encontrado")
+    budget = _get_budget(db, bid, org_id)
 
     # Verify catalog belongs to org
     catalog = (
@@ -788,123 +779,13 @@ async def apply_catalog_to_budget(
     if not catalog.data:
         raise HTTPException(404, "Catalogo no encontrado")
 
-    # Load all catalog entries indexed by codigo
-    entries_result = (
-        db.table("catalog_entries")
-        .select("codigo, precio_sin_iva, tipo")
-        .eq("catalog_id", cid)
-        .eq("org_id", org_id)
-        .execute()
-    )
-    price_map: dict[str, float] = {}
-    for entry in (entries_result.data or []):
-        codigo = (entry.get("codigo") or "").strip()
-        precio = entry.get("precio_sin_iva")
-        if codigo and precio is not None:
-            price_map[codigo] = float(precio)
-
-    if not price_map:
-        raise HTTPException(404, "Catalogo sin entradas con precios")
-
-    # Get all budget items
-    items = (
-        db.table("budget_items")
-        .select("id")
-        .eq("budget_id", bid)
-        .eq("org_id", org_id)
-        .execute()
-    )
-    if not items.data:
-        raise HTTPException(404, "Presupuesto sin items")
-
-    item_ids = [item["id"] for item in items.data]
-
-    # Get all item_resources for these items
-    all_resources: list[dict] = []
-    for item_id in item_ids:
-        res = (
-            db.table("item_resources")
-            .select("*")
-            .eq("item_id", item_id)
-            .eq("org_id", org_id)
-            .execute()
-        )
-        all_resources.extend(res.data or [])
-
-    if not all_resources:
+    # Same recalculation as "Actualizar precios" (every resource tipo, what the client
+    # buys at $0, the cascade of the budget)
+    result = apply_catalog(db, org_id, budget, cid)
+    if not result["matched"] and not result["unmatched"]:
         raise HTTPException(404, "Presupuesto sin recursos en items")
-
-    matched = 0
-    unmatched = 0
-    total_updated = 0.0
-
-    for resource in all_resources:
-        codigo = (resource.get("codigo") or "").strip()
-        if codigo not in price_map:
-            unmatched += 1
-            continue
-
-        new_precio = price_map[codigo]
-        cantidad_eff = resource.get("cantidad_efectiva") or resource.get("cantidad") or 0
-        new_subtotal = round(new_precio * float(cantidad_eff), 2)
-
-        db.table("item_resources").update({
-            "precio_unitario": new_precio,
-            "subtotal": new_subtotal,
-        }).eq("id", resource["id"]).execute()
-
-        matched += 1
-        total_updated += new_subtotal
-
-    # Recalculate budget_items totals from their resources
-    for item_id in item_ids:
-        resources = (
-            db.table("item_resources")
-            .select("tipo, subtotal")
-            .eq("item_id", item_id)
-            .eq("org_id", org_id)
-            .execute()
-        )
-        mat_total = 0.0
-        mo_total = 0.0
-        for r in (resources.data or []):
-            subtotal = r.get("subtotal") or 0
-            if r.get("tipo") == "material":
-                mat_total += subtotal
-            elif r.get("tipo") == "mano_obra":
-                mo_total += subtotal
-
-        directo_total = mat_total + mo_total
-        # Preserve existing indirecto and beneficio
-        item_data = (
-            db.table("budget_items")
-            .select("indirecto_total, beneficio_total, cantidad")
-            .eq("id", item_id)
-            .single()
-            .execute()
-        )
-        if not item_data.data:
-            continue
-
-        cantidad = item_data.data.get("cantidad") or 0
-        indirecto = item_data.data.get("indirecto_total") or 0
-        beneficio = item_data.data.get("beneficio_total") or 0
-        neto_total = directo_total + indirecto + beneficio
-
-        mat_unitario = round(mat_total / cantidad, 2) if cantidad else 0
-        mo_unitario = round(mo_total / cantidad, 2) if cantidad else 0
-
-        db.table("budget_items").update({
-            "mat_unitario": mat_unitario,
-            "mo_unitario": mo_unitario,
-            "mat_total": round(mat_total, 2),
-            "mo_total": round(mo_total, 2),
-            "directo_total": round(directo_total, 2),
-            "neto_total": round(neto_total, 2),
-        }).eq("id", item_id).execute()
-
     return {
-        "items_matched": matched,
-        "items_unmatched": unmatched,
-        "total_updated": round(total_updated, 2),
+        "items_matched": result["matched"],
+        "items_unmatched": result["unmatched"],
+        "total_updated": result["total_updated"],
     }

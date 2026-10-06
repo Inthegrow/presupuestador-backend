@@ -24,11 +24,14 @@ from app.budget_prices import (
     today,
 )
 from app.calculations import (
+    CASCADE_FIELDS,
+    cascade_factors,
     calc_budget_summary,
-    calc_cascade_indirects,
     calc_item_from_resources,
     calc_item_totals,
     calc_resource_subtotal,
+    is_section,
+    price_item,
 )
 from app.db import get_data_db
 from app.formulas import FormulaError
@@ -77,7 +80,43 @@ def _apply_config_defaults(config: dict) -> dict:
 
 def _is_leaf_item(item: dict) -> bool:
     """Leaf items have cantidad > 0 and represent actual work items (not sections)."""
-    return (item.get("notas") != "Seccion") and (float(item.get("cantidad") or 0) > 0)
+    return not is_section(item) and (float(item.get("cantidad") or 0) > 0)
+
+
+def reprice_budget(db, org_id: str, budget: dict, config: dict | None = None,
+                   items: list[dict] | None = None) -> list[dict]:
+    """Price every leaf item of a budget from its saved direct cost (price_item).
+
+    Used when only the percentages change: resources and quantities stay as they are.
+    ``config``: the cascade config (default: the budget's own, read here).
+    Returns the written cascade values, one dict per item (with "id" and "directo_total").
+    """
+    if config is None:
+        raw = load_org_config(db, org_id)
+        config = {**raw, **effective_indirects(raw, budget)}
+    if items is None:
+        items = _get_items(str(budget["id"]), org_id)
+
+    written: list[dict] = []
+    for item in items:
+        if not _is_leaf_item(item):
+            continue
+        priced = price_item(dict(item), config)
+        upd = {k: priced[k] for k in CASCADE_FIELDS}
+        try:
+            db.table("budget_items").update(upd).eq("id", item["id"]).execute()
+        except Exception:
+            # Columns impuestos_total / iva_total / total_final may not exist yet
+            logger.warning(
+                "Full cascade update failed for item %s, falling back to legacy fields",
+                item["id"],
+                exc_info=True,
+            )
+            db.table("budget_items").update({
+                k: upd[k] for k in ("indirecto_total", "beneficio_total", "neto_total")
+            }).eq("id", item["id"]).execute()
+        written.append({"id": item["id"], "directo_total": float(item.get("directo_total") or 0), **upd})
+    return written
 
 
 # ── Indirect config CRUD ────────────────────────────────────────────────────
@@ -98,11 +137,17 @@ def _get_budget(db, budget_id: str, org_id: str) -> dict:
 
 
 def _indirects_response(org_config: dict, budget: dict) -> dict:
-    """Values of this budget, plus the general ones to compare."""
+    """Values of this budget, plus the general ones to compare.
+
+    ``indirecto_pct`` (the 5 indirect concepts) and ``coeficiente`` (price without IVA
+    per 1 of direct cost) come from here, so the screens do not add them up.
+    """
+    effective = effective_indirects(org_config, budget)
     return {
         **org_config,
         "org_id": org_config.get("org_id") or budget.get("org_id"),
-        **effective_indirects(org_config, budget),
+        **effective,
+        **cascade_factors(effective),
         "desperdicio_pct": org_config.get("desperdicio_pct"),
         "general": general_indirects(org_config),
         # False = the budget still follows the general values
@@ -128,9 +173,10 @@ async def update_indirects(
     payload: IndirectConfigUpdate,
     user: dict = Depends(require_editor),
 ):
-    """Change the indirect % of this budget only.
+    """Change the indirect % of this budget only, and reprice it.
 
-    The other budgets and the general values do not change.
+    The other budgets and the general values do not change. When a % changes, every
+    work of this budget is priced again from its saved direct cost (``actualizados``: 1).
     ``desperdicio_pct`` is still the organization's default waste.
     """
     db = get_data_db()
@@ -157,7 +203,12 @@ async def update_indirects(
     if "desperdicio_pct" in update_data:
         org_config = save_org_config(db, org_id, {"desperdicio_pct": update_data["desperdicio_pct"]})
 
-    return _indirects_response(org_config, budget)
+    actualizados = 0
+    if pct:
+        reprice_budget(db, org_id, budget, {**org_config, **effective_indirects(org_config, budget)})
+        actualizados = 1
+
+    return {**_indirects_response(org_config, budget), "actualizados": actualizados}
 
 
 # ── Indirect costs (apply) ──────────────────────────────────────────────────
@@ -182,42 +233,9 @@ async def apply_indirects(
     if not items:
         raise HTTPException(404, "Presupuesto sin items")
 
-    # Only process leaf items (actual work items, not sections)
-    leaf_items = [i for i in items if _is_leaf_item(i)]
-
-    total_directo = sum(float(i.get("directo_total") or 0) for i in leaf_items)
-
-    # Apply cascade indirects and batch-update
-    updates = []
-    for item in leaf_items:
-        recalculated = calc_cascade_indirects(dict(item), config)
-        updates.append({
-            "id": item["id"],
-            "indirecto_total": recalculated["indirecto_total"],
-            "beneficio_total": recalculated["beneficio_total"],
-            "impuestos_total": recalculated.get("impuestos_total", 0),
-            "neto_total": recalculated["neto_total"],
-            "iva_total": recalculated.get("iva_total", 0),
-            "total_final": recalculated.get("total_final", 0),
-        })
-
-    for upd in updates:
-        item_id = upd.pop("id")
-        try:
-            db.table("budget_items").update(upd).eq("id", item_id).execute()
-        except Exception:
-            # Columns impuestos_total / iva_total / total_final may not exist yet
-            # Fall back to updating only the legacy fields
-            logger.warning(
-                "Full cascade update failed for item %s, falling back to legacy fields",
-                item_id,
-                exc_info=True,
-            )
-            db.table("budget_items").update({
-                "indirecto_total": upd["indirecto_total"],
-                "beneficio_total": upd["beneficio_total"],
-                "neto_total": upd["neto_total"],
-            }).eq("id", item_id).execute()
+    # Only leaf items (actual work items, not sections)
+    updates = reprice_budget(db, org_id, budget, config, items)
+    total_directo = sum(u["directo_total"] for u in updates)
 
     total_indirecto = sum(u.get("indirecto_total", 0) for u in updates)
     total_beneficio = sum(u.get("beneficio_total", 0) for u in updates)
@@ -393,7 +411,7 @@ def _run_cascade(
             # No resources — use existing unit prices to recalc totals
             item_copy = calc_item_totals(item_copy)
 
-        calc_cascade_indirects(item_copy, config)
+        price_item(item_copy, config)
 
         # Patch fields to update in DB
         patch = {
@@ -444,6 +462,55 @@ def _run_cascade(
     if price_for is not None:
         result["precios_actualizados"] = prices_updated
     return result
+
+
+def apply_catalog(db, org_id: str, budget: dict, catalog_id: str) -> dict:
+    """Price a budget with one catalog (match by code) and recalculate it like
+    "Actualizar precios": _run_cascade with every resource tipo, what the client buys
+    at $0 and the cascade of the budget.
+
+    Returns the _run_cascade result plus ``matched`` / ``unmatched`` (resources whose
+    code is / is not in the catalog) and ``total_updated`` (new subtotal of the matched ones).
+    """
+    entries = (
+        db.table("catalog_entries")
+        .select("*")
+        .eq("catalog_id", catalog_id)
+        .eq("org_id", org_id)
+        .execute()
+        .data or []
+    )
+    price_map: dict[str, dict] = {}
+    for entry in entries:
+        codigo = (entry.get("codigo") or "").strip()
+        if codigo and entry.get("precio_sin_iva") is not None:
+            price_map[codigo] = entry
+    if not price_map:
+        raise HTTPException(404, "Catalogo sin entradas con precios")
+
+    items = _get_items(str(budget["id"]), org_id)
+    if not items:
+        raise HTTPException(404, "Presupuesto sin items")
+
+    matched: list[dict] = []
+    unmatched = 0
+
+    def price_for(resource: dict):
+        nonlocal unmatched
+        entry = price_map.get((resource.get("codigo") or "").strip())
+        if entry is None:
+            unmatched += 1
+            return None
+        matched.append(resource)  # the same dict gets its new subtotal in _run_cascade
+        return float(entry["precio_sin_iva"]), entry.get("fecha_precio"), str(entry["id"])
+
+    result = _run_cascade(db, org_id, budget, items, price_for=price_for)
+    return {
+        **result,
+        "matched": len(matched),
+        "unmatched": unmatched,
+        "total_updated": round(sum(float(r.get("subtotal") or 0) for r in matched), 2),
+    }
 
 
 # ── Update prices ───────────────────────────────────────────────────────────
@@ -656,21 +723,40 @@ async def create_version(
     return _save_version(db, org_id, user["user_id"], budget, items, version.notes)
 
 
+def _version_neto(data: object) -> float:
+    """Price without IVA of a saved version: the sum of its works' saved neto."""
+    try:
+        snapshot = json.loads(data) if isinstance(data, (str, bytes)) else (data or {})
+    except (TypeError, ValueError):
+        return 0.0
+    items = snapshot.get("items") if isinstance(snapshot, dict) else None
+    if not isinstance(items, list):
+        return 0.0
+    return calc_budget_summary([i for i in items if isinstance(i, dict)])["neto_total"]
+
+
+_VERSION_FIELDS = ("id", "version", "created_at", "created_by", "precios_al", "notas")
+
+
 @router.get("/{budget_id}/versions")
 async def list_versions(
     budget_id: UUID,
     user: dict = Depends(get_current_user),
 ):
+    """Versions of a budget, newest first, each with ``neto_total`` (price without IVA)."""
     db = get_data_db()
     result = (
         db.table("budget_versions")
-        .select("id, version, created_at, created_by, precios_al, notas")
+        .select(", ".join((*_VERSION_FIELDS, "data")))
         .eq("budget_id", str(budget_id))
         .eq("org_id", user["org_id"])
         .order("created_at", desc=True)
         .execute()
     )
-    return result.data or []
+    return [
+        {**{k: v.get(k) for k in _VERSION_FIELDS}, "neto_total": _version_neto(v.get("data"))}
+        for v in (result.data or [])
+    ]
 
 
 @router.get("/{budget_id}/versions/{version_id}")

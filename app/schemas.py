@@ -76,7 +76,10 @@ class AnalysisResponse(BaseModel):
     directo_total: float
     indirecto_total: float
     beneficio_total: float
+    impuestos_total: float = 0
     neto_total: float
+    iva_total: float = 0
+    total_final: float = 0
     items_count: int
 
 
@@ -132,6 +135,11 @@ class IndirectConfigUpdate(BaseModel):
     iva_pct: float | None = None
     # Default waste % for the whole organization
     desperdicio_pct: float | None = Field(default=None, ge=0, le=100)
+
+
+class GeneralIndirectsUpdate(IndirectConfigUpdate):
+    # True: besides saving, recalculate the budgets that follow the general values
+    aplicar: bool = False
 
 
 # ── Budget copy ─────────────────────────────────────────────────────────────

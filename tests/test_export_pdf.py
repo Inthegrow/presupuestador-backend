@@ -13,7 +13,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import create_app
-from app.routers.excel import _apply_cfg_defaults, _cascade_from_config, client_pdf_data
+from app.calculations import calc_budget_summary
+from app.routers.excel import _apply_cfg_defaults, client_pdf_data
 from tests.test_recipes_api import MOCK_USER, ORG, FakeDB
 
 BUDGET = "00000000-0000-0000-0000-0000000000b1"
@@ -85,31 +86,34 @@ def _cents(value: float) -> int:
 
 
 class TestClientData:
-    def test_prices_add_up_to_the_net_of_the_cascade(self):
+    def test_prices_add_up_to_the_saved_net(self):
+        # PLAN_UN_SOLO_TOTAL T8: the client PDF shows the saved price, it never recalculates it
         data = client_pdf_data(ITEMS, CFG)
-        directo = sum(i.get("directo_total") or 0 for i in ITEMS if i["notas"] != "Seccion")
-        cascade = _cascade_from_config(directo, CFG)
+        works = [i for i in ITEMS if i["notas"] != "Seccion"]
         filas = [f for r in data["rubros"] for f in r["filas"]]
         assert len(filas) == 5
-        assert data["total_sin_iva"] == round(cascade["neto"], 2)
+        assert _cents(data["total_sin_iva"]) == sum(_cents(i["neto_total"]) for i in works)
+        assert data["total_sin_iva"] == calc_budget_summary(ITEMS)["neto_total"]
         assert sum(_cents(f["total"]) for f in filas) == _cents(data["total_sin_iva"])
         assert sum(_cents(r["subtotal"]) for r in data["rubros"]) == _cents(data["total_sin_iva"])
         assert data["iva_pct"] == 21
-        assert data["iva"] == round(cascade["iva"], 2)
-        assert data["total_con_iva"] == pytest.approx(cascade["total_final"], abs=0.011)
+        # Saved without IVA (old items): the IVA step over each saved neto
+        assert _cents(data["iva"]) == sum(_cents(round(i["neto_total"] * 0.21, 2)) for i in works)
         assert _cents(data["total_con_iva"]) == _cents(data["total_sin_iva"]) + _cents(data["iva"])
 
-    def test_price_is_proportional_to_the_direct_cost(self):
+    def test_price_is_the_saved_net(self):
         data = client_pdf_data(ITEMS, CFG)
-        directo = sum(i.get("directo_total") or 0 for i in ITEMS if i["notas"] != "Seccion")
-        ratio = _cascade_from_config(directo, CFG)["neto"] / directo
         filas = {f["descripcion"] + str(f["cantidad"]): f for r in data["rubros"] for f in r["filas"]}
         muro = filas["Muro de ladrillo hueco del 1830.0"]
-        assert muro["total"] == round(22189.33 * ratio, 2)
+        assert muro["total"] == round(22189.33 * 1.474, 2)
         assert muro["precio_unitario"] == round(muro["total"] / 30, 2)
-        # The rounding difference (a few cents at most) goes to the most expensive work
-        mas_caro = filas["Contrapiso de cascote e=8cm80.0"]
-        assert abs(mas_caro["total"] - 101333.33 * ratio) < 0.05
+
+    def test_saved_iva_and_total_are_used(self):
+        items = [{**i, "iva_total": 100.0, "total_final": round(i["neto_total"] + 100, 2)}
+                 if i["notas"] != "Seccion" else i for i in ITEMS]
+        data = client_pdf_data(items, CFG)
+        assert data["iva"] == 500
+        assert _cents(data["total_con_iva"]) == _cents(data["total_sin_iva"]) + 50000
 
     def test_rubros_pisos_and_loose_works(self):
         data = client_pdf_data(ITEMS, CFG)
