@@ -58,6 +58,8 @@ ROUTE_ROLES: dict[tuple[str, str], str] = {
     ("GET", "/budgets/{budget_id}/items/{item_id}/audits"): MEMBER,
     ("GET", "/budgets/{budget_id}/items/{item_id}/resources"): MEMBER,
     ("GET", "/budgets/{budget_id}/items/{item_id}/precios-faltantes"): MEMBER,
+    ("POST", "/budgets/{budget_id}/trabajos"): EDITOR,
+    ("GET", "/budgets/{budget_id}/precios-faltantes"): MEMBER,
     ("PATCH", "/budgets/{budget_id}/items/{item_id}/parametros"): EDITOR,
     ("POST", "/budgets/{budget_id}/items/{item_id}/resources"): EDITOR,
     ("PATCH", "/budgets/{budget_id}/items/{item_id}/resources/{resource_id}"): EDITOR,

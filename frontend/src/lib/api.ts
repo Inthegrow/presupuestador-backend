@@ -110,6 +110,20 @@ export class ApiError extends Error {
   }
 }
 
+/** Texto para mostrar de un error: el `detail` del servidor (texto o `{mensaje}`) o, si no hay, el del error. */
+export function mensajeDeError(err: unknown, porDefecto = 'Algo salió mal. Probá de nuevo.'): string {
+  if (err instanceof ApiError) {
+    const d = err.detail
+    if (typeof d === 'string' && d.trim() && !/internal server error|<html/i.test(d)) return d
+    if (d && typeof d === 'object' && typeof (d as { mensaje?: unknown }).mensaje === 'string') {
+      return (d as { mensaje: string }).mensaje
+    }
+    return porDefecto
+  }
+  if (err instanceof TypeError) return 'No me pude comunicar con el servidor. Revisá la conexión y probá de nuevo.'
+  return err instanceof Error && err.message ? err.message : porDefecto
+}
+
 function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   return conAviso(async () => {
     const res = await fetch(`${BASE_URL}${path}`, {
@@ -211,6 +225,15 @@ export const budgetApi = {
   preciosFaltantes: (budgetId: string, itemId: string) =>
     get<{ precios_faltantes: PrecioFaltante[] }>(`/budgets/${budgetId}/items/${itemId}/precios-faltantes`),
 
+  // Cuántos precios faltan en cada trabajo del presupuesto, todos juntos (para el punto de color de la tabla)
+  preciosFaltantesPorItem: (budgetId: string) =>
+    get<{ por_item: Record<string, number> }>(`/budgets/${budgetId}/precios-faltantes`),
+
+  // Agregar un trabajo con su fórmula ya aplicada, dentro del rubro de la fórmula (o de `parent_id`).
+  // Si la unidad no es la de la fórmula y falta `factor`: 409 FALTA_CONVERSION y no se crea nada.
+  agregarTrabajo: (budgetId: string, data: AgregarTrabajoPayload) =>
+    post<AgregarTrabajoResult>(`/budgets/${budgetId}/trabajos`, data),
+
   // Full recalculation: formulas, inherited waste, purchase rounding, indirects
   cascadeRecalculate: (budgetId: string) =>
     post<CascadeResult>(`/budgets/${budgetId}/cascade-recalculate`),
@@ -272,6 +295,23 @@ export const budgetApi = {
   updatePrices: (id: string, fecha?: string) =>
     post<PriceUpdateResult>(`/budgets/${id}/actualizar-precios`, fecha ? { fecha } : {}),
   getVersion: (id: string, vid: string) => get<BudgetVersion>(`/budgets/${id}/versions/${vid}`),
+}
+
+// ─── Agregar un trabajo en el editor ───────────────────────────────────────────
+
+export interface AgregarTrabajoPayload {
+  template_id: string
+  cantidad: number
+  descripcion?: string
+  unidad?: string
+  parent_id?: string
+  factor?: number
+}
+
+export interface AgregarTrabajoResult {
+  item: BudgetItem
+  rubro: { id: string; nombre: string; creado: boolean }
+  precios_faltantes: PrecioFaltante[]
 }
 
 // ─── Asistente "Nuevo Presupuesto" ─────────────────────────────────────────────

@@ -303,5 +303,15 @@ class TemplateApply(BaseModel):
     reemplazar: bool = False
 
 
+class TrabajoCreate(BaseModel):
+    """A new item of the editor with its recipe applied (POST /budgets/{id}/trabajos)."""
+    template_id: str
+    cantidad: float = Field(gt=0)
+    descripcion: str | None = None  # default: the recipe's name
+    unidad: str | None = None  # default: the recipe's unit
+    parent_id: str | None = None  # the rubro; default: the one of the recipe's categoria
+    factor: float | None = None  # units of the recipe per unit of the item (FALTA_CONVERSION)
+
+
 class ItemParamsUpdate(BaseModel):
     parametros: dict[str, float]
