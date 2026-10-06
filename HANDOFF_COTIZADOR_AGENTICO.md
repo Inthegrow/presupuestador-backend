@@ -73,7 +73,7 @@ recetas que no se entienden solos ("DE CASCOTE"). Código `eps` en el Excel cont
 *Presupuesto a mano (Nuevo Presupuesto), auditoría del 05/10:* https://claude.ai/artifact/3KfqizZ6HkfNGqtUmSpDiL
 (informe con 26 fricciones). Hoy el precio sale mal sin aviso (contrapiso m² calculado como m³, aplicar dos veces suma
 los materiales, faltantes en $0 sin marca) y "Vista Cliente" bajaba el PDF interno con el margen. Ocho entregas:
-1 ✅ precio seguro (`PLAN_PRECIO_SEGURO.md`, PR #37) · 2 buscador y semáforo en el detalle (`PLAN_BUSCADOR_EN_DETALLE.md`, en curso) · 3 asistente · 4 agregar
+1 ✅ precio seguro (`PLAN_PRECIO_SEGURO.md`, PR #37) · 2 ✅ buscador y semáforo en el detalle (`PLAN_BUSCADOR_EN_DETALLE.md`, PR #38) · 3 asistente (`PLAN_ASISTENTE.md`, en curso) · 4 agregar
 trabajo en un renglón · 5 un solo total (**decide Carlos**: suma de netos por trabajo o cascada con imprevistos, IIBB
 y cheque) · 6 exportar (resto) · 7 coherencia con Cargar obra y tildes · 8 celular. La guía de Ayuda de este camino,
 después de la 5.
