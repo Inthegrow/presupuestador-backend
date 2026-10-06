@@ -60,17 +60,19 @@ cheque, se pone 0 en Coeficiente de pase y todo el resto sigue solo (pregunta ab
     `neto_app` (T12).
   - `copy` (~1397): copia también `impuestos_total`, `iva_total`, `total_final`.
   - `POST /{id}/recalculate`: hace lo mismo que `cascade-recalculate` (delegar; la ruta queda por compatibilidad) (T4).
-- **Cambiar porcentajes** (T7): `PATCH /{id}/indirects` recalcula ese presupuesto (cascada sobre el directo
-  guardado, como `POST /{id}/indirects`). Para los generales: `GET /budgets/indirects/afectados` (o el nombre que
-  encaje) devuelve los presupuestos cuya config efectiva cambiaría con un body dado (`[{id, nombre}]`); el `PATCH`
-  general, con `aplicar: true`, recalcula esos y devuelve `{actualizados: n}`. Un presupuesto con todos los conceptos
-  propios no cambia.
+- **Cambiar porcentajes** (T7): `PATCH /budgets/{id}/indirects` recalcula ese presupuesto (cascada sobre el directo
+  guardado, como `POST /{id}/indirects`) y devuelve lo de hoy + `actualizados: 1`. Para los generales
+  (`/indirects/general`): `POST /indirects/general/afectados` con el mismo body que el PATCH devuelve
+  `{"presupuestos": [{"id", "nombre"}]}` = los presupuestos de la empresa cuya config efectiva cambiaría; el
+  `PATCH /indirects/general` acepta `aplicar: true` y entonces, además de guardar, recalcula esos presupuestos y
+  devuelve lo de hoy + `actualizados: n`. Sin `aplicar` guarda y no recalcula (compatibilidad). Un presupuesto con
+  todos los conceptos propios no cambia.
 - **Lecturas** (T6, T8, T11): `calc_budget_summary` suma también `impuestos_total`, `iva_total`, `total_final` y
   cuenta solo trabajos (no rubros). PDF interno: KPIs, "Resumen de costos" y la página de la cascada salen de esas
   sumas guardadas (con el renglón Impuestos); se deja de recalcular desde la config. PDF cliente: precio de cada
   trabajo = su neto guardado; total sin IVA = Σ neto; IVA = Σ iva; con IVA = Σ total_final. Excel exportado: columna
   Impuestos (y fila de totales que suma).
-- **Versiones** (T10): `list_versions` devuelve el neto de cada versión (del snapshot: Σ neto de sus trabajos, o el
+- **Versiones** (T10): `list_versions` devuelve `neto_total` de cada versión (del snapshot: Σ neto de sus trabajos, o el
   campo que guarde; si el snapshot no lo tiene, calcularlo al listar).
 - Un porcentaje de indirectos para mostrar: `GET /{id}/indirects` devuelve también `indirecto_pct` (los 5 conceptos)
   y `coeficiente` (precio sin IVA por cada $1 de directo), para que la pantalla no sume por su cuenta.
