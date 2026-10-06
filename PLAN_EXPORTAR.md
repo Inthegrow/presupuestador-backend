@@ -9,7 +9,7 @@
 | Hoy | Después |
 |---|---|
 | La pantalla Exportar tiene 4 tarjetas iguales, con jerga: "PDF Profesional · UNIVERSAL", "Excel Estándar (BoQ) · Bill of Quantities genérico", "Excel Formato Terrac · 26 col + hojas detalle 78 filas", "Vista Cliente (Venta)". No dice para quién es cada una. | Arriba, el total que se va a exportar, el mismo del editor: "Ginkgo · Precio sin IVA $2.639.518.457 · con IVA $3.193.817.333 · 244 trabajos". Debajo, cuatro opciones que dicen **para quién son** y **qué llevan** (2 o 3 renglones cada una). La primera, destacada: **"Para el cliente (PDF)"**. |
-| "Excel Formato Terrac" baja **el mismo archivo** que el Excel estándar. | **"Planilla Terrac (Excel)"** es la planilla de Sol: hoja `01_C&P` con sus 26 columnas, sus encabezados y sus rubros y pisos, un renglón por trabajo. Además, **una hoja por trabajo** con sus materiales y su mano de obra, como las hojas de detalle de Sol, y una hoja "Coeficiente de pase" con los porcentajes. Se puede volver a subir en Cargar obra y da los mismos trabajos y los mismos costos. |
+| "Excel Formato Terrac" baja **el mismo archivo** que el Excel estándar. | **"Planilla Terrac (Excel)"** es la planilla de Sol: hoja `01_C&P` con sus 26 columnas, sus encabezados y sus rubros y pisos, un renglón por trabajo. Además, **una hoja por trabajo** con sus materiales y su mano de obra, como las hojas de detalle de Sol, y una hoja "Coeficiente de pase" con los porcentajes. Se puede volver a subir en Cargar obra: vuelve con los mismos trabajos, cantidades, rubros, pisos y porcentajes de la obra (los lee de la hoja "Coeficiente de pase"); los trabajos sin fórmula conservan su precio al centavo y los que tienen fórmula se calculan con las fórmulas y la lista oficial de ese día (Cargar obra es para calcular un cómputo, no para restaurar una copia exacta). |
 | "PDF Profesional". | **"Informe interno (PDF)"**: con costos, indirectos, beneficio e impuestos. "No se lo mandes al cliente: tiene tus costos". |
 | "Excel Estándar (BoQ)". | **"Planilla simple (Excel)"**: un renglón por trabajo con su rubro y la escalera (costo directo → precio con IVA). Para filtrar u ordenar, o pasar a otro sistema. Encabezado en negrita, columnas con ancho y formato de pesos, primera fila fija. |
 | Se exporta sin avisar si hay trabajos en rojo (precios que faltan): el total sale corto y nadie se entera. | Si hay trabajos en rojo, un aviso arriba **antes** de exportar: "Hay 3 trabajos con precios que faltan: el total puede quedar corto. Ver cuáles" (lleva al editor). Se puede exportar igual. |
@@ -64,7 +64,8 @@
   (descargando / "Descargado" / error con "Probar de nuevo"):
   1. **Para el cliente (PDF)** — destacada. "Precio de venta de cada trabajo y el total, con y sin IVA. Sin tus costos."
   2. **Planilla Terrac (Excel)** — "Tu planilla de siempre: hoja 01_C&P, una hoja por trabajo con sus materiales y mano
-     de obra, y el Coeficiente de pase. La podés volver a subir en Cargar obra."
+     de obra, y el Coeficiente de pase. Si la volvés a subir en Cargar obra, vuelve con los mismos trabajos, cantidades y
+     porcentajes; los trabajos con fórmula se calculan con los precios de ese día."
   3. **Informe interno (PDF)** — "Con costos, indirectos, beneficio e impuestos. No se lo mandes al cliente."
   4. **Planilla simple (Excel)** — "Un renglón por trabajo con su rubro y su precio. Para filtrar u ordenar."
 - `budgetApi.exportExcel(id, formato?)`; nombres de archivo "{obra} - {opción} - {AAAA-MM-DD}.{ext}".

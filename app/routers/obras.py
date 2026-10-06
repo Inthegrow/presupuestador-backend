@@ -62,6 +62,7 @@ from app.obra_import import (
     unit_key,
 )
 from app.recipes import ORIGEN_RECURSO, resolve_waste
+from app.terrac_export import read_coeficiente
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -778,7 +779,10 @@ async def cargar_obra(
     budget = db.table("budgets").insert({
         "org_id": org_id, "name": nombre, "status": "draft", "source_file": file.filename,
         "description": "Cantidades del Excel de la obra; precios con las fórmulas del Maestro",
-        "indirectos": initial_indirects(db, org_id), "precios_al": book.fecha.isoformat(),
+        # A Planilla Terrac made by the app keeps the obra's percentages; any other Excel
+        # starts with the general ones, like every new budget
+        "indirectos": {**initial_indirects(db, org_id), **(read_coeficiente(wb) or {})},
+        "precios_al": book.fecha.isoformat(),
     }).execute().data[0]
     budget_id = budget["id"]
 

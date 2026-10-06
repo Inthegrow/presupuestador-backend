@@ -54,7 +54,7 @@ const OPCIONES: Opcion[] = [
     para: 'Para vos y tu equipo',
     enFrase: 'la Planilla Terrac',
     lleva:
-      'Tu planilla de siempre: hoja 01_C&P, una hoja por trabajo con sus materiales y mano de obra, y el Coeficiente de pase. La podés volver a subir en Cargar obra.',
+      'Tu planilla de siempre: hoja 01_C&P, una hoja por trabajo con sus materiales y mano de obra, y el Coeficiente de pase. Si la volvés a subir en Cargar obra, vuelve con los mismos trabajos, cantidades y porcentajes; los trabajos con fórmula se calculan con los precios de ese día.',
     bajar: (id) => budgetApi.exportExcel(id, 'terrac'),
   },
   {

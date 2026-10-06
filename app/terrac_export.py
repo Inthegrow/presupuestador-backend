@@ -3,7 +3,8 @@
 Sheets:
   - ``01_C&P``: her 26 columns (A..Z) with her header (rows 1-7), rubros and pisos as title
     rows and one row per work from row 8, in the layout ``app/obra_import.parse_obra``
-    reads, so the file can go back through "Cargar obra".
+    reads, so the file can go back through "Cargar obra" (same works, quantities and, from the
+"Coeficiente de pase" sheet, the obra's percentages; works with a formula are priced again).
   - One sheet per work with resources, like her detail sheets ("3.1-1"): a block per
     kind of resource and the work's direct cost at the bottom.
   - ``Coeficiente de pase``: the % of the budget and the cascade of its totals.
@@ -489,11 +490,50 @@ def _write_work_sheet(ws: Worksheet, obra: str, item: dict, resources: list[dict
     ws.freeze_panes = "A4"
 
 
+# Rows of the "Coeficiente de pase" sheet that carry a % (label in A, fraction in B), so a
+# Planilla Terrac uploaded again in Cargar obra keeps the obra's percentages
+COEF_TITLE = "COEFICIENTE DE PASE"
+COEF_LABELS = {
+    "Imprevistos": "imprevistos_pct",
+    "Gastos de estructura": "estructura_pct",
+    "Jefatura de obra": "jefatura_pct",
+    "Logística": "logistica_pct",
+    "Herramientas": "herramientas_pct",
+    "Beneficio": "beneficio_pct",
+    "Ingresos brutos": "ingresos_brutos_pct",
+    "Impuesto al cheque": "imp_cheque_pct",
+    "IVA": "iva_pct",
+}
+
+
+def read_coeficiente(wb) -> dict[str, float] | None:  # type: ignore[no-untyped-def]
+    """The 9 % (as 15 = 15%) of a Planilla Terrac made by the app, or None.
+
+    None unless the workbook has the app's "Coeficiente de pase" sheet with all 9 values
+    between 0 and 100 %: an Excel made by hand never changes the obra's percentages.
+    """
+    if SHEET_COEF not in wb.sheetnames:
+        return None
+    ws = wb[SHEET_COEF]
+    if str(ws["A3"].value or "").strip() != COEF_TITLE:
+        return None
+    found: dict[str, float] = {}
+    for row in ws.iter_rows(min_row=6, max_row=40, max_col=2, values_only=True):
+        label, value = str(row[0] or "").strip(), row[1]
+        key = COEF_LABELS.get(label)
+        if key is None or isinstance(value, bool) or not isinstance(value, (int, float)):
+            continue
+        if not 0 <= value <= 1:
+            return None
+        found[key] = round(float(value) * 100, 4)
+    return found if len(found) == len(COEF_LABELS) else None
+
+
 def _write_coef(ws: Worksheet, obra: str, cfg: dict, totals: dict) -> None:
     """The 9 % of the budget, the cascade of its saved totals and the coeficiente de pase."""
     ws["A1"] = obra
     ws["A1"].font = _BOLD
-    ws["A3"] = "COEFICIENTE DE PASE"
+    ws["A3"] = COEF_TITLE
     for col in range(1, 5):
         ws.cell(3, col).fill = _BLACK
     ws["A3"].font = Font(bold=True, size=16, color="FFFFFFFF")

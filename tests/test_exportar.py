@@ -1,8 +1,8 @@
 """Exportar sin sorpresas (PLAN_EXPORTAR 2): the Planilla Terrac and the planilla simple.
 
 The Planilla Terrac is Sol's Excel: 01_C&P with her 26 columns, one sheet per work with
-resources and the Coeficiente de pase. It goes back through Cargar obra (parse_obra) with
-the same works, rubros, pisos and costs, and its amounts are the saved ones to the cent.
+resources and the Coeficiente de pase. It goes back through Cargar obra with the same works,
+rubros, pisos and percentages, and its amounts are the saved ones to the cent.
 """
 
 from __future__ import annotations
@@ -208,6 +208,67 @@ class TestRoundTrip:
 
 
 # ── 01_C&P ──────────────────────────────────────────────────────────────────
+
+
+class TestCargarOtraVez:
+    """Codex PR #43 [P1]: the planilla goes through Cargar obra and comes back with the same
+    works, quantities, rubros and percentages. Works without a formula keep their price to the
+    cent; works with one are priced again with the formulas and the price list of today."""
+
+    def _cargar(self, client, db, wb_bytes, nombre="Ginkgo (copia)"):
+        import json
+        xlsx = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        # Cargar obra needs the Maestro loaded; one formula nobody uses is enough here
+        db.tables.setdefault("item_templates", []).append({
+            "id": "t-ninguna", "org_id": ORG, "codigo": "9.9", "nombre": "NINGUNA", "unidad": "m2",
+            "categoria": "Otros", "recursos": [], "parametros": []})
+        with patch("app.routers.obras.get_data_db", return_value=db), \
+             patch("app.routers.analysis.get_data_db", return_value=db):
+            a = client.post("/obras/analizar", files={"file": ("planilla.xlsx", wb_bytes, xlsx)})
+            assert a.status_code == 200, a.text
+            # No formulas in this org: every work goes "sin fórmula", with the planilla's price
+            asig = {t["clave"]: {"plantillas": []} for t in a.json()["tareas"]}
+            r = client.post("/obras/cargar", files={"file": ("planilla.xlsx", wb_bytes, xlsx)},
+                            data={"nombre": nombre, "permitir_sin_precio": "true",
+                                  "asignaciones": json.dumps(asig)})
+            assert r.status_code == 200, r.text
+            return r.json()["budget_id"]
+
+    def _bytes(self, client):
+        r = client.get(f"/budgets/{BUDGET}/export/excel", params={"formato": "terrac"})
+        assert r.status_code == 200, r.text
+        return r.content
+
+    def test_same_works_percentages_and_prices(self, client, db):
+        nuevo = self._cargar(client, db, self._bytes(client))
+        budget = next(b for b in db.tables["budgets"] if b["id"] == nuevo)
+        # The obra's own beneficio (12.5), not the general one (10)
+        assert budget["indirectos"]["beneficio_pct"] == 12.5
+        cargados = {i["code"]: i for i in db.tables["budget_items"]
+                    if i["budget_id"] == nuevo and not is_section(i)}
+        assert set(cargados) == {w["code"] for w in WORKS}
+        for w in WORKS:
+            c = cargados[w["code"]]
+            assert (c["description"], c["unidad"], float(c["cantidad"])) == (
+                " ".join(w["description"].split()), w["unidad"], float(w["cantidad"])), w["code"]
+            for key in ("directo_total", "neto_total", "total_final"):
+                assert cents(c[key]) == cents(w[key]), (w["code"], key)
+        # Recalculating it does not move a cent
+        antes = {k: (v["directo_total"], v["neto_total"], v["total_final"]) for k, v in cargados.items()}
+        with patch("app.routers.analysis.get_data_db", return_value=db):
+            assert client.post(f"/budgets/{nuevo}/cascade-recalculate").status_code == 200
+        despues = {i["code"]: (i["directo_total"], i["neto_total"], i["total_final"])
+                   for i in db.tables["budget_items"] if i["budget_id"] == nuevo and not is_section(i)}
+        assert {k: tuple(map(cents, v)) for k, v in despues.items()} == {k: tuple(map(cents, v)) for k, v in antes.items()}
+
+    def test_an_excel_made_by_hand_starts_with_the_general_percentages(self, client, db):
+        wb = terrac(client)
+        wb["Coeficiente de pase"]["A3"] = "OTRA COSA"  # not the app's sheet any more
+        out = io.BytesIO()
+        wb.save(out)
+        nuevo = self._cargar(client, db, out.getvalue(), nombre="A mano")
+        budget = next(b for b in db.tables["budgets"] if b["id"] == nuevo)
+        assert budget["indirectos"]["beneficio_pct"] == 10
 
 
 class TestPlanilla:
