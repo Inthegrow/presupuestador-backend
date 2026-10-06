@@ -20,9 +20,11 @@ import {
   AlertTriangle,
 } from 'lucide-react'
 import { budgetApi, templateApi, esFaltaConversion, esConfirmarReemplazo, esFalloAplicar } from '../lib/api'
-import type { FaltaConversion, PrecioFaltante } from '../lib/api'
+import type { FaltaConversion, PrecioFaltante, TemplateSugerencias } from '../lib/api'
 import { useAuth } from '../contexts/AuthContext'
-import { fmtCurrency, fmtNumber, fmtPercent } from '../lib/format'
+import { fmtCurrency, fmtNumber, fmtPercent, unidadEnPalabras } from '../lib/format'
+import { ESTILO, estadoDeTrabajo } from '../lib/semaforo'
+import BuscadorFormulas from '../components/ui/BuscadorFormulas'
 import type { ItemResource, BudgetItem, Budget, ItemAudit, IndirectConfig } from '../types'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -102,6 +104,16 @@ function emptyResource(tipo: Tipo, itemId: string): Partial<ItemResource> {
   }
 }
 
+const VER_CUENTA_KEY = 'presupuestador.verComoSeCalcula'
+
+function leerVerCuenta(): boolean {
+  try {
+    return localStorage.getItem(VER_CUENTA_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
 // ─── ResourceRow ──────────────────────────────────────────────────────────────
 
 interface ResourceRowProps {
@@ -111,9 +123,11 @@ interface ResourceRowProps {
   onDelete: (id: string) => Promise<void>
   startEditing: boolean
   onEditDone: () => void
+  // Muestra la cuenta, el redondeo y la cantidad con desperdicio ("Ver cómo se calcula")
+  verCuenta: boolean
 }
 
-function ResourceRow({ resource, tipo, onSave, onDelete, startEditing, onEditDone }: ResourceRowProps) {
+function ResourceRow({ resource, tipo, onSave, onDelete, startEditing, onEditDone, verCuenta }: ResourceRowProps) {
   const { puedeEditar } = useAuth()
   const [editing, setEditing] = useState(startEditing)
   const [draft, setDraft] = useState<Partial<ItemResource>>({})
@@ -211,6 +225,18 @@ function ResourceRow({ resource, tipo, onSave, onDelete, startEditing, onEditDon
         </td>
         <td className="px-2 py-1.5">
           <input className={inputCls} value={draft.descripcion ?? ''} onChange={(e) => set('descripcion', e.target.value || null)} placeholder="Descripcion" />
+          {!verCuenta && (
+            <div className="mt-1">
+              <label className="inline-flex items-center gap-1 text-[10px] text-gray-500" title="Lo compra el cliente: se ve pero no suma al costo">
+                <input
+                  type="checkbox"
+                  checked={!!draft.lo_compra_cliente}
+                  onChange={(e) => setDraft((prev) => ({ ...prev, lo_compra_cliente: e.target.checked }))}
+                />
+                cliente
+              </label>
+            </div>
+          )}
         </td>
         <td className="px-2 py-1.5">
           <input className={inputCls} value={draft.unidad ?? ''} onChange={(e) => set('unidad', e.target.value || null)} placeholder="m2" />
@@ -221,16 +247,18 @@ function ResourceRow({ resource, tipo, onSave, onDelete, startEditing, onEditDon
         <td className="px-2 py-1.5">
           <input className={numCls} type="number" step="0.1" min="0" value={draft.desperdicio_pct ?? 0} onChange={(e) => set('desperdicio_pct', parseFloat(e.target.value) || 0)} />
         </td>
-        <td className="px-2 py-1.5 text-center">
-          <label className="inline-flex items-center gap-1 text-[10px] text-gray-500" title="Lo compra el cliente: se ve pero no suma al costo">
-            <input
-              type="checkbox"
-              checked={!!draft.lo_compra_cliente}
-              onChange={(e) => setDraft((prev) => ({ ...prev, lo_compra_cliente: e.target.checked }))}
-            />
-            cliente
-          </label>
-        </td>
+        {verCuenta && (
+          <td className="px-2 py-1.5 text-center">
+            <label className="inline-flex items-center gap-1 text-[10px] text-gray-500" title="Lo compra el cliente: se ve pero no suma al costo">
+              <input
+                type="checkbox"
+                checked={!!draft.lo_compra_cliente}
+                onChange={(e) => setDraft((prev) => ({ ...prev, lo_compra_cliente: e.target.checked }))}
+              />
+              cliente
+            </label>
+          </td>
+        )}
         <td className="px-2 py-1.5">
           <input className={numCls} type="number" step="1" min="0" value={draft.precio_unitario ?? 0} onChange={(e) => set('precio_unitario', parseFloat(e.target.value) || 0)} />
         </td>
@@ -258,7 +286,7 @@ function ResourceRow({ resource, tipo, onSave, onDelete, startEditing, onEditDon
         <td className="px-3 py-1.5 text-right text-gray-700">{fmtNumber(resource.trabajadores, 0)}</td>
         <td className="px-3 py-1.5 text-right text-gray-700">
           {fmtNumber(resource.dias, 2)}
-          {resource.rendimiento && <div className="text-[9px] text-gray-400 font-mono">Q / {resource.rendimiento}</div>}
+          {verCuenta && resource.rendimiento && <div className="text-[9px] text-gray-400 font-mono">Q / {resource.rendimiento}</div>}
         </td>
         <td className="px-3 py-1.5 text-right text-orange-500">{fmtPercent(resource.cargas_sociales_pct)}</td>
         <td className="px-3 py-1.5 text-right font-medium text-gray-700">{fmtNumber(resource.cantidad_efectiva, 2)}</td>
@@ -285,16 +313,16 @@ function ResourceRow({ resource, tipo, onSave, onDelete, startEditing, onEditDon
       <td className="px-3 py-1.5 font-mono text-[10px] text-gray-400">{resource.codigo ?? '—'}</td>
       <td className="px-3 py-1.5 text-gray-800">
         {resource.descripcion ?? '—'}
-        {resource.formula && (
+        {verCuenta && resource.formula && (
           <span className="ml-1.5 font-mono text-[10px] text-gray-400" title="Cantidad (Q = cantidad del ítem)">= {resource.formula}</span>
         )}
-        {resource.rendimiento && (
+        {verCuenta && resource.rendimiento && (
           <span className="ml-1.5 font-mono text-[10px] text-gray-400" title="Días = Q / rendimiento">días = Q / {resource.rendimiento}</span>
         )}
         {resource.lo_compra_cliente && (
           <span className="ml-1.5 text-[10px] bg-amber-100 text-amber-700 rounded px-1.5" title="No suma al costo">lo compra el cliente</span>
         )}
-        {resource.redondear && (
+        {verCuenta && resource.redondear && (
           <span className="ml-1.5 text-[10px] bg-blue-100 text-blue-700 rounded px-1.5" title="Se redondea sobre el total de la obra">
             redondeo{resource.cantidad_redondeo ? ` +${fmtNumber(resource.cantidad_redondeo, 2)}` : ''}
           </span>
@@ -308,7 +336,9 @@ function ResourceRow({ resource, tipo, onSave, onDelete, startEditing, onEditDon
           <div className="text-[9px] text-gray-400">hereda {ORIGEN_LABEL[resource.desperdicio_origen]}</div>
         )}
       </td>
-      <td className="px-3 py-1.5 text-right font-medium text-gray-700">{fmtNumber(resource.cantidad_efectiva, 2)}</td>
+      {verCuenta && (
+        <td className="px-3 py-1.5 text-right font-medium text-gray-700">{fmtNumber(resource.cantidad_efectiva, 2)}</td>
+      )}
       <td className="px-3 py-1.5 text-right text-gray-700">{fmtARS(resource.precio_unitario)}</td>
       <td className="px-3 py-1.5 text-right font-bold text-gray-900">{fmtARS(resource.subtotal)}</td>
       <td className="px-3 py-1.5">
@@ -336,9 +366,10 @@ interface SectionProps {
   budgetId: string
   itemId: string
   onReload: () => void
+  verCuenta: boolean
 }
 
-function ResourceSection({ tipo, recursos, itemQty, budgetId, itemId, onReload }: SectionProps) {
+function ResourceSection({ tipo, recursos, itemQty, budgetId, itemId, onReload, verCuenta }: SectionProps) {
   const { puedeEditar } = useAuth()
   const [open, setOpen] = useState(true)
   const [adding, setAdding] = useState(false)
@@ -380,7 +411,9 @@ function ResourceSection({ tipo, recursos, itemQty, budgetId, itemId, onReload }
   }
 
   const moHeaders = ['Codigo', 'Descripcion', 'Trabajadores', 'Dias', 'Cargas %', 'Jornales Efect.', 'Jornal', 'Subtotal', '']
-  const matHeaders = ['Codigo', 'Descripcion', 'Unidad', 'Cantidad', 'Desperdicio %', 'Qty Efectiva', 'Precio Unit.', 'Subtotal', '']
+  const matHeaders = verCuenta
+    ? ['Codigo', 'Descripcion', 'Unidad', 'Cantidad', 'Desperdicio %', 'Cantidad con desperdicio', 'Precio Unit.', 'Subtotal', '']
+    : ['Codigo', 'Descripcion', 'Unidad', 'Cantidad', 'Desperdicio %', 'Precio Unit.', 'Subtotal', '']
   const headers = tipo === 'mano_obra' ? moHeaders : matHeaders
 
   const tipoUnitLabel =
@@ -438,6 +471,7 @@ function ResourceSection({ tipo, recursos, itemQty, budgetId, itemId, onReload }
                       onDelete={handleDelete}
                       startEditing={false}
                       onEditDone={() => {}}
+                      verCuenta={verCuenta}
                     />
                   ))}
                   {/* New resource row (inline) */}
@@ -450,6 +484,7 @@ function ResourceSection({ tipo, recursos, itemQty, budgetId, itemId, onReload }
                       onDelete={async () => { handleCancelNew() }}
                       startEditing={newEditStarted}
                       onEditDone={handleCancelNew}
+                      verCuenta={verCuenta}
                     />
                   )}
                 </tbody>
@@ -729,6 +764,9 @@ interface TemplateModalProps {
   reemplaza: boolean
   // cuántos recursos tiene cargados ahora (para el texto de la confirmación)
   recursosCargados: number
+  // Nombre y unidad del trabajo: con eso el servidor propone una fórmula ("Quizás sea:")
+  descripcion: string
+  unidad: string | null
   onApplied: () => Promise<void> | void
   onClose: () => void
 }
@@ -738,30 +776,32 @@ type Paso =
   | { tipo: 'confirmar'; tmpl: any; mensaje: string }
   | { tipo: 'conversion'; tmpl: any; det: FaltaConversion; valor: string; reemplazar: boolean }
 
-function TemplateModal({ budgetId, itemId, reemplaza, recursosCargados, onApplied, onClose }: TemplateModalProps) {
+function TemplateModal({ budgetId, itemId, reemplaza, recursosCargados, descripcion, unidad, onApplied, onClose }: TemplateModalProps) {
   const [templates, setTemplates] = useState<any[]>([])
-  const [categories, setCategories] = useState<string[]>([])
-  const [selectedCat, setSelectedCat] = useState<string | null>(null)
+  const [sugerencias, setSugerencias] = useState<TemplateSugerencias | null>(null)
+  // Conversión que trae la propuesta (si la regla o la memoria la conocen): solo vale para esa fórmula
+  const factorPropuesto = useRef<{ id: string; factor: number } | null>(null)
   const [loading, setLoading] = useState(true)
   const [applying, setApplying] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [paso, setPaso] = useState<Paso | null>(null)
 
   useEffect(() => {
-    Promise.all([templateApi.list(), templateApi.categories()])
-      .then(([tmplList, cats]) => {
-        setTemplates(Array.isArray(tmplList) ? tmplList : [])
-        const catList = Array.isArray(cats) ? cats : []
-        setCategories(catList)
-        if (catList.length > 0) setSelectedCat(catList[0])
-      })
+    templateApi.list()
+      .then((tmplList) => setTemplates(Array.isArray(tmplList) ? tmplList : []))
       .catch(() => setError('Error cargando las fórmulas.'))
       .finally(() => setLoading(false))
   }, [])
 
-  const filtered = selectedCat
-    ? templates.filter((t) => t.categoria === selectedCat)
-    : templates
+  // Si el pedido falla, la ventana funciona igual, sin "Quizás sea:"
+  useEffect(() => {
+    let vigente = true
+    if (!descripcion.trim()) return
+    templateApi.sugerir(descripcion, unidad)
+      .then((r) => { if (vigente && r && typeof r === 'object') setSugerencias(r) })
+      .catch(() => {})
+    return () => { vigente = false }
+  }, [descripcion, unidad])
 
   // Texto de la confirmación según lo que la pantalla sabe del trabajo
   const mensajeReemplazo = () =>
@@ -787,7 +827,10 @@ function TemplateModal({ budgetId, itemId, reemplaza, recursosCargados, onApplie
       if (esConfirmarReemplazo(err)) {
         setPaso({ tipo: 'confirmar', tmpl, mensaje: err.detail.mensaje || mensajeReemplazo() })
       } else if (esFaltaConversion(err)) {
-        const prop = err.detail.factor_propuesto
+        // Si Sol eligió la propuesta y trae su conversión, arranca con ese valor; si no, con la del servidor
+        const guardado = factorPropuesto.current
+        const deLaPropuesta = guardado && guardado.id === tmpl.id ? guardado.factor : null
+        const prop = deLaPropuesta ?? err.detail.factor_propuesto
         setPaso({
           tipo: 'conversion',
           tmpl,
@@ -810,10 +853,17 @@ function TemplateModal({ budgetId, itemId, reemplaza, recursosCargados, onApplie
   }
 
   // Al elegir una fórmula: si el trabajo ya tiene una, primero se pide confirmación en la misma ventana
-  const handleElegir = (tmpl: any) => {
+  const handleElegir = (tmpl: any, factor: number | null = null) => {
     setError(null)
+    factorPropuesto.current = factor != null ? { id: tmpl.id, factor } : null
     if (reemplaza) setPaso({ tipo: 'confirmar', tmpl, mensaje: mensajeReemplazo() })
     else aplicar(tmpl)
+  }
+
+  // Una de "Quizás sea:": se cruza con la lista completa por id o código (si no está, sirve la sugerencia misma)
+  const elegirSugerida = (s: { id?: string; codigo: string; nombre: string }, esPropuesta: boolean) => {
+    const tmpl = templates.find((t) => t.id === s.id) ?? templates.find((t) => t.codigo && t.codigo === s.codigo) ?? s
+    handleElegir(tmpl, esPropuesta ? sugerencias?.propuesta?.factor ?? null : null)
   }
 
   const enviarConversion = () => {
@@ -842,25 +892,6 @@ function TemplateModal({ budgetId, itemId, reemplaza, recursosCargados, onApplie
             <X size={16} />
           </button>
         </div>
-
-        {/* Category tabs */}
-        {!paso && categories.length > 0 && (
-          <div className="px-4 pt-3 pb-2 flex gap-2 flex-wrap flex-shrink-0 border-b border-gray-100">
-            {categories.map((cat) => (
-              <button
-                key={cat}
-                onClick={() => setSelectedCat(cat)}
-                className={`text-xs px-3 py-1 rounded-full font-medium capitalize transition-colors ${
-                  selectedCat === cat
-                    ? 'bg-[#2D8D68] text-white'
-                    : 'bg-gray-100 text-gray-600 hover:bg-[#E8F5EE] hover:text-[#2D8D68]'
-                }`}
-              >
-                {cat}
-              </button>
-            ))}
-          </div>
-        )}
 
         {/* Confirmar el reemplazo */}
         {paso?.tipo === 'confirmar' && (
@@ -946,67 +977,36 @@ function TemplateModal({ budgetId, itemId, reemplaza, recursosCargados, onApplie
           </div>
         )}
 
-        {/* Template list */}
+        {/* Buscador: "Quizás sea:" arriba y la lista completa por rubro debajo */}
         {!paso && (
-        <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
-          {loading && (
-            <div className="flex items-center gap-2 text-sm text-gray-400 py-6 justify-center">
-              <div className="w-4 h-4 border-2 border-[#2D8D68] border-t-transparent rounded-full animate-spin" />
-              Cargando fórmulas...
-            </div>
-          )}
-          {!loading && filtered.length === 0 && (
-            <div className="text-center text-sm text-gray-400 italic py-8">
-              No hay fórmulas en esta categoría.
-            </div>
-          )}
-          {!loading && filtered.map((tmpl) => {
-            const recursoCount = Array.isArray(tmpl.recursos) ? tmpl.recursos.length : 0
-            const isApplying = applying === tmpl.id
-            return (
-              <div
-                key={tmpl.id}
-                className="border border-gray-200 rounded-xl p-3.5 hover:border-[#2D8D68] hover:bg-[#E8F5EE]/30 transition-all"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex-1 min-w-0">
-                    <div className="font-semibold text-[#143D34] text-sm">{tmpl.nombre}</div>
-                    {tmpl.descripcion && (
-                      <div className="text-xs text-gray-500 mt-0.5 truncate">{tmpl.descripcion}</div>
-                    )}
-                    <div className="flex items-center gap-3 mt-1.5">
-                      {tmpl.unidad && (
-                        <span className="text-[10px] bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded font-mono uppercase">
-                          {tmpl.unidad}
-                        </span>
-                      )}
-                      <span className="text-[10px] text-gray-400">
-                        {recursoCount} {recursoCount === 1 ? 'recurso' : 'recursos'}
-                      </span>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleElegir(tmpl)}
-                    disabled={isApplying || applying !== null}
-                    className="flex items-center gap-1.5 text-xs bg-[#2D8D68] hover:bg-[#1E6B4E] text-white px-3 py-1.5 rounded-lg font-medium transition-colors disabled:opacity-50 flex-shrink-0"
-                  >
-                    {isApplying ? (
-                      <>
-                        <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                        Aplicando...
-                      </>
-                    ) : (
-                      <>
-                        <Check size={12} />
-                        Aplicar
-                      </>
-                    )}
-                  </button>
-                </div>
+          <div className="flex-1 min-h-0 flex flex-col">
+            {loading ? (
+              <div className="flex items-center gap-2 text-sm text-gray-400 py-6 justify-center">
+                <div className="w-4 h-4 border-2 border-[#2D8D68] border-t-transparent rounded-full animate-spin" />
+                Cargando fórmulas...
               </div>
-            )
-          })}
-        </div>
+            ) : (
+              <BuscadorFormulas
+                recetas={templates}
+                onElegir={(t) => handleElegir(t)}
+                deshabilitado={applying !== null}
+                ayuda="Elegí la fórmula correcta para este trabajo."
+                quizas={sugerencias ? {
+                  propuesta: sugerencias.propuesta,
+                  parecidas: sugerencias.parecidas,
+                  onElegir: elegirSugerida,
+                } : undefined}
+                className="flex-1 min-h-0 flex flex-col"
+                listaClassName="flex-1 overflow-y-auto min-h-[10rem]"
+              />
+            )}
+            {applying !== null && (
+              <div className="px-4 py-2 flex items-center gap-2 text-xs text-gray-500 border-t">
+                <div className="w-3 h-3 border-2 border-[#2D8D68] border-t-transparent rounded-full animate-spin" />
+                Aplicando...
+              </div>
+            )}
+          </div>
         )}
 
         {/* Error */}
@@ -1043,7 +1043,15 @@ export default function ItemDetail() {
   const [templateModalOpen, setTemplateModalOpen] = useState(false)
   // Materiales sin precio, tal como los calcula el servidor sobre lo guardado
   const [faltantes, setFaltantes] = useState<PrecioFaltante[]>([])
+  // false hasta que el servidor contestó (o falló) la primera vez: así el chip no pasa por verde sin saber
+  const [faltantesListos, setFaltantesListos] = useState(false)
   const faltantesReq = useRef(0)
+  const [verCuenta, setVerCuenta] = useState<boolean>(leerVerCuenta)
+  const alternarVerCuenta = () => {
+    const nuevo = !verCuenta
+    setVerCuenta(nuevo)
+    try { localStorage.setItem(VER_CUENTA_KEY, nuevo ? '1' : '0') } catch { /* sin almacenamiento: vale solo por ahora */ }
+  }
 
   // Pide el aviso al servidor; si falla, sin aviso. Se ignoran respuestas viejas si hubo un pedido más nuevo.
   const refrescarFaltantes = useCallback(async () => {
@@ -1056,7 +1064,10 @@ export default function ItemDetail() {
     } catch {
       lista = []
     }
-    if (req === faltantesReq.current) setFaltantes(lista)
+    if (req === faltantesReq.current) {
+      setFaltantes(lista)
+      setFaltantesListos(true)
+    }
   }, [id, itemId])
 
   const loadData = useCallback(async (cancelled?: { v: boolean }) => {
@@ -1129,6 +1140,12 @@ export default function ItemDetail() {
   const eqUnit = item?.eq_unitario ?? 0
   const matIndUnit = item?.mat_ind_unitario ?? 0
   const subUnit = item?.sub_unitario ?? 0
+  const porUnidad = unidadEnPalabras(item?.unidad)
+  const estado = estadoDeTrabajo({
+    tieneFormula: !!item?.template_id,
+    recursos: recursos.length,
+    preciosFaltantes: faltantes.length,
+  })
 
   if (loading) {
     return (
@@ -1210,6 +1227,8 @@ export default function ItemDetail() {
           itemId={itemId}
           reemplaza={!!item?.template_id || recursos.length > 0}
           recursosCargados={recursos.length}
+          descripcion={item?.description ?? ''}
+          unidad={item?.unidad ?? null}
           onApplied={reloadResources}
           onClose={() => setTemplateModalOpen(false)}
         />
@@ -1220,9 +1239,19 @@ export default function ItemDetail() {
         <div className="flex items-start gap-3 mb-3">
           <div className="w-1 h-8 bg-[#2D8D68] rounded-full flex-shrink-0 mt-0.5" />
           <div className="flex-1">
-            <h1 className="text-xl font-extrabold text-[#143D34]">
-              {item ? `${item.code ?? ''} ${item.description ?? ''}`.trim().toUpperCase() : 'DETALLE DE ITEM'}
-            </h1>
+            <div className="flex items-start gap-x-3 gap-y-1 flex-wrap">
+              <h1 className="text-xl font-extrabold text-[#143D34] min-w-0 break-words">
+                {item ? `${item.code ?? ''} ${item.description ?? ''}`.trim().toUpperCase() : 'DETALLE DE ITEM'}
+              </h1>
+              {item && faltantesListos && (
+                <div className="flex items-center gap-2 flex-wrap pt-1" data-testid="estado-trabajo">
+                  <span className={`inline-block text-[10px] font-bold rounded px-1.5 py-0.5 ${ESTILO[estado.estado].chip}`}>
+                    {ESTILO[estado.estado].texto}
+                  </span>
+                  <span className="text-xs text-gray-700">{estado.frase}</span>
+                </div>
+              )}
+            </div>
             <div className="flex items-center gap-4 mt-1.5 flex-wrap">
               <div className="flex items-center gap-1.5">
                 <span className="text-[10px] text-[#2D8D68] uppercase font-semibold">Unidad</span>
@@ -1243,16 +1272,16 @@ export default function ItemDetail() {
         </div>
 
         {/* Summary bar: 5 mini cards */}
-        <div className="grid grid-cols-5 gap-2">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
           {[
-            { label: 'MAT Unit', value: matUnit },
-            { label: 'MO Unit', value: moUnit },
-            { label: 'EQ Unit', value: eqUnit },
-            { label: 'Mat.Ind Unit', value: matIndUnit },
-            { label: 'Sub Unit', value: subUnit },
+            { label: 'Materiales', value: matUnit },
+            { label: 'Mano de obra', value: moUnit },
+            { label: 'Equipos', value: eqUnit },
+            { label: 'Materiales indirectos', value: matIndUnit },
+            { label: 'Subcontratos', value: subUnit },
           ].map(({ label, value }) => (
-            <div key={label} className="bg-white rounded-lg p-2 text-center border border-[#C3E5D3]">
-              <div className="text-[9px] text-[#2D8D68] uppercase font-semibold mb-0.5">{label}</div>
+            <div key={label} className="bg-white rounded-lg p-2 text-center border border-[#C3E5D3] min-w-0">
+              <div className="text-[10px] leading-tight text-[#2D8D68] font-semibold mb-0.5 break-words">{label} por {porUnidad}</div>
               <div className="font-bold text-[#143D34] text-xs">{fmtARS(value)}</div>
             </div>
           ))}
@@ -1273,6 +1302,15 @@ export default function ItemDetail() {
 
       {item && id && <ItemParams budgetId={id} item={item} onSaved={reloadResources} />}
 
+      <div className="mb-2 text-right">
+        <button
+          onClick={alternarVerCuenta}
+          className="text-xs text-[#2D8D68] hover:text-[#1B5E4B] hover:underline font-medium"
+        >
+          {verCuenta ? 'Ocultar cómo se calcula' : 'Ver cómo se calcula'}
+        </button>
+      </div>
+
       {/* 5 Resource sections */}
       <div className="space-y-4 mb-6">
         {TIPO_SECTIONS.map((tipo) => (
@@ -1284,6 +1322,7 @@ export default function ItemDetail() {
             budgetId={id ?? ''}
             itemId={itemId ?? ''}
             onReload={reloadResources}
+            verCuenta={verCuenta}
           />
         ))}
       </div>

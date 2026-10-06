@@ -105,6 +105,7 @@ ROUTE_ROLES: dict[tuple[str, str], str] = {
     # Recetas
     ("GET", "/templates"): MEMBER,
     ("GET", "/templates/categories"): MEMBER,
+    ("GET", "/templates/sugerir"): MEMBER,
     ("GET", "/templates/{template_id}"): MEMBER,
     ("POST", "/templates"): EDITOR,
     ("PATCH", "/templates/{template_id}"): EDITOR,
