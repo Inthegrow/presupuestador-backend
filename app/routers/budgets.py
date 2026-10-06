@@ -175,7 +175,7 @@ async def create_full_budget(payload: CreateFullBudget, user: dict = Depends(req
 
     # 3. Build summary
     all_items = _get_items(budget_id, org_id)
-    summary = calc_budget_summary(all_items)
+    summary = calc_budget_summary(all_items, pct_or_default(config, "iva_pct", 21))
 
     return {
         "budget": budget,

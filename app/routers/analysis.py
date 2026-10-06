@@ -448,7 +448,7 @@ def _run_cascade(
 
     # Build summary from freshly updated items
     all_items = _get_items(budget["id"], org_id)
-    summary = calc_budget_summary(all_items)
+    summary = calc_budget_summary(all_items, config["iva_pct"])
 
     result = {
         "items_total": len(items),
@@ -625,11 +625,17 @@ async def get_analysis(
     user: dict = Depends(get_current_user),
 ):
     """Get cost analysis with MAT/MO/Indirect/Benefit breakdown."""
-    items = _get_items(str(budget_id), user["org_id"])
+    org_id = user["org_id"]
+    items = _get_items(str(budget_id), org_id)
     if not items:
         raise HTTPException(404, "Presupuesto vacio o sin acceso")
 
-    summary = calc_budget_summary(items)
+    # Old items without stored IVA take the IVA of this budget, as /full and the exports do
+    db = get_data_db()
+    rows = db.table("budgets").select("*").eq("id", str(budget_id)).eq("org_id", org_id).execute().data or []
+    raw = load_org_config(db, org_id)
+    config = _apply_config_defaults({**raw, **effective_indirects(raw, rows[0] if rows else None)})
+    summary = calc_budget_summary(items, config["iva_pct"])
     return AnalysisResponse(budget_id=str(budget_id), **summary)
 
 

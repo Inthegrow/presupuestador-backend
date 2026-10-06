@@ -7,6 +7,8 @@ whose cascade changes; the budgets with their own values never change.
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.auth import get_current_user, require_admin
@@ -18,11 +20,12 @@ from app.budget_prices import (
     load_org_config,
     save_org_config,
 )
-from app.calculations import cascade_factors
+from app.calculations import CASCADE_FIELDS, cascade_factors
 from app.db import get_data_db
-from app.routers.analysis import reprice_budget
+from app.routers.analysis import _get_items, _is_leaf_item, reprice_budget
 from app.schemas import GeneralIndirectsUpdate
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -90,8 +93,43 @@ async def update_general_indirects(
     if not payload.aplicar:
         return _response(save_org_config(db, org_id, data))
 
-    budgets = _affected(db, org_id, load_org_config(db, org_id), data)
-    saved = save_org_config(db, org_id, data)
-    for budget in budgets:
-        reprice_budget(db, org_id, budget, {**saved, **effective_indirects(saved, budget)})
+    org_config = load_org_config(db, org_id)
+    budgets = _affected(db, org_id, org_config, data)
+    new_config = {**org_config, **data}
+
+    # Reprice first and save last: while the new values are not saved, a retry finds the
+    # same budgets. If anything fails, the repriced budgets get their old prices back.
+    done: list[tuple[str, list[dict]]] = []
+    try:
+        for budget in budgets:
+            items = _get_items(str(budget["id"]), org_id)
+            done.append((str(budget["id"]), items))
+            reprice_budget(db, org_id, budget, {**new_config, **effective_indirects(new_config, budget)}, items)
+        saved = save_org_config(db, org_id, data)
+    except Exception as exc:
+        logger.exception("Saving the general indirects failed; restoring %d budgets", len(done))
+        try:
+            for _, items in done:
+                _restore_prices(db, items)
+        except Exception:
+            logger.exception("Restoring the prices failed")
+            raise HTTPException(500, {
+                "codigo": "A_MEDIAS",
+                "mensaje": "No se guardaron los porcentajes y algunos presupuestos pueden haber quedado con "
+                           "precios nuevos. Volvé a guardar: la app termina de actualizarlos.",
+            }) from exc
+        raise HTTPException(500, {
+            "codigo": "NO_SE_APLICO",
+            "mensaje": "No se guardaron los porcentajes ni cambió ningún precio. Probá de nuevo.",
+        }) from exc
     return {**_response(saved), "actualizados": len(budgets)}
+
+
+def _restore_prices(db, items: list[dict]) -> None:
+    """Write back the cascade values the items had before (only those columns)."""
+    for item in items:
+        if not _is_leaf_item(item):
+            continue
+        old = {k: item.get(k) for k in CASCADE_FIELDS if k in item}
+        if old:
+            db.table("budget_items").update(old).eq("id", item["id"]).execute()

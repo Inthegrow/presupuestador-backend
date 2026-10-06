@@ -431,6 +431,99 @@ class TestPercentages:
         assert numbers(db) == antes
 
 
+class TestGeneralSaveIsAtomic:
+    """Codex PR #42 [P1]: saving the general values reprices first and saves last, so a failure
+    leaves nothing half done and a retry finishes the job."""
+
+    B3 = "00000000-0000-0000-0000-0000000000b3"
+
+    def _second_follower(self, client, db):
+        db.tables["budgets"].append({"id": self.B3, "org_id": ORG, "name": "Otra obra", "desperdicio_pct": None,
+                                     "indirectos": {}, "precios_al": "2026-09-01"})
+        db.tables["budget_items"].append(_work("00000000-0000-0000-0000-0000000000f1", "1.1", 4,
+                                               budget=self.B3, parent=None, mat_unitario=25, mo_unitario=0))
+        assert client.post(f"/budgets/{self.B3}/cascade-recalculate").status_code == 200
+
+    def _failing_on(self, call: int):
+        import app.routers.indirects as indirects
+        real = indirects.reprice_budget
+        calls = {"n": 0}
+
+        def flaky(*args, **kwargs):
+            calls["n"] += 1
+            result = real(*args, **kwargs)  # the budget gets written...
+            if calls["n"] == call:
+                raise RuntimeError("se cortó la base")  # ...and then the request dies
+            return result
+        return patch("app.routers.indirects.reprice_budget", side_effect=flaky)
+
+    def test_failure_restores_and_the_retry_finishes(self, client, db):
+        self._second_follower(client, db)
+        antes = {bid: numbers(db, bid) for bid in (B1, self.B3)}
+        with self._failing_on(2):
+            r = client.patch("/indirects/general", json={"beneficio_pct": 20, "aplicar": True})
+        assert r.status_code == 500
+        assert r.json()["detail"]["codigo"] == "NO_SE_APLICO"
+        # Nothing saved, nothing half priced: both budgets are as they were
+        assert db.tables["indirect_config"][0].get("beneficio_pct") is None
+        for bid in (B1, self.B3):
+            assert numbers(db, bid) == antes[bid]
+        # The retry finds the same two budgets and prices them with the new values
+        assert len(client.post("/indirects/general/afectados", json={"beneficio_pct": 20}).json()["presupuestos"]) == 2
+        r = client.patch("/indirects/general", json={"beneficio_pct": 20, "aplicar": True})
+        assert r.status_code == 200, r.text
+        assert r.json()["actualizados"] == 2
+        assert config(db)["beneficio_pct"] == 20
+        for bid in (B1, self.B3):
+            check(client, db, bid)
+        w1 = item(db, W1)
+        assert cents(w1["neto_total"]) == cents(
+            calc_cascade_indirects({"directo_total": w1["directo_total"]}, {"beneficio_pct": 20})["neto_total"])
+
+    def test_failure_while_saving_restores_the_prices(self, client, db):
+        antes = numbers(db)
+        with patch("app.routers.indirects.save_org_config", side_effect=RuntimeError("sin base")):
+            r = client.patch("/indirects/general", json={"beneficio_pct": 20, "aplicar": True})
+        assert r.status_code == 500 and r.json()["detail"]["codigo"] == "NO_SE_APLICO"
+        assert numbers(db) == antes
+        check(client, db)
+
+    def test_restore_also_fails_then_the_retry_heals(self, client, db):
+        self._second_follower(client, db)
+        with self._failing_on(2), patch("app.routers.indirects._restore_prices",
+                                        side_effect=RuntimeError("tampoco")):
+            r = client.patch("/indirects/general", json={"beneficio_pct": 20, "aplicar": True})
+        assert r.status_code == 500 and r.json()["detail"]["codigo"] == "A_MEDIAS"
+        assert "Volvé a guardar" in r.json()["detail"]["mensaje"]
+        # The values were not saved, so the retry still sees both budgets and fixes them
+        r = client.patch("/indirects/general", json={"beneficio_pct": 20, "aplicar": True})
+        assert r.status_code == 200 and r.json()["actualizados"] == 2
+        for bid in (B1, self.B3):
+            check(client, db, bid)
+
+
+class TestOldItemsUseTheirBudgetIva:
+    """Codex PR #42 [P2]: items saved before iva_total existed take their budget's IVA everywhere."""
+
+    def test_analysis_full_and_exports_agree(self, client, db):
+        budget = next(b for b in db.tables["budgets"] if b["id"] == B2)
+        budget["indirectos"] = {**budget["indirectos"], "iva_pct": 10}
+        for w in works(db, B2):
+            w["iva_total"] = None
+            w["total_final"] = None
+        neto = sum(cents(w["neto_total"]) for w in works(db, B2))
+        esperado = round(neto * 0.10)
+        analysis = client.get(url(B2, "analysis")).json()
+        full = client.get(url(B2, "full")).json()["analysis"]
+        assert abs(cents(analysis["iva_total"]) - esperado) <= 1
+        assert cents(analysis["iva_total"]) == cents(full["iva_total"])
+        assert cents(analysis["total_final"]) == cents(full["total_final"]) == cents(analysis["neto_total"]) + cents(analysis["iva_total"])
+        assert cents(client_pdf(client, B2)["total_con_iva"]) == cents(full["total_final"])
+        # And the recalculation summary too
+        recalc = client.post(url(B2, "cascade-recalculate")).json()["summary"]
+        assert abs(cents(recalc["iva_total"]) - round(cents(recalc["neto_total"]) * 0.10)) <= 1
+
+
 class TestCopy:
     def test_copy_keeps_the_whole_price(self, client, db):
         r = client.post(url(B1, "copy"), json={})
