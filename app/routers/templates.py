@@ -448,7 +448,7 @@ async def apply_template(
         before = _snapshot(db, org_id, budget.data[0], items)
     except Exception as exc:
         logger.exception("Could not read budget %s before applying template %s", budget_id, template_id)
-        raise HTTPException(500, NO_SE_APLICO) from exc
+        raise HTTPException(500, {"codigo": "NO_SE_APLICO", "mensaje": NO_SE_APLICO}) from exc
     anteriores = [r for r in before["resources"] if str(r.get("item_id")) == item_id]
 
     try:
@@ -487,8 +487,8 @@ async def apply_template(
             _restore(db, org_id, before)
         except Exception:
             logger.exception("Could not restore budget %s after a failed apply", budget_id)
-            raise HTTPException(500, A_MEDIAS) from exc
-        raise HTTPException(500, NO_SE_APLICO) from exc
+            raise HTTPException(500, {"codigo": "A_MEDIAS", "mensaje": A_MEDIAS}) from exc
+        raise HTTPException(500, {"codigo": "NO_SE_APLICO", "mensaje": NO_SE_APLICO}) from exc
 
     return {
         "resources_created": len(created),

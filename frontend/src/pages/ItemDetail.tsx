@@ -19,7 +19,7 @@ import {
   Library,
   AlertTriangle,
 } from 'lucide-react'
-import { budgetApi, templateApi, esFaltaConversion, esConfirmarReemplazo } from '../lib/api'
+import { budgetApi, templateApi, esFaltaConversion, esConfirmarReemplazo, esFalloAplicar } from '../lib/api'
 import type { FaltaConversion, PrecioFaltante } from '../lib/api'
 import { useAuth } from '../contexts/AuthContext'
 import { fmtCurrency, fmtNumber, fmtPercent } from '../lib/format'
@@ -795,6 +795,12 @@ function TemplateModal({ budgetId, itemId, reemplaza, recursosCargados, onApplie
           valor: prop != null ? String(prop).replace('.', ',') : '',
           reemplazar: !!opts.reemplazar,
         })
+      } else if (esFalloAplicar(err)) {
+        setPaso(null)
+        // El mensaje del servidor dice si quedó como estaba o si hay que revisar antes de seguir
+        setError(err.detail.mensaje)
+        // Si pudo quedar a medias, mostrar lo que hay guardado de verdad (sin cerrar el aviso)
+        if (err.detail.codigo === 'A_MEDIAS') Promise.resolve(onApplied()).catch(() => {})
       } else {
         setPaso(null)
         setError('Error al aplicar la fórmula. Intentá de nuevo.')

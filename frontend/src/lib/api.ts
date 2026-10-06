@@ -313,6 +313,18 @@ export interface ConfirmarReemplazo {
   recursos: number
 }
 
+/** 500 de aplicar una fórmula: NO_SE_APLICO (quedó como estaba) o A_MEDIAS (falló también la restauración). */
+export interface FalloAplicar {
+  codigo: 'NO_SE_APLICO' | 'A_MEDIAS'
+  mensaje: string
+}
+
+export function esFalloAplicar(err: unknown): err is ApiError & { detail: FalloAplicar } {
+  if (!(err instanceof ApiError)) return false
+  const d = err.detail as { codigo?: unknown } | null
+  return !!d && typeof d === 'object' && (d.codigo === 'NO_SE_APLICO' || d.codigo === 'A_MEDIAS')
+}
+
 export function esConfirmarReemplazo(err: unknown): err is ApiError & { detail: ConfirmarReemplazo } {
   if (!(err instanceof ApiError) || err.status !== 409) return false
   const d = err.detail as { codigo?: unknown } | null

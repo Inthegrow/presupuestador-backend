@@ -398,7 +398,7 @@ class TestAtomicApply:
 
         r = apply(client, CASCOTE, reemplazar=True)
         assert r.status_code == 500, r.text
-        assert r.json()["detail"] == NO_SE_APLICO
+        assert r.json()["detail"] == {"codigo": "NO_SE_APLICO", "mensaje": NO_SE_APLICO}
         # Same resources (ids and values) and the item still on its recipe
         assert self._state(db) == antes
         assert item(db)["template_id"] == TEMPLATE
@@ -416,7 +416,7 @@ class TestAtomicApply:
 
         r = apply(client, CASCOTE, reemplazar=True)
         assert r.status_code == 500, r.text
-        assert r.json()["detail"] == NO_SE_APLICO
+        assert r.json()["detail"] == {"codigo": "NO_SE_APLICO", "mensaje": NO_SE_APLICO}
         assert self._state(db) == antes
         assert item(db)["directo_total"] == directo
 
@@ -425,7 +425,7 @@ class TestAtomicApply:
         fail_writes(db, item_update, veces=None)
         r = apply(client, CASCOTE, reemplazar=True)
         assert r.status_code == 500
-        assert r.json()["detail"] == A_MEDIAS
+        assert r.json()["detail"] == {"codigo": "A_MEDIAS", "mensaje": A_MEDIAS}
 
     def test_happy_path(self, client, db):
         self._with_other_item(db)
