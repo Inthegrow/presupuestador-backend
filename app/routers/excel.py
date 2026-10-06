@@ -796,6 +796,44 @@ def _pdf_header(budget_data: dict, pw: float, styles, with_description: bool = T
     return elements
 
 
+def pdf_detail_groups(all_items: list[dict]) -> list[tuple[dict | None, list[dict]]]:
+    """Groups of the internal PDF's detail table: [(rubro or None, rows)].
+
+    Each top-level section (rubro) gets every row below it at any depth, in tree order:
+    the pisos (sections) as titles and their works, so the works listed add up to the
+    grand total. A top-level work is its own group (no title), with whatever hangs from
+    it. Rows whose parent is missing are treated as top level. Every row appears once.
+    """
+    ids = {i.get("id") for i in all_items}
+    children: dict[object, list[dict]] = {}
+    for i in all_items:
+        pid = i.get("parent_id")
+        children.setdefault(pid if pid in ids else None, []).append(i)
+
+    seen: set = set()
+
+    def below(node: dict) -> list[dict]:
+        out: list[dict] = []
+        for child in children.get(node.get("id"), []):
+            if child.get("id") in seen:
+                continue
+            seen.add(child.get("id"))
+            out.append(child)
+            out.extend(below(child))
+        return out
+
+    groups: list[tuple[dict | None, list[dict]]] = []
+    for top in children.get(None, []):
+        if top.get("id") in seen:
+            continue
+        seen.add(top.get("id"))
+        if is_section(top):
+            groups.append((top, below(top)))
+        else:
+            groups.append((None, [top, *below(top)]))
+    return groups
+
+
 @router.get("/{budget_id}/export/pdf")
 async def export_budget_pdf(
     budget_id: UUID,
@@ -857,7 +895,6 @@ async def export_budget_pdf(
 
     # ── Totals: the saved sums (the same numbers as the editor) ─────────────
     totals = pdf_totals(all_items, cfg)
-    leaf_items = [i for i in all_items if not is_section(i)]
     mat_total = totals["mat_total"]
     mo_total = totals["mo_total"]
     directo_total = totals["directo_total"]
@@ -1051,29 +1088,7 @@ async def export_budget_pdf(
     elements.append(PageBreak())
     elements.append(Paragraph("Detalle de Items", section_heading_style))
 
-    # Build section-grouped structure
-    # sections: list of (section_item_or_None, [child_items])
-    sections: list[tuple] = []
-    id_to_item = {i["id"]: i for i in all_items}
-    # Map parent_id -> list of children
-    children_map: dict[str | None, list] = {}
-    for i in all_items:
-        pid = i.get("parent_id")
-        children_map.setdefault(pid, []).append(i)
-
-    # Top-level items (parent_id is None)
-    top_level = children_map.get(None, [])
-    for top in top_level:
-        if top.get("notas") == "Seccion":
-            children = children_map.get(top["id"], [])
-            sections.append((top, children))
-        else:
-            # Standalone item (no section parent)
-            sections.append((None, [top]))
-
-    # If no top-level grouping, just dump all leaf items
-    if not sections:
-        sections = [(None, leaf_items)]
+    sections = pdf_detail_groups(all_items)
 
     # Column layout for detail table
     # Codigo | Descripcion | Unidad | Cantidad | P.Unit MAT | P.Unit MO | Directo | Indirecto | Beneficio
@@ -1087,6 +1102,7 @@ async def export_budget_pdf(
     table_rows: list = [detail_header]
     # Track row indices for section rows styling
     section_row_indices: list[int] = []
+    piso_row_indices: list[int] = []
     subtotal_row_indices: list[int] = []
 
     row_idx = 1  # 0 is header
@@ -1115,6 +1131,15 @@ async def export_budget_pdf(
 
         for item in children:
             if is_section(item):
+                # A piso (or any section below the rubro): a title row, its works follow
+                sub_code = item.get("code") or ""
+                sub_desc = item.get("description") or "—"
+                table_rows.append([
+                    Paragraph(f"{sub_code}  {sub_desc}".strip() if sub_code else sub_desc, cell_bold_style),
+                    "", "", "", "", "", "", "", "", "", "",
+                ])
+                piso_row_indices.append(row_idx)
+                row_idx += 1
                 continue
             cantidad = item.get("cantidad")
             cantidad_str = _fmt_ars(float(cantidad)).replace("$ ", "").replace(",00", "") if cantidad else "—"
@@ -1208,8 +1233,12 @@ async def export_budget_pdf(
     ]
     # Alternating rows (odd body rows)
     for i in range(1, len(table_rows) - 1, 2):
-        if i not in section_row_indices and i not in subtotal_row_indices:
+        if i not in section_row_indices and i not in subtotal_row_indices and i not in piso_row_indices:
             ts.append(("BACKGROUND", (0, i), (-1, i), C_ROW_ALT))
+    # Piso rows (sections inside a rubro)
+    for i in piso_row_indices:
+        ts.append(("SPAN", (0, i), (-1, i)))
+        ts.append(("LINEBELOW", (0, i), (-1, i), 0.5, C_ACCENT))
     # Section rows
     for i in section_row_indices:
         ts.append(("BACKGROUND", (0, i), (-1, i), colors.HexColor(_COLOR_SECTION)))
@@ -1342,7 +1371,7 @@ def _top_section(item: dict, by_id: dict) -> tuple[dict | None, dict | None]:
         seen.add(parent.get("id"))
         chain.append(parent)
         parent = by_id.get(parent.get("parent_id"))
-    sections = [p for p in chain if p.get("notas") == "Seccion"]
+    sections = [p for p in chain if is_section(p)]
     if not sections:
         return None, None
     rubro = sections[-1]

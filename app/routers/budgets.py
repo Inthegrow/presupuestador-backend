@@ -14,6 +14,7 @@ from app.calculations import (
     calc_budget_summary,
     calc_item_from_resources,
     calc_item_totals,
+    is_section,
     pct_or_default,
     price_item,
 )
@@ -543,7 +544,7 @@ def _next_item_code(rubro: dict, items: list[dict]) -> str | None:
 def _rubro_for(items: list[dict], parent_id: str | None, categoria: str) -> dict | None:
     """The rubro chosen in the tree (it must be a section of this budget), else the one named
     like the recipe's categoria (without capitals or accents), else None (to be created)."""
-    secciones = sorted((i for i in items if i.get("notas") == SECCION),
+    secciones = sorted((i for i in items if is_section(i)),
                        key=lambda i: (i.get("sort_order") is None, i.get("sort_order") or 0))
     if parent_id:
         rubro = next((i for i in secciones if str(i["id"]) == parent_id.strip()), None)
@@ -679,7 +680,7 @@ async def get_budget_missing_prices(budget_id: UUID, user: dict = Depends(get_cu
     if not db.table("budgets").select("id").eq("id", bid).eq("org_id", org_id).execute().data:
         raise HTTPException(404, "Presupuesto no encontrado")
 
-    ids = [str(i["id"]) for i in _budget_items(db, bid, org_id) if i.get("notas") != SECCION]
+    ids = [str(i["id"]) for i in _budget_items(db, bid, org_id) if not is_section(i)]
     por_item: dict[str, list[dict]] = {i: [] for i in ids}
     for start in range(0, len(ids), RESOURCES_CHUNK):
         chunk = ids[start:start + RESOURCES_CHUNK]

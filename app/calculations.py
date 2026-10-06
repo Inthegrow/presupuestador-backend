@@ -9,6 +9,8 @@ Cascade model (Excel-based):
 
 from __future__ import annotations
 
+import unicodedata
+
 from app.tree import safe_float
 
 
@@ -80,9 +82,25 @@ CASCADE_FIELDS = (
 PRICE_FIELDS = ("mat_unitario", "mo_unitario", "mat_total", "mo_total", "directo_total", *CASCADE_FIELDS)
 
 
+# Every marker the app writes in budget_items.notas for a rubro / piso / section row,
+# compared without capitals or accents: "Seccion" (editor, create-full, Excel import,
+# Cargar obra rubros and pisos) and "Sección generada por IA" (from-ai).
+SECTION_MARKERS = frozenset({"seccion", "seccion generada por ia"})
+
+
+def _plain(text: object) -> str:
+    decomposed = unicodedata.normalize("NFKD", str(text or ""))
+    return "".join(c for c in decomposed if not unicodedata.combining(c)).strip().lower()
+
+
 def is_section(item: dict) -> bool:
-    """Rubro / section rows ("Seccion") are not works: they have no price of their own."""
-    return item.get("notas") == SECCION
+    """Rubro / piso / section rows are not works: they have no price of their own.
+
+    Decided by the explicit markers, not by structure: an imported Excel can hang a
+    priced work under another priced work (code 1.1 → 1.1.1), so "has children" does
+    not mean "is not a work".
+    """
+    return _plain(item.get("notas")) in SECTION_MARKERS
 
 
 def is_work_item(item: dict) -> bool:

@@ -45,7 +45,7 @@ from app.budget_prices import (
     pick_price,
     today,
 )
-from app.calculations import calc_resource_subtotal, pct_or_default
+from app.calculations import calc_resource_subtotal, is_section, pct_or_default
 from app.catalog_prices import normalize_codigo, parse_fecha
 from app.db import get_data_db
 from app.obra_import import (
@@ -956,7 +956,7 @@ async def diferencias_con_excel(
     )
     by_id = {str(r["id"]): r for r in rows}
     items = sorted(
-        (r for r in rows if r.get("notas") != "Seccion" and r.get("excel_neto") is not None),
+        (r for r in rows if not is_section(r) and r.get("excel_neto") is not None),
         key=lambda r: (r.get("sort_order") is None, r.get("sort_order") or 0),
     )
     if not items:

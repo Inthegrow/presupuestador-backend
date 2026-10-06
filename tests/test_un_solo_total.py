@@ -25,7 +25,7 @@ from fastapi.testclient import TestClient
 
 import app.routers.excel as excel_router
 from app.budget_prices import effective_indirects, general_indirects
-from app.calculations import CASCADE_FIELDS, calc_cascade_indirects
+from app.calculations import CASCADE_FIELDS, calc_budget_summary, calc_cascade_indirects, is_section
 from app.main import create_app
 from tests.test_budget_prices import resource
 from tests.test_recipes_api import MOCK_USER, ORG, FakeDB
@@ -124,7 +124,7 @@ def client():
 @pytest.fixture
 def db(client):
     fake = FakeDB(tables())
-    targets = ("budgets", "analysis", "indirects", "excel", "catalogs", "templates")
+    targets = ("budgets", "analysis", "indirects", "excel", "catalogs", "templates", "ai")
     patches = [patch(f"app.routers.{name}.get_data_db", return_value=fake) for name in targets]
     for p in patches:
         p.start()
@@ -150,7 +150,7 @@ def item(db, iid) -> dict:
 
 
 def works(db, bid=B1) -> list[dict]:
-    return [i for i in db.tables["budget_items"] if i["budget_id"] == bid and i.get("notas") != "Seccion"]
+    return [i for i in db.tables["budget_items"] if i["budget_id"] == bid and not is_section(i)]
 
 
 def config(db, bid=B1) -> dict:
@@ -525,3 +525,71 @@ class TestVersions:
         netos = {v["version"]: v["neto_total"] for v in r.json()}
         assert netos == {1: primero, 2: segundo}
         assert all("data" not in v for v in r.json())
+
+
+# ── Sections of every kind are not works ────────────────────────────────────
+
+
+class TestSections:
+    def test_ai_section_is_not_a_work(self, client, db):
+        r = client.post(url(B1, "items", "from-ai"), json={"items": [{
+            "seccion_nombre": "Pintura", "seccion_codigo": "2", "codigo": "2.1", "descripcion": "Pintura látex",
+            "unidad": "m2", "cantidad": 10,
+            "recursos": {"materiales": [{"codigo": "LAD", "descripcion": "Ladrillo", "cantidad_por_unidad": 2}]},
+        }]})
+        assert r.status_code == 200, r.text
+        seccion = next(i for i in db.tables["budget_items"] if i.get("notas") == "Sección generada por IA")
+        assert seccion["cantidad"] == 1 and is_section(seccion)
+        nuevo = next(i for i in works(db) if i["code"] == "2.1")
+        assert nuevo["directo_total"] == pytest.approx(20 * 61.11)  # priced by the cascade at insertion
+        assert check(client, db)["items_count"] == 4  # the AI section is not counted
+        # Neither the full recalculation nor a change of % prices the AI section
+        assert client.post(url(B1, "cascade-recalculate")).json()["items_skipped"] == 2
+        assert client.patch(url(B1, "indirects"), json={"beneficio_pct": 12}).status_code == 200
+        seccion = next(i for i in db.tables["budget_items"] if i["id"] == seccion["id"])
+        assert not seccion.get("neto_total") and not seccion.get("total_final")
+        check(client, db)
+        rows = excel_router.excel_rows(db.tables["budget_items"], 21)
+        assert next(x for x in rows if x["Codigo"] == "2")["Precio sin IVA"] == ""
+
+    def test_summary_ignores_every_section_marker(self):
+        items = [{"notas": "Seccion", "neto_total": 5}, {"notas": "SECCIÓN GENERADA POR IA", "cantidad": 1},
+                 {"notas": "Sugerido por IA", "neto_total": 10}, {"notas": None, "neto_total": 1}]
+        summary = calc_budget_summary(items)
+        assert summary["items_count"] == 2 and summary["neto_total"] == 11
+
+
+class TestInternalPdfDepth:
+    """Works under a piso (rubro → piso → trabajo) are listed, so the rows add up to the total."""
+
+    def _two_levels(self, db):
+        piso = "00000000-0000-0000-0000-0000000000f1"
+        db.tables["budget_items"].append({
+            "id": piso, "budget_id": B1, "org_id": ORG, "parent_id": SEC, "code": "", "description": "Planta alta",
+            "notas": "Seccion", "sort_order": 20, "cantidad": None})
+        deep = "00000000-0000-0000-0000-0000000000f2"
+        db.tables["budget_items"].append(_work(deep, "1.5", 4, parent=piso, description="Revoque planta alta",
+                                               sort_order=21, mat_unitario=150.15))
+        return deep
+
+    def test_groups_reach_every_work(self, client, db):
+        self._two_levels(db)
+        assert client.post(url(B1, "cascade-recalculate")).status_code == 200
+        items = sorted((i for i in db.tables["budget_items"] if i["budget_id"] == B1),
+                       key=lambda i: i["sort_order"])
+        groups = excel_router.pdf_detail_groups(items)
+        listed = [r for _, rows in groups for r in rows if not is_section(r)]
+        assert sorted(r["id"] for r in listed) == sorted(w["id"] for w in works(db))
+        assert sum(cents(r["neto_total"]) for r in listed) == cents(check(client, db)["neto_total"])
+
+    def test_pdf_lists_the_deep_work_and_its_piso(self, client, db):
+        fitz = pytest.importorskip("fitz")
+        self._two_levels(db)
+        assert client.post(url(B1, "cascade-recalculate")).status_code == 200
+        r = client.get(url(B1, "export", "pdf"))
+        assert r.status_code == 200
+        text = "\n".join(page.get_text() for page in fitz.open(stream=r.content, filetype="pdf"))
+        assert "Planta alta" in text and "Revoque planta alta" in text
+        deep = next(w for w in works(db) if w["code"] == "1.5")
+        ars = "$ " + f"{deep['neto_total']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        assert ars in text
