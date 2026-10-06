@@ -36,13 +36,13 @@ function Peldano({
   detalle?: ReactNode
 }) {
   return (
-    <div className="rounded-xl border border-gray-100 bg-white px-3 py-2.5 min-w-0" data-testid={testId} data-valor={valor}>
-      <div className="flex items-center flex-wrap gap-x-1.5 gap-y-0.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
+    <div className="rounded-xl border border-gray-100 bg-white px-2.5 py-2.5 min-w-0" data-testid={testId} data-valor={valor}>
+      <div className="flex items-center flex-wrap gap-x-1.5 gap-y-0.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wide">
         {signo && <span className="text-gray-300 font-bold" aria-hidden>{signo}</span>}
         <span>{label}</span>
         <Chip pct={pct} testId={pctTestId} />
       </div>
-      <div className="font-bold text-sm @xs:text-[15px] text-gray-900 tabular-nums mt-0.5 [overflow-wrap:anywhere]">{fmtPesos(valor)}</div>
+      <div className="font-bold text-sm @xs:text-[15px] @4xl:text-sm @6xl:text-[15px] text-gray-900 tabular-nums mt-0.5 [overflow-wrap:anywhere]">{fmtPesos(valor)}</div>
       {detalle && <div className="text-[10px] text-gray-400 mt-0.5 leading-snug">{detalle}</div>}
     </div>
   )
@@ -57,7 +57,7 @@ export default function CostSummaryBar({ escalera: e, pcts, titulo }: Props) {
   return (
     <section className="@container" data-testid="escalera" aria-label="Del costo directo al precio">
       {titulo && <div className="text-[11px] text-gray-500 mb-1.5">{titulo}</div>}
-      <div className="grid grid-cols-1 @xs:grid-cols-2 @2xl:grid-cols-3 @4xl:grid-cols-6 gap-2">
+      <div className="grid grid-cols-1 @xs:grid-cols-2 @2xl:grid-cols-3 @4xl:grid-cols-[repeat(4,minmax(0,1fr))_repeat(2,minmax(0,1.15fr))] gap-2">
         <Peldano
           label="Costo directo"
           valor={e.directo}
@@ -84,7 +84,7 @@ export default function CostSummaryBar({ escalera: e, pcts, titulo }: Props) {
           <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-white/80">
             <span aria-hidden>=</span> Precio sin IVA
           </div>
-          <div className="font-extrabold text-sm @3xs:text-base @xs:text-lg tabular-nums mt-0.5 [overflow-wrap:anywhere]">{fmtPesos(e.neto)}</div>
+          <div className="font-extrabold text-sm @3xs:text-base @xs:text-lg @4xl:text-base @6xl:text-lg tabular-nums mt-0.5 [overflow-wrap:anywhere]">{fmtPesos(e.neto)}</div>
         </div>
 
         {/* Precio con IVA */}
@@ -96,7 +96,7 @@ export default function CostSummaryBar({ escalera: e, pcts, titulo }: Props) {
           <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-[#1B5E4B]">
             <span aria-hidden className="text-[#2D8D68]/60">+</span> Precio con IVA
           </div>
-          <div className="font-extrabold text-sm @3xs:text-base @xs:text-lg text-[#143D34] tabular-nums mt-0.5 [overflow-wrap:anywhere]">
+          <div className="font-extrabold text-sm @3xs:text-base @xs:text-lg @4xl:text-base @6xl:text-lg text-[#143D34] tabular-nums mt-0.5 [overflow-wrap:anywhere]">
             {e.total_final === null ? '—' : fmtPesos(e.total_final)}
           </div>
           <div className="text-[10px] text-[#2D8D68] mt-0.5">

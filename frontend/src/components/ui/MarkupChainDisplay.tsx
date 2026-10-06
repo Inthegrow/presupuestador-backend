@@ -82,7 +82,7 @@ export default function MarkupChainDisplay({ config, budgetId, fallo = false }: 
           className="flex items-center gap-1 text-[11px] text-gray-500 hover:text-[#2D8D68] font-medium transition-colors px-2 py-1 rounded-lg hover:bg-[#E8F5EE]/60"
         >
           <Settings2 size={12} />
-          Cambiar porcentajes
+          Editar porcentajes
         </button>
       </div>
 

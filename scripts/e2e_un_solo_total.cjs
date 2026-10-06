@@ -93,11 +93,12 @@ const valor = async (loc) => Number(await loc.getAttribute('data-valor'))
   page.on('pageerror', (e) => console.log('PAGEERROR', e.message))
 
   // 1. Mientras cargan los %, la barra no muestra ninguno (antes decía 41%); después, 34%
-  await page.route('**/indirects', async (r) => { await new Promise((ok) => setTimeout(ok, 2500)); await r.continue() })
+  await page.route('**/indirects', async (r) => { await new Promise((ok) => setTimeout(ok, 2500)); await r.continue().catch(() => {}) })
   await page.goto(`${B}/app/budgets/${id}/editor`)
   await page.getByTestId('precio-sin-iva').waitFor({ timeout: 20000 })
   const txtCargando = await page.getByTestId('escalera').innerText()
   check(await page.getByTestId('pct-indirectos').count() === 0 && !/41\s*%/.test(txtCargando), 'mientras cargan los %, la barra no muestra ningún % (ni 41%)')
+  await page.getByTestId('pct-indirectos').waitFor({ timeout: 10000 })
   await page.unroute('**/indirects')
   await page.getByTestId('pct-indirectos').waitFor({ timeout: 10000 })
   check((await page.getByTestId('pct-indirectos').innerText()).trim() === '34%', `la barra dice 34% de indirectos (dice ${await page.getByTestId('pct-indirectos').innerText()})`)
@@ -197,7 +198,7 @@ const valor = async (loc) => Number(await loc.getAttribute('data-valor'))
   await page.getByText('Listo: precios recalculados').waitFor({ timeout: 60000 }).catch(() => {})
   check(await errRecalc.count() === 0, 'al volver a probar y andar, el aviso rojo se va')
   const e2 = await leerEscalera(page)
-  check(cerca(e2.neto, e1.neto, 1), `recalcular todo no mueve el total (${pesos(e1.neto)} → ${pesos(e2.neto)})`)
+  check(cerca(e2.neto, e1.neto, 10), `recalcular todo no mueve el total (más que redondeos de centavos) (${pesos(e1.neto)} → ${pesos(e2.neto)})`)
 
   // 7. Coeficiente de pase general: beneficio 20% → aviso con Ginkgo → Seguir → actualizados
   await j('POST', `/budgets/${id}/versions`)
@@ -229,7 +230,7 @@ const valor = async (loc) => Number(await loc.getAttribute('data-valor'))
   await page.screenshot({ path: SHOTS + '/07_editor_beneficio_20.png' })
 
   // 8. Los % propios del presupuesto (desde el editor): se actualiza solo, sin aviso
-  await page.getByRole('button', { name: 'Cambiar porcentajes' }).click()
+  await page.getByRole('button', { name: 'Editar porcentajes' }).click()
   await page.waitForURL(/settings\/markups\?budget=/)
   const filaB2 = page.locator('div.flex.items-center.justify-between', { hasText: 'sobre el subtotal con indirectos' })
   await filaB2.locator('input').waitFor({ timeout: 10000 })

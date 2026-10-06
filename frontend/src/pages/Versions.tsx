@@ -7,7 +7,7 @@ import { fmtDate, fmtPesos } from '../lib/format'
 import type { Budget, BudgetVersion, PriceUpdateResult } from '../types'
 
 // neto: precio sin IVA de la versión (null = el servidor no lo mandó: no se inventa un $0)
-type VersionRow = BudgetVersion & { neto: number | null; label: string; author: string; date: string }
+type VersionRow = BudgetVersion & { neto: number | null; label: string; date: string }
 
 function netoDe(v: BudgetVersion): number | null {
   if (typeof v.neto_total === 'number' && Number.isFinite(v.neto_total)) return v.neto_total
@@ -35,12 +35,12 @@ export default function Versions() {
   const [priceError, setPriceError] = useState<string | null>(null)
 
   function mapVersions(data: BudgetVersion[]): VersionRow[] {
-    return data.map((v) => ({
+    // La más nueva primero (la "Actual"), aunque el servidor las mande en otro orden
+    return [...data].sort((a, b) => (b.version ?? 0) - (a.version ?? 0)).map((v) => ({
       ...v,
       neto: netoDe(v),
-      label: v.notas || `v${v.version}`,
-      author: 'Carlos',
-      date: new Date(v.created_at).toLocaleDateString('es-AR'),
+      label: v.notas || '',
+      date: v.created_at ? new Date(v.created_at).toLocaleDateString('es-AR') : '',
     }))
   }
 
@@ -193,10 +193,10 @@ export default function Versions() {
                 <div className="p-4 flex justify-between items-center">
                   <div>
                     <div className="font-semibold text-sm text-gray-900">
-                      v{v.version} — {v.label}
+                      v{v.version}{v.label ? ` — ${v.label}` : ''}
                     </div>
                     <div className="text-[10px] text-gray-400 mt-0.5">
-                      {v.author} · {v.date}{v.precios_al ? ` · Precios al ${fmtDate(v.precios_al)}` : ''}
+                      {[v.date && `Guardada el ${v.date}`, v.precios_al && `Precios al ${fmtDate(v.precios_al)}`].filter(Boolean).join(' · ')}
                     </div>
                     <div className="text-xs text-gray-700 mt-1" data-testid="version-precio" data-valor={v.neto ?? ''}>
                       Precio sin IVA: <span className="font-semibold tabular-nums">{v.neto === null ? '—' : fmtPesos(v.neto)}</span>
