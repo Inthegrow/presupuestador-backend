@@ -11,6 +11,9 @@ import CostSummaryBar from '../components/ui/CostSummaryBar'
 import MarkupChainDisplay from '../components/ui/MarkupChainDisplay'
 import ViewModeSelector from '../components/ui/ViewModeSelector'
 import AddItemForm from '../components/ui/AddItemForm'
+import AgregarTrabajo from '../components/ui/AgregarTrabajo'
+import type { AgregarTrabajoResult } from '../lib/api'
+import { estadoEnTabla } from '../lib/semaforo'
 import { regroupItems } from '../lib/viewModes'
 import type { ViewMode } from '../lib/viewModes'
 
@@ -51,6 +54,11 @@ export default function Editor() {
   const [viewMode, setViewMode] = useState<ViewMode>('rubro')
   const [originalTree, setOriginalTree] = useState<TreeNode[]>([])
   const [showAddForm, setShowAddForm] = useState(false)
+  // Rubro que Sol eligió a mano en el árbol: los trabajos nuevos van ahí (la selección automática no cuenta)
+  const [rubroElegido, setRubroElegido] = useState<TreeNode | null>(null)
+  // Precios que faltan en cada trabajo, y de qué trabajos se preguntó (null: la consulta falló o no volvió)
+  const [faltantes, setFaltantes] = useState<{ porItem: Record<string, number>; recursosPorItem: Record<string, number>; ids: Set<string> } | null>(null)
+  const faltantesReq = useRef(0)
   const [indirectConfig, setIndirectConfig] = useState<{estructura_pct: number, jefatura_pct: number, logistica_pct: number, herramientas_pct: number} | null>(null)
 
   const [recalculating, setRecalculating] = useState(false)
@@ -160,11 +168,39 @@ export default function Editor() {
     return { tree: t, items: fetchedItems }
   }, [id])
 
+  /** Pide los faltantes de todo el presupuesto (para el punto de color). Respuestas viejas se ignoran;
+   *  si falla, la tabla queda sin puntos: nunca verde sin saber. */
+  const cargarFaltantes = useCallback(async (conItems: BudgetItem[]) => {
+    if (!id) return
+    const req = ++faltantesReq.current
+    const ids = new Set(conItems.map((i) => i.id))
+    try {
+      const r = await budgetApi.preciosFaltantesPorItem(id)
+      const porItem = r && typeof r.por_item === 'object' && r.por_item !== null ? r.por_item : null
+      const recursosPorItem = r && typeof r.recursos_por_item === 'object' && r.recursos_por_item !== null
+        ? r.recursos_por_item : null
+      if (req === faltantesReq.current) {
+        setFaltantes(porItem && recursosPorItem ? { porItem, recursosPorItem, ids } : null)
+      }
+    } catch {
+      if (req === faltantesReq.current) setFaltantes(null)
+    }
+  }, [id])
+
+  /** La sección (rubro) de un nodo del árbol, o null si no está en un rubro de verdad */
+  const rubroDe = useCallback((node: TreeNode): TreeNode | null => {
+    if (node.id.startsWith('__virtual_')) return null
+    if (node.notas === 'Seccion') return node
+    if (node.parent_id) return originalTree.find((n) => n.id === node.parent_id && n.notas === 'Seccion') ?? null
+    return null
+  }, [originalTree])
+
   useEffect(() => {
     if (!id) return
     refreshData()
       .then((data) => {
         if (!data) return
+        cargarFaltantes(data.items)
         const firstNode = data.tree[0] ?? null
         if (firstNode) {
           setSelectedNode(firstNode)
@@ -176,7 +212,7 @@ export default function Editor() {
     budgetApi.getIndirects(id).then(config => {
       if (config) setIndirectConfig(config)
     }).catch(() => {})
-  }, [id, refreshData, getItemsForNode])
+  }, [id, refreshData, getItemsForNode, cargarFaltantes])
 
   async function handleRecalculate() {
     if (!id || recalculating) return
@@ -187,6 +223,7 @@ export default function Editor() {
       const data = await refreshData()
       // Refresca también la lista visible del rubro elegido (si no, la tabla queda con los números viejos)
       if (data && selectedNode) setItems(getItemsForNode(selectedNode, data.items))
+      if (data) cargarFaltantes(data.items)
     } catch (err) {
       console.error('Error recalculating:', err)
     } finally {
@@ -304,6 +341,7 @@ export default function Editor() {
       const data = await refreshData()
       if (data) {
         // If deleted node was selected, select first available
+        if (rubroElegido?.id === node.id) setRubroElegido(null)
         if (selectedNode?.id === node.id) {
           const firstNode = data.tree[0] ?? null
           setSelectedNode(firstNode)
@@ -314,7 +352,7 @@ export default function Editor() {
     } catch (err) {
       addToast(`Error al eliminar seccion: ${err instanceof Error ? err.message : 'desconocido'}`, 'error')
     }
-  }, [id, selectedNode, refreshData, getItemsForNode, addToast])
+  }, [id, selectedNode, rubroElegido, refreshData, getItemsForNode, addToast])
 
   /** Suggest next item code based on existing items in section */
   const suggestNextCode = useCallback((): string => {
@@ -356,10 +394,11 @@ export default function Editor() {
     mat_unitario: number
     mo_unitario: number
   }) => {
-    if (!id || !selectedNode) throw new Error('No budget/section selected')
+    if (!id) throw new Error('Falta el presupuesto')
 
-    // Always use the section as parent, not the leaf item
-    const sectionNode = findSectionParent()
+    // Siempre dentro de la sección (rubro), no del trabajo elegido; sin nada elegido, queda suelto
+    const sectionNode = selectedNode ? findSectionParent() : null
+    const parentId = sectionNode?.id ?? selectedNode?.id
 
     const newItem = await budgetApi.createItem(id, {
       code: data.code,
@@ -368,15 +407,51 @@ export default function Editor() {
       cantidad: data.cantidad,
       mat_unitario: data.mat_unitario,
       mo_unitario: data.mo_unitario,
-      parent_id: sectionNode?.id ?? selectedNode.id,
+      ...(parentId ? { parent_id: parentId } : {}),
     })
 
-    const refreshedItems = await budgetApi.getItems(id)
-    setAllItems(refreshedItems)
-    setItems(getItemsForNode(selectedNode, refreshedItems))
+    const fresh = await refreshData()
+    if (fresh) {
+      if (selectedNode) {
+        setItems(getItemsForNode(selectedNode, fresh.items))
+      } else {
+        // Sin nada elegido: mostrar el trabajo recién creado
+        const creado = fresh.items.find((i) => i.code === data.code && i.description === data.description)
+        if (creado) setItems([creado])
+      }
+      cargarFaltantes(fresh.items)
+    }
     setShowAddForm(false)
-    addToast(`Item agregado: ${newItem.code ?? data.code} ${data.description}`)
-  }, [id, selectedNode, addToast, getItemsForNode, findSectionParent])
+    addToast(`Trabajo agregado: ${(Array.isArray(newItem) ? newItem[0]?.code : newItem?.code) ?? data.code} ${data.description}`)
+  }, [id, selectedNode, addToast, getItemsForNode, findSectionParent, refreshData, cargarFaltantes])
+
+  /** Después de agregar un trabajo con fórmula: refresca árbol, tabla y puntos, y muestra el rubro donde quedó */
+  const handleTrabajoAgregado = useCallback(async (res: AgregarTrabajoResult) => {
+    const data = await refreshData()
+    if (!data) return
+    cargarFaltantes(data.items)
+    const arbol = regroupItems(viewMode, data.tree, data.items)
+    const buscar = (nodos: TreeNode[], nid?: string): TreeNode | null => {
+      if (!nid) return null
+      for (const n of nodos) {
+        if (n.id === nid) return n
+        const h = buscar((n.children ?? []) as TreeNode[], nid)
+        if (h) return h
+      }
+      return null
+    }
+    // Con un rubro elegido, se queda en ese; si no, se muestra el rubro de la fórmula
+    const destinoId = rubroElegido?.id ?? (viewMode === 'rubro' ? res?.rubro?.id : selectedNode?.id)
+    const nodo = buscar(arbol, destinoId) ?? (selectedNode ? buscar(arbol, selectedNode.id) : null)
+    if (nodo) {
+      setSelectedNode(nodo)
+      setItems(getItemsForNode(nodo, data.items))
+      if (rubroElegido) setRubroElegido(nodo)
+    } else {
+      const nuevo = data.items.find((i) => i.id === res?.item?.id)
+      if (nuevo) setItems([nuevo])
+    }
+  }, [refreshData, cargarFaltantes, viewMode, rubroElegido, selectedNode, getItemsForNode])
 
   // Open section form with suggested code
   const openSectionForm = useCallback(() => {
@@ -574,6 +649,7 @@ export default function Editor() {
           mode={viewMode}
           onChange={(m) => {
             setSelectedNode(null)
+            setRubroElegido(null)
             setItems([])
             setViewMode(m)
           }}
@@ -650,6 +726,7 @@ export default function Editor() {
               onSelect={(node) => {
                 setSelectedNode(node)
                 setItems(getItemsForNode(node, allItems))
+                setRubroElegido(rubroDe(node))
               }}
               onEditSection={puedeEditar ? handleEditSection : undefined}
               onDeleteSection={puedeEditar ? handleDeleteSection : undefined}
@@ -672,31 +749,59 @@ export default function Editor() {
                 <span>{fmtCurrency(directo)} costo directo</span>
               </p>
             </div>
-            <div className="flex items-center gap-2">
-              {selectedNode && puedeEditar && (
-                <button
-                  onClick={() => setShowAddForm((v) => !v)}
-                  className="text-xs border border-[#2D8D68]/30 text-[#2D8D68] hover:bg-[#E8F5EE] px-3 py-1.5 rounded-xl font-medium transition-all duration-200 flex items-center gap-1 hover:shadow-sm"
-                >
-                  <Plus size={12} /> Item
-                </button>
-              )}
-            </div>
           </div>
 
           <CostSummaryBar mat={mat} mo={mo} directo={directo} indirecto={indirecto} neto={neto} indirectoPct={indirectoPct ?? undefined} />
           <MarkupChainDisplay directo={directo} neto={neto} links={markupLinks} budgetId={id} />
 
-          {showAddForm && selectedNode && puedeEditar && (
-            <AddItemForm
-              suggestedCode={suggestNextCode()}
-              onSubmit={handleAddItem}
-              onCancel={() => setShowAddForm(false)}
+          {puedeEditar && id && (
+            <AgregarTrabajo
+              budgetId={id}
+              rubroElegido={rubroElegido ? {
+                id: rubroElegido.id,
+                nombre: `${rubroElegido.code ? rubroElegido.code + ' ' : ''}${rubroElegido.description ?? ''}`.trim(),
+              } : null}
+              onSoltarRubro={() => setRubroElegido(null)}
+              onAgregado={handleTrabajoAgregado}
+              onVerTrabajo={(itemId) => navigate(`/app/budgets/${id}/item/${itemId}`)}
+              pie={
+                <div className="mt-2">
+                  <button
+                    onClick={() => setShowAddForm((v) => !v)}
+                    aria-expanded={showAddForm}
+                    className="text-[11px] text-[#2D8D68] font-medium hover:underline flex items-center gap-1"
+                  >
+                    <ChevronRight size={12} className={`transition-transform ${showAddForm ? 'rotate-90' : ''}`} />
+                    Agregar un trabajo sin fórmula (precio a mano)
+                  </button>
+                  {showAddForm && (
+                    <div className="-mx-4">
+                      <AddItemForm
+                        suggestedCode={suggestNextCode()}
+                        onSubmit={handleAddItem}
+                        onCancel={() => setShowAddForm(false)}
+                      />
+                    </div>
+                  )}
+                </div>
+              }
             />
           )}
 
           <div className="flex-1 overflow-y-auto">
-          {items.length === 0 ? (
+          {items.length === 0 && !loading && puedeEditar && !allItems.some((i) => i.notas !== 'Seccion') ? (
+            <div className="py-12 px-8 text-center">
+              <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gray-100 mb-4">
+                <LayoutGrid size={28} className="text-gray-300" />
+              </div>
+              <h3 className="text-sm font-semibold text-gray-500 mb-1">
+                Este presupuesto todavía no tiene trabajos
+              </h3>
+              <p className="text-xs text-gray-400 max-w-xs mx-auto">
+                Escribí el primero arriba, en «Agregá un trabajo»: por ejemplo «hueco 18» y la cantidad.
+              </p>
+            </div>
+          ) : items.length === 0 ? (
             <div className="py-16 px-8 text-center">
               <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gray-100 mb-4">
                 <LayoutGrid size={28} className="text-gray-300" />
@@ -721,6 +826,7 @@ export default function Editor() {
           ) : (
             <DataTable
               items={items}
+              semaforo={(item) => (item.notas === 'Seccion' ? null : estadoEnTabla(item, faltantes))}
               onEditItem={puedeEditar ? handleEditItem : undefined}
               onViewDetail={(itemId) => navigate(`/app/budgets/${id}/item/${itemId}`)}
               onDeleteItem={!puedeEditar ? undefined : async (itemId, desc) => {
@@ -730,6 +836,7 @@ export default function Editor() {
                   const refreshedItems = await budgetApi.getItems(id)
                   setAllItems(refreshedItems)
                   if (selectedNode) setItems(getItemsForNode(selectedNode, refreshedItems))
+                  cargarFaltantes(refreshedItems)
                   addToast(`Item eliminado: ${desc}`)
                 } catch (err) {
                   addToast(`Error al eliminar: ${err instanceof Error ? err.message : 'desconocido'}`, 'error')

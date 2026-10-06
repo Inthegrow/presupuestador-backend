@@ -28,7 +28,7 @@ export default function AddItemForm({ suggestedCode, onSubmit, onCancel }: AddIt
 
   const handleSubmit = async () => {
     if (!description.trim()) {
-      setError('La descripcion es obligatoria')
+      setError('La descripción es obligatoria')
       return
     }
     setError('')
@@ -43,7 +43,7 @@ export default function AddItemForm({ suggestedCode, onSubmit, onCancel }: AddIt
         mo_unitario: parseFloat(moUnitario) || 0,
       })
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error al agregar item')
+      setError(err instanceof Error ? err.message : 'No se pudo agregar el trabajo')
     } finally {
       setSubmitting(false)
     }
@@ -55,19 +55,21 @@ export default function AddItemForm({ suggestedCode, onSubmit, onCancel }: AddIt
   return (
     <div className="border border-[#2D8D68]/30 bg-[#F8FDFB] rounded-lg mx-4 my-3 p-3">
       <div className="flex items-center justify-between mb-2.5">
-        <span className="text-xs font-bold text-[#1B5E4B]">Nuevo Item</span>
+        <span className="text-xs font-bold text-[#1B5E4B]">Trabajo sin fórmula (precio a mano)</span>
         <button
           onClick={onCancel}
+          title="Cerrar"
+          aria-label="Cerrar"
           className="text-gray-400 hover:text-gray-600 transition-colors"
         >
           <X size={14} />
         </button>
       </div>
 
-      <div className="grid grid-cols-12 gap-2">
-        {/* Codigo */}
-        <div className="col-span-2">
-          <label className="block text-[10px] text-gray-500 mb-0.5 font-medium">Codigo</label>
+      <div className="grid grid-cols-2 sm:grid-cols-12 gap-2">
+        {/* Código */}
+        <label className="col-span-1 sm:col-span-2">
+          <span className="block text-[10px] text-gray-500 mb-0.5 font-medium">Código</span>
           <input
             type="text"
             value={code}
@@ -75,24 +77,24 @@ export default function AddItemForm({ suggestedCode, onSubmit, onCancel }: AddIt
             className={inputClass}
             placeholder="1.8"
           />
-        </div>
+        </label>
 
-        {/* Descripcion */}
-        <div className="col-span-4">
-          <label className="block text-[10px] text-gray-500 mb-0.5 font-medium">Descripcion</label>
+        {/* Descripción */}
+        <label className="col-span-2 sm:col-span-4 order-first sm:order-none">
+          <span className="block text-[10px] text-gray-500 mb-0.5 font-medium">Descripción</span>
           <input
             type="text"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             className={inputClass}
-            placeholder="Ej: Hormigon armado H21"
+            placeholder="Ej.: Hormigón armado H21"
             autoFocus
           />
-        </div>
+        </label>
 
         {/* Unidad */}
-        <div className="col-span-1">
-          <label className="block text-[10px] text-gray-500 mb-0.5 font-medium">Unidad</label>
+        <label className="col-span-1 sm:col-span-1">
+          <span className="block text-[10px] text-gray-500 mb-0.5 font-medium">Unidad</span>
           <select
             value={unidad}
             onChange={(e) => setUnidad(e.target.value)}
@@ -104,11 +106,11 @@ export default function AddItemForm({ suggestedCode, onSubmit, onCancel }: AddIt
               </option>
             ))}
           </select>
-        </div>
+        </label>
 
         {/* Cantidad */}
-        <div className="col-span-1">
-          <label className="block text-[10px] text-gray-500 mb-0.5 font-medium">Cantidad</label>
+        <label className="col-span-1 sm:col-span-1">
+          <span className="block text-[10px] text-gray-500 mb-0.5 font-medium">Cantidad</span>
           <input
             type="number"
             value={cantidad}
@@ -117,11 +119,11 @@ export default function AddItemForm({ suggestedCode, onSubmit, onCancel }: AddIt
             placeholder="0"
             step="any"
           />
-        </div>
+        </label>
 
-        {/* MAT Unitario */}
-        <div className="col-span-2">
-          <label className="block text-[10px] text-gray-500 mb-0.5 font-medium">MAT Unit.</label>
+        {/* Materiales por unidad */}
+        <label className="col-span-1 sm:col-span-2">
+          <span className="block text-[10px] text-gray-500 mb-0.5 font-medium">Materiales por unidad</span>
           <input
             type="number"
             value={matUnitario}
@@ -130,11 +132,11 @@ export default function AddItemForm({ suggestedCode, onSubmit, onCancel }: AddIt
             placeholder="0"
             step="any"
           />
-        </div>
+        </label>
 
-        {/* MO Unitario */}
-        <div className="col-span-2">
-          <label className="block text-[10px] text-gray-500 mb-0.5 font-medium">MO Unit.</label>
+        {/* Mano de obra por unidad */}
+        <label className="col-span-1 sm:col-span-2">
+          <span className="block text-[10px] text-gray-500 mb-0.5 font-medium">Mano de obra por unidad</span>
           <input
             type="number"
             value={moUnitario}
@@ -143,7 +145,7 @@ export default function AddItemForm({ suggestedCode, onSubmit, onCancel }: AddIt
             placeholder="0"
             step="any"
           />
-        </div>
+        </label>
       </div>
 
       {error && (
@@ -162,7 +164,7 @@ export default function AddItemForm({ suggestedCode, onSubmit, onCancel }: AddIt
           disabled={submitting}
           className="px-3 py-1.5 text-xs bg-[#2D8D68] hover:bg-[#1B5E4B] disabled:opacity-50 text-white font-semibold rounded-md transition-colors"
         >
-          {submitting ? 'Agregando...' : 'Agregar'}
+          {submitting ? 'Agregando…' : 'Agregar'}
         </button>
       </div>
     </div>

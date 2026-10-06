@@ -1,6 +1,10 @@
 import { useState } from 'react'
-import type { ReactNode } from 'react'
+import type { ReactNode, Ref } from 'react'
 import { Search } from 'lucide-react'
+
+function sinTildes(t: string): string {
+  return t.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+}
 
 // Una fórmula de la lista (en Cargar obra viene del catálogo del Maestro, en el detalle de las fórmulas de la empresa)
 export interface FormulaBuscable {
@@ -39,23 +43,45 @@ interface Props<R extends FormulaBuscable, Q extends FormulaQuizas> {
   // Clases del recuadro y de la lista (por defecto, el recuadro chico de Cargar obra)
   className?: string
   listaClassName?: string
+  // Texto del buscador manejado desde afuera (si no viene, lo maneja el buscador)
+  texto?: string
+  onTexto?: (t: string) => void
+  placeholder?: string
+  autoFocus?: boolean
+  inputRef?: Ref<HTMLInputElement>
+  // true: "Quizás sea" y la lista aparecen recién cuando hay algo escrito (el renglón del editor)
+  soloConTexto?: boolean
+  // Enter en el buscador, con la primera fórmula de la lista filtrada (o null si no hay ninguna)
+  onEnter?: (primera: R | null) => void
 }
 
 export default function BuscadorFormulas<R extends FormulaBuscable, Q extends FormulaQuizas = FormulaQuizas>({
   recetas, onElegir, onCerrar, ayuda, extra, quizas, deshabilitado = false,
   className = 'mt-3 border rounded-xl bg-white shadow-sm',
   listaClassName = 'max-h-64 overflow-y-auto',
+  texto: textoDeAfuera, onTexto, placeholder = 'Buscá como hablás: revoque, pintura, contrapiso…',
+  autoFocus = true, inputRef, soloConTexto = false, onEnter,
 }: Props<R, Q>) {
-  const [q, setQ] = useState('')
-  const texto = q.trim().toLowerCase()
-  const filtradas = recetas.filter((r) =>
-    !texto || `${r.nombre} ${r.categoria || ''}`.toLowerCase().includes(texto))
+  const [qPropio, setQPropio] = useState('')
+  const q = textoDeAfuera ?? qPropio
+  const setQ = (t: string) => {
+    if (textoDeAfuera === undefined) setQPropio(t)
+    onTexto?.(t)
+  }
+  const texto = sinTildes(q.trim().toLowerCase())
+  // Cada palabra escrita tiene que estar (en cualquier orden): "hueco 18" encuentra "Hueco del 18"
+  const palabras = texto.split(/\s+/).filter(Boolean)
+  const filtradas = recetas.filter((r) => {
+    const donde = sinTildes(`${r.nombre} ${r.categoria || ''}`.toLowerCase())
+    return palabras.every((p) => donde.includes(p))
+  })
   const grupos: Record<string, R[]> = {}
   for (const r of filtradas) (grupos[r.categoria || 'Otras'] ||= []).push(r)
 
   const propuesta = quizas?.propuesta ?? null
   const parecidas = (quizas?.parecidas ?? []).filter((p) => !propuesta || (p.id ?? p.codigo) !== (propuesta.id ?? propuesta.codigo))
   const hayQuizas = !!quizas && (propuesta !== null || parecidas.length > 0)
+  const mostrarAbajo = !soloConTexto || texto !== ''
 
   function filaQuizas(s: Q, esPropuesta: boolean) {
     return (
@@ -79,26 +105,33 @@ export default function BuscadorFormulas<R extends FormulaBuscable, Q extends Fo
 
   return (
     <div className={className}>
-      <div className="flex items-center gap-2 px-3 py-2 border-b">
+      <div className={`flex items-center gap-2 px-3 py-2 ${mostrarAbajo || ayuda ? 'border-b' : ''}`}>
         <Search size={14} className="text-gray-400" />
         <input
-          autoFocus
+          ref={inputRef}
+          autoFocus={autoFocus}
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          placeholder="Buscá como hablás: revoque, pintura, contrapiso…"
-          className="flex-1 min-w-0 text-sm outline-none"
+          onKeyDown={onEnter ? (e) => {
+            if (e.key === 'Enter' && texto !== '') {
+              e.preventDefault()
+              onEnter(filtradas[0] ?? null)
+            }
+          } : undefined}
+          placeholder={placeholder}
+          className="flex-1 min-w-0 text-sm outline-none bg-transparent"
         />
         {onCerrar && <button onClick={onCerrar} className="text-xs text-gray-500 hover:text-gray-800">Cerrar</button>}
       </div>
       {ayuda && <p className="px-3 py-1.5 text-[11px] text-gray-500 border-b">{ayuda}</p>}
-      {hayQuizas && (
+      {mostrarAbajo && hayQuizas && (
         <div className="border-b bg-[#E8F5EE]/50 py-1.5">
           <div className="px-3 pb-0.5 text-[11px] font-bold text-gray-500 uppercase tracking-wide">Quizás sea:</div>
           {propuesta && filaQuizas(propuesta, true)}
           {parecidas.map((p) => filaQuizas(p, false))}
         </div>
       )}
-      <div className={listaClassName}>
+      {mostrarAbajo && <div className={listaClassName}>
         {extra}
         {Object.entries(grupos).map(([cat, items]) => (
           <div key={cat}>
@@ -117,8 +150,8 @@ export default function BuscadorFormulas<R extends FormulaBuscable, Q extends Fo
             ))}
           </div>
         ))}
-        {filtradas.length === 0 && <div className="px-3 py-3 text-xs text-gray-500">No encontré nada con esa palabra.</div>}
-      </div>
+        {filtradas.length === 0 && !(soloConTexto && hayQuizas) && <div className="px-3 py-3 text-xs text-gray-500">No encontré nada con esa palabra.</div>}
+      </div>}
     </div>
   )
 }

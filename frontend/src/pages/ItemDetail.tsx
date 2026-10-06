@@ -23,8 +23,9 @@ import { budgetApi, templateApi, esFaltaConversion, esConfirmarReemplazo, esFall
 import type { FaltaConversion, PrecioFaltante, TemplateSugerencias } from '../lib/api'
 import { useAuth } from '../contexts/AuthContext'
 import { fmtCurrency, fmtNumber, fmtPercent, unidadEnPalabras } from '../lib/format'
-import { ESTILO, estadoDeTrabajo } from '../lib/semaforo'
+import { ESTILO, estadoDeTrabajo, precioPorUnidad } from '../lib/semaforo'
 import BuscadorFormulas from '../components/ui/BuscadorFormulas'
+import PreguntaConversion, { factorComoTexto, leerFactor } from '../components/ui/PreguntaConversion'
 import type { ItemResource, BudgetItem, Budget, ItemAudit, IndirectConfig } from '../types'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -835,7 +836,7 @@ function TemplateModal({ budgetId, itemId, reemplaza, recursosCargados, descripc
           tipo: 'conversion',
           tmpl,
           det: err.detail,
-          valor: prop != null ? String(prop).replace('.', ',') : '',
+          valor: factorComoTexto(prop),
           reemplazar: !!opts.reemplazar,
         })
       } else if (esFalloAplicar(err)) {
@@ -868,8 +869,8 @@ function TemplateModal({ budgetId, itemId, reemplaza, recursosCargados, descripc
 
   const enviarConversion = () => {
     if (!paso || paso.tipo !== 'conversion') return
-    const n = Number(paso.valor.trim().replace(',', '.'))
-    if (!Number.isFinite(n) || n <= 0) {
+    const n = leerFactor(paso.valor)
+    if (n === null) {
       setError('Escribí un número mayor que cero.')
       return
     }
@@ -929,51 +930,15 @@ function TemplateModal({ budgetId, itemId, reemplaza, recursosCargados, descripc
         {/* La unidad de la fórmula no es la del trabajo: preguntar cuánto es */}
         {paso?.tipo === 'conversion' && (
           <div className="px-4 py-4 flex-shrink-0">
-            <div className="bg-gray-50 rounded-xl px-4 py-3 text-xs text-gray-700">
-              <div className="font-semibold text-[#143D34] text-sm mb-1">{paso.tmpl.nombre}</div>
-              <div className="flex flex-wrap items-center gap-2">
-                <span>{paso.det.mensaje}</span>
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  autoFocus
-                  value={paso.valor}
-                  onChange={(e) => setPaso({ ...paso, valor: e.target.value })}
-                  onKeyDown={(e) => { if (e.key === 'Enter') enviarConversion() }}
-                  className="border rounded-lg px-2 py-1 w-24 bg-white"
-                />
-                <span className="text-gray-500">{paso.det.unidad_formula}</span>
-              </div>
-              <p className="text-[11px] text-gray-500 mt-1.5">
-                Para contrapisos y carpetas es el espesor en metros: 10 cm = 0,10
-              </p>
-              <div className="flex items-center gap-2 mt-3">
-                <button
-                  onClick={enviarConversion}
-                  disabled={applying !== null}
-                  className="flex items-center gap-1.5 text-xs bg-[#2D8D68] hover:bg-[#1E6B4E] text-white px-3 py-1.5 rounded-lg font-medium transition-colors disabled:opacity-50"
-                >
-                  {applying !== null ? (
-                    <>
-                      <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                      Aplicando...
-                    </>
-                  ) : (
-                    <>
-                      <Check size={12} />
-                      Aplicar
-                    </>
-                  )}
-                </button>
-                <button
-                  onClick={() => { setPaso(null); setError(null) }}
-                  disabled={applying !== null}
-                  className="text-xs bg-white border text-gray-700 px-3 py-1.5 rounded-lg font-semibold hover:bg-gray-100 disabled:opacity-50"
-                >
-                  Cancelar
-                </button>
-              </div>
-            </div>
+            <PreguntaConversion
+              titulo={paso.tmpl.nombre}
+              det={paso.det}
+              valor={paso.valor}
+              onValor={(v) => setPaso({ ...paso, valor: v })}
+              onEnviar={enviarConversion}
+              onCancelar={() => { setPaso(null); setError(null) }}
+              ocupado={applying !== null}
+            />
           </div>
         )}
 
@@ -1150,6 +1115,7 @@ export default function ItemDetail() {
     recursos: recursos.length,
     preciosFaltantes: faltantes.length,
     preciosVerificados: faltantesEstado === 'ok',
+    precioAMano: item ? precioPorUnidad(item) : 0,
   })
 
   if (loading) {

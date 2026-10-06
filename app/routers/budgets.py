@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException
 
 from app.auth import get_current_user, require_admin, require_editor
-from app.budget_prices import initial_indirects, precios_faltantes, today
+from app.budget_prices import fetch_all, initial_indirects, precios_faltantes, today
 from app.calculations import (
     calc_budget_summary,
     calc_item_totals,
@@ -16,7 +17,18 @@ from app.calculations import (
 )
 from app.db import get_data_db
 from app.formulas import FormulaError
-from app.recipes import ORIGEN_RECURSO, has_formula, requantify_row
+from app.obra_import import plain
+from app.recipes import ORIGEN_RECURSO, has_formula, merge_params, param_defaults, requantify_row
+from app.routers.obras import _human
+from app.routers.templates import (
+    A_MEDIAS,
+    _budget_items,
+    _json_list,
+    build_rows,
+    check_factor,
+    conversion_factor,
+    save_applied,
+)
 from app.schemas import (
     BudgetCopyRequest,
     BudgetCreate,
@@ -29,6 +41,7 @@ from app.schemas import (
     ResourceCreate,
     ResourceUpdate,
     SectionCreate,
+    TrabajoCreate,
 )
 from app.tree import build_tree
 
@@ -479,6 +492,195 @@ async def get_item_missing_prices(
         .execute()
     )
     return {"precios_faltantes": precios_faltantes(resources.data or [])}
+
+
+# ── Agregar un trabajo con su fórmula (PLAN_AGREGAR_TRABAJO 2) ─────────────
+
+SECCION = "Seccion"
+RUBRO_AJENO = "Ese rubro no es de este presupuesto"
+RUBRO_SIN_CATEGORIA = "Varios"
+NO_SE_AGREGO = "No se pudo agregar el trabajo. No quedó nada cargado; probá de nuevo."
+
+
+def _oracion(text: object) -> str:
+    """'CONTRAPISO DE CASCOTE' → 'Contrapiso de cascote'; 'platea' → 'Platea'."""
+    t = _human(text).strip()
+    return t[:1].upper() + t[1:]
+
+
+def _leading_number(code: object) -> str:
+    m = re.match(r"\s*(\d+)", str(code or ""))
+    return m.group(1) if m else ""
+
+
+def _next_rubro_code(items: list[dict]) -> str:
+    """One more than the highest number of the top level (like the editor's new section)."""
+    numbers = [_leading_number(i.get("code")) for i in items if not i.get("parent_id")]
+    return str(max((int(n) for n in numbers if n), default=0) + 1)
+
+
+def _next_item_code(rubro: dict, items: list[dict]) -> str | None:
+    """'{rubro}.{n}': one more than the highest n already used (like the editor's "+ Item")."""
+    base = _leading_number(rubro.get("code"))
+    if not base:
+        return None
+    pattern = re.compile(rf"^{base}\.(\d+)")
+    used = [m.group(1) for i in items if (m := pattern.match(str(i.get("code") or "").strip()))]
+    return f"{base}.{max((int(n) for n in used), default=0) + 1}"
+
+
+def _rubro_for(items: list[dict], parent_id: str | None, categoria: str) -> dict | None:
+    """The rubro chosen in the tree (it must be a section of this budget), else the one named
+    like the recipe's categoria (without capitals or accents), else None (to be created)."""
+    secciones = sorted((i for i in items if i.get("notas") == SECCION),
+                       key=lambda i: (i.get("sort_order") is None, i.get("sort_order") or 0))
+    if parent_id:
+        rubro = next((i for i in secciones if str(i["id"]) == parent_id.strip()), None)
+        if rubro is None:
+            raise HTTPException(422, RUBRO_AJENO)
+        return rubro
+    nombre = plain(categoria)
+    return next((i for i in secciones if plain(i.get("description")) == nombre), None)
+
+
+def _remove_new(db, org_id: str, budget_id: str, item_id: str | None, rubro_id: str | None) -> bool:
+    """Delete the item (and the rubro) created by a failed request. False when it could not."""
+    try:
+        if item_id:
+            db.table("item_resources").delete().eq("item_id", item_id).eq("org_id", org_id).execute()
+            db.table("budget_items").delete().eq("id", item_id).eq("budget_id", budget_id).eq(
+                "org_id", org_id).execute()
+        if rubro_id:
+            db.table("budget_items").delete().eq("id", rubro_id).eq("budget_id", budget_id).eq(
+                "org_id", org_id).execute()
+        return True
+    except Exception:
+        logger.exception("Could not remove the new item %s / rubro %s", item_id, rubro_id)
+        return False
+
+
+@router.post("/{budget_id}/trabajos")
+async def create_trabajo(
+    budget_id: UUID,
+    payload: TrabajoCreate,
+    user: dict = Depends(require_editor),
+):
+    """Add an item with its recipe applied, in the rubro of the recipe (or the one chosen).
+
+    Same rules as applying a recipe (templates.apply_template): unit conversion (409
+    FALTA_CONVERSION before anything is created), prices and the full recalculation. If
+    applying fails, the new item (and the rubro created for it) is deleted.
+    """
+    db = get_data_db()
+    org_id = user["org_id"]
+    bid = str(budget_id)
+
+    budgets = db.table("budgets").select("*").eq("id", bid).eq("org_id", org_id).execute().data
+    if not budgets:
+        raise HTTPException(404, "Presupuesto no encontrado")
+    budget = budgets[0]
+    templates = (
+        db.table("item_templates").select("*").eq("id", payload.template_id).eq("org_id", org_id).execute().data
+    )
+    if not templates:
+        raise HTTPException(404, "Template no encontrado")
+    template = templates[0]
+    check_factor(payload.factor)
+
+    descripcion = (payload.descripcion or "").strip() or _oracion(template.get("nombre"))
+    unidad = (payload.unidad or "").strip() or template.get("unidad")
+    items = _budget_items(db, bid, org_id)
+    categoria = _oracion(template.get("categoria")) or RUBRO_SIN_CATEGORIA
+    rubro = _rubro_for(items, payload.parent_id, categoria)
+
+    # Everything that can say no goes before creating anything: conversion and formulas
+    factor = conversion_factor(template, descripcion, unidad, payload.factor)
+    params = merge_params(param_defaults(_json_list(template.get("parametros"))), {})
+    rows, faltantes = build_rows(db, org_id, budget, template, None, payload.cantidad, params, factor)
+
+    rubro_creado = rubro is None
+    next_sort = max((i.get("sort_order") or 0 for i in items), default=-1) + 1
+    trabajo = None
+    try:
+        if rubro_creado:
+            rubro = (db.table("budget_items").insert({
+                "budget_id": bid,
+                "org_id": org_id,
+                "parent_id": None,
+                "code": _next_rubro_code(items),
+                "description": categoria,
+                "notas": SECCION,
+                "sort_order": next_sort,
+                "mat_unitario": 0,
+                "mo_unitario": 0,
+            }).execute().data or [None])[0]
+            if not rubro:
+                raise RuntimeError("No se creó el rubro")
+            next_sort += 1
+        trabajo = (db.table("budget_items").insert(calc_item_totals({
+            "budget_id": bid,
+            "org_id": org_id,
+            "parent_id": str(rubro["id"]),
+            "code": _next_item_code(rubro, items),
+            "description": descripcion,
+            "unidad": unidad,
+            "cantidad": payload.cantidad,
+            "mat_unitario": 0,
+            "mo_unitario": 0,
+            "notas": None,
+            "sort_order": next_sort,
+        })).execute().data or [None])[0]
+        if not trabajo:
+            raise RuntimeError("No se creó el trabajo")
+        for row in rows:
+            row["item_id"] = str(trabajo["id"])
+        save_applied(db, org_id, budget, payload.template_id, trabajo, rows, params)
+    except Exception as exc:
+        logger.exception("Adding an item with template %s to budget %s failed", payload.template_id, bid)
+        a_medias = isinstance(exc, HTTPException) and isinstance(exc.detail, dict) \
+            and exc.detail.get("codigo") == "A_MEDIAS"
+        borrado = _remove_new(db, org_id, bid, trabajo and str(trabajo["id"]),
+                              str(rubro["id"]) if rubro_creado and rubro else None)
+        if a_medias or not borrado:
+            raise HTTPException(500, {"codigo": "A_MEDIAS", "mensaje": A_MEDIAS}) from exc
+        raise HTTPException(500, {"codigo": "NO_SE_APLICO", "mensaje": NO_SE_AGREGO}) from exc
+
+    item = db.table("budget_items").select("*").eq("id", str(trabajo["id"])).eq("org_id", org_id).execute().data
+    return {
+        "item": item[0] if item else trabajo,
+        "rubro": {"id": rubro["id"], "nombre": rubro.get("description"), "creado": rubro_creado},
+        "precios_faltantes": list(faltantes.values()),
+    }
+
+
+RESOURCES_CHUNK = 200  # item ids per item_resources request
+
+
+@router.get("/{budget_id}/precios-faltantes")
+async def get_budget_missing_prices(budget_id: UUID, user: dict = Depends(get_current_user)):
+    """How many codes without a price each item has, and how many resources it has (the dot
+    of the editor's table), with the rule of GET .../items/{item_id}/precios-faltantes.
+    Resources are read in bulk. The resource count is real: a formula can leave no resources
+    (an empty formula, or all of them deleted later), and that item is not "listo"."""
+    db = get_data_db()
+    org_id = user["org_id"]
+    bid = str(budget_id)
+    if not db.table("budgets").select("id").eq("id", bid).eq("org_id", org_id).execute().data:
+        raise HTTPException(404, "Presupuesto no encontrado")
+
+    ids = [str(i["id"]) for i in _budget_items(db, bid, org_id) if i.get("notas") != SECCION]
+    por_item: dict[str, list[dict]] = {i: [] for i in ids}
+    for start in range(0, len(ids), RESOURCES_CHUNK):
+        chunk = ids[start:start + RESOURCES_CHUNK]
+        for r in fetch_all(
+            lambda chunk=chunk: db.table("item_resources").select("*")
+            .eq("org_id", org_id).in_("item_id", chunk).order("id")
+        ):
+            por_item.setdefault(str(r["item_id"]), []).append(r)
+    return {
+        "por_item": {i: len(precios_faltantes(rs)) for i, rs in por_item.items()},
+        "recursos_por_item": {i: len(rs) for i, rs in por_item.items()},
+    }
 
 
 # ── Resource helpers ────────────────────────────────────────────────────────

@@ -2,12 +2,16 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { FileText, Pencil, Loader2, Trash2 } from 'lucide-react'
 import type { BudgetItem } from '../../types'
 import { fmtCurrency, fmtNumber } from '../../lib/format'
+import { ESTILO } from '../../lib/semaforo'
+import type { Semaforo } from '../../lib/semaforo'
 
 interface Props {
   items: BudgetItem[]
   onEditItem?: (itemId: string, field: string, oldValue: number, newValue: number) => Promise<void>
   onViewDetail?: (itemId: string) => void
   onDeleteItem?: (itemId: string, description: string) => void
+  // Punto de color de cada trabajo (null: no se sabe, sin punto)
+  semaforo?: (item: BudgetItem) => { estado: Semaforo; frase: string } | null
 }
 
 type EditableField = 'cantidad' | 'mat_unitario' | 'mo_unitario'
@@ -21,7 +25,7 @@ interface CellState {
   hasAudit: boolean
 }
 
-export default function DataTable({ items, onEditItem, onViewDetail, onDeleteItem }: Props) {
+export default function DataTable({ items, onEditItem, onViewDetail, onDeleteItem, semaforo }: Props) {
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [editing, setEditing] = useState<{ id: string; field: EditableField } | null>(null)
   const [editValue, setEditValue] = useState('')
@@ -215,7 +219,21 @@ export default function DataTable({ items, onEditItem, onViewDetail, onDeleteIte
             >
               <td className="px-3 py-2.5 font-mono text-[10px] text-gray-400">{item.code}</td>
               <td className="px-3 py-2.5">
-                <span className="font-medium text-gray-800">{item.description}</span>
+                <span className="inline-flex items-center gap-1.5">
+                  {(() => {
+                    const s = semaforo?.(item)
+                    return s ? (
+                      <span
+                        className={`w-2 h-2 rounded-full flex-shrink-0 ${ESTILO[s.estado].punto}`}
+                        title={s.frase}
+                        aria-label={s.frase}
+                        role="img"
+                        data-semaforo={s.estado}
+                      />
+                    ) : null
+                  })()}
+                  <span className="font-medium text-gray-800">{item.description}</span>
+                </span>
               </td>
               <td className="px-3 py-2.5 text-gray-400 text-[10px] uppercase">{item.unidad}</td>
               {renderEditableCell(item, 'cantidad', (v) => fmtNumber(v, 0))}
