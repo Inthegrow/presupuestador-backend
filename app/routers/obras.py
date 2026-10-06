@@ -62,6 +62,7 @@ from app.obra_import import (
     unit_key,
 )
 from app.recipes import ORIGEN_RECURSO, resolve_waste
+from app.terrac_export import read_coeficiente
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -87,8 +88,25 @@ async def _read_workbook(file: UploadFile):  # type: ignore[no-untyped-def]
     except Exception as exc:
         raise HTTPException(400, "No se pudo abrir el Excel") from exc
     if SHEET not in wb.sheetnames:
-        raise HTTPException(400, f"El Excel no tiene la hoja {SHEET} (cómputo y presupuesto)")
+        raise HTTPException(400, _missing_sheet_message(wb))
     return wb
+
+
+def _missing_sheet_message(wb) -> str:  # type: ignore[no-untyped-def]
+    """Why the Excel can't be loaded, in words Sol understands (and what to upload instead)."""
+    if "Presupuesto" in wb.sheetnames:
+        first = [str(c.value or "").strip() for c in next(wb["Presupuesto"].iter_rows(max_row=1), [])]
+        if "Codigo" in first and ("Precio sin IVA" in first or "Neto Total" in first):
+            return (
+                "Este Excel es la planilla simple que baja la app (Exportar), no el cómputo de la obra: "
+                f"no tiene la hoja {SHEET}. Subí el Excel original de la obra o, desde Exportar, "
+                "la \"Planilla Terrac\", que sí se puede volver a cargar."
+            )
+    hojas = ", ".join(wb.sheetnames[:6]) + ("…" if len(wb.sheetnames) > 6 else "")
+    return (
+        f"El Excel no tiene la hoja {SHEET} (cómputo y presupuesto), que es la que la app lee. "
+        f"Tiene estas hojas: {hojas}."
+    )
 
 
 def _factor(value: object) -> float | None:
@@ -761,7 +779,10 @@ async def cargar_obra(
     budget = db.table("budgets").insert({
         "org_id": org_id, "name": nombre, "status": "draft", "source_file": file.filename,
         "description": "Cantidades del Excel de la obra; precios con las fórmulas del Maestro",
-        "indirectos": initial_indirects(db, org_id), "precios_al": book.fecha.isoformat(),
+        # A Planilla Terrac made by the app keeps the obra's percentages; any other Excel
+        # starts with the general ones, like every new budget
+        "indirectos": {**initial_indirects(db, org_id), **(read_coeficiente(wb) or {})},
+        "precios_al": book.fecha.isoformat(),
     }).execute().data[0]
     budget_id = budget["id"]
 

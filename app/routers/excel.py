@@ -15,6 +15,7 @@ import os
 from datetime import datetime, timezone
 from io import BytesIO
 from typing import Literal
+from urllib.parse import quote
 from uuid import UUID
 
 import pandas as pd
@@ -33,6 +34,8 @@ from app.calculations import (
 )
 from app.db import get_data_db
 from app.routers.catalogs import record_history, start_history, update_entries
+from app.terrac_export import FMT_PESOS as TERRAC_FMT_PESOS
+from app.terrac_export import terrac_bytes
 from app.tree import get_parent_candidates, normalize_item_code, safe_float
 
 router = APIRouter()
@@ -533,9 +536,15 @@ async def import_excel(
 @router.get("/{budget_id}/export/excel")
 async def export_budget_excel(
     budget_id: UUID,
+    formato: Literal["simple", "terrac"] = Query("simple"),
     user: dict = Depends(get_current_user),
 ):
-    """Export a budget to Excel with cost breakdown."""
+    """Export a budget to Excel.
+
+    ``formato=simple`` (default): one row per work with the whole cascade (planilla simple).
+    ``formato=terrac``: Sol's planilla (01_C&P, one sheet per work, Coeficiente de pase),
+    which Cargar obra can read back (see app/terrac_export.py).
+    """
     db = get_data_db()
     bid = str(budget_id)
     org_id = user["org_id"]
@@ -550,6 +559,9 @@ async def export_budget_excel(
     )
     if not budget.data:
         raise HTTPException(404, "Presupuesto no encontrado")
+
+    if formato == "terrac":
+        return _terrac_response(db, budget.data, org_id)
 
     items = (
         db.table("budget_items")
@@ -573,16 +585,81 @@ async def export_budget_excel(
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         df.to_excel(writer, index=False, sheet_name="Presupuesto")
+        _format_simple_sheet(writer.sheets["Presupuesto"], list(df.columns))
     output.seek(0)
 
     safe_name = (budget.data["name"] or "presupuesto").replace(" ", "_")
-    filename = f"{safe_name}_{datetime.now().strftime('%Y%m%d')}.xlsx"
+    return _xlsx_response(output, f"{safe_name}_{datetime.now().strftime('%Y%m%d')}.xlsx")
 
+
+def _xlsx_response(output: BytesIO, filename: str) -> StreamingResponse:
+    # Headers are latin-1: an ASCII fallback plus the real name (RFC 5987) for any obra name
+    ascii_name = filename.encode("ascii", "replace").decode().replace("?", "_").replace('"', "")
     return StreamingResponse(
         output,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={"Content-Disposition": f'attachment; filename="{ascii_name}"; filename*=UTF-8\'\'{quote(filename)}'},
     )
+
+
+# Widths of the planilla simple (the rest: money columns)
+_SIMPLE_WIDTHS = {"Codigo": 10, "Descripcion": 60, "Unidad": 8, "Cantidad": 11, "Notas": 50}
+
+
+def _format_simple_sheet(ws, columns: list[str]) -> None:  # type: ignore[no-untyped-def]
+    """Planilla simple: bold header, column widths, pesos format, first row fixed.
+
+    Only formatting: the header row and its names stay as they are (tests and e2e read them).
+    """
+    from openpyxl.styles import Font, PatternFill
+    from openpyxl.utils import get_column_letter
+
+    head_fill = PatternFill("solid", fgColor="FFE8F5EE")
+    money = {c for c in columns if c not in _SIMPLE_WIDTHS}
+    for idx, name in enumerate(columns, start=1):
+        letter = get_column_letter(idx)
+        ws.column_dimensions[letter].width = _SIMPLE_WIDTHS.get(name, 18)
+        head = ws.cell(1, idx)
+        head.font = Font(bold=True)
+        head.fill = head_fill
+        for row in range(2, ws.max_row + 1):
+            cell = ws.cell(row, idx)
+            if name in money:
+                cell.number_format = TERRAC_FMT_PESOS
+            elif name == "Cantidad":
+                cell.number_format = "#,##0.00"
+    for idx in range(1, len(columns) + 1):
+        ws.cell(ws.max_row, idx).font = Font(bold=True)  # TOTAL row
+    ws.freeze_panes = "A2"
+
+
+_RESOURCES_CHUNK = 200  # item ids per item_resources request (as in budgets.py)
+
+
+def _terrac_response(db, budget: dict, org_id: str) -> StreamingResponse:  # type: ignore[no-untyped-def]
+    """Planilla Terrac of a budget (formato=terrac)."""
+    bid = str(budget["id"])
+    items = fetch_all(
+        lambda: db.table("budget_items").select("*").eq("budget_id", bid).eq("org_id", org_id).order("id")
+    )
+    if not items:
+        raise HTTPException(404, "Presupuesto sin items")
+    items.sort(key=lambda i: (i.get("sort_order") is None, i.get("sort_order") or 0))
+
+    ids = [str(i["id"]) for i in items if not is_section(i)]
+    resources: dict[str, list[dict]] = {}
+    for start in range(0, len(ids), _RESOURCES_CHUNK):
+        chunk = ids[start:start + _RESOURCES_CHUNK]
+        for r in fetch_all(
+            lambda chunk=chunk: db.table("item_resources").select("*")
+            .eq("org_id", org_id).in_("item_id", chunk).order("id")
+        ):
+            resources.setdefault(str(r["item_id"]), []).append(r)
+
+    cfg = _apply_cfg_defaults(budget_config(db, org_id, budget))
+    output = terrac_bytes(budget, items, resources, cfg, pdf_totals(items, cfg))
+    name = " ".join(str(budget.get("name") or "presupuesto").split())
+    return _xlsx_response(output, f"{name} - Planilla Terrac - {today().isoformat()}.xlsx")
 
 
 # Columns of the exported Excel that get a total (the same sums as calc_budget_summary)

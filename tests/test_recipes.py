@@ -224,6 +224,20 @@ class TestPurchaseRounding:
         assert rows[0]["cantidad_redondeo"] == pytest.approx(0.2)
         assert rows[1]["cantidad_redondeo"] == pytest.approx(0.6)
 
+    def test_same_split_whatever_the_order(self):
+        # Loading a budget and recalculating it read the rows in different orders: the share of
+        # each item (and the budget total) must not depend on it
+        def rows():
+            return [self._row(f"i{n}", e, precio=55682, id=f"r{n}")
+                    for n, e in enumerate((2.8891, 4.0311, 0.4092))]
+        a, b = rows(), list(reversed(rows()))
+        apply_purchase_rounding(a)
+        apply_purchase_rounding(b)
+        by_id = {r["id"]: r for r in b}
+        for r in a:
+            assert r["cantidad_efectiva"] == by_id[r["id"]]["cantidad_efectiva"]
+            assert r["subtotal"] == by_id[r["id"]]["subtotal"]
+
     def test_purchase_unit_size(self):
         # 130 kg of cement in 50 kg bags -> 150 kg (3 bags)
         rows = [self._row("a", 80, precio=2, unidad_compra=50), self._row("b", 50, precio=2, unidad_compra=50)]

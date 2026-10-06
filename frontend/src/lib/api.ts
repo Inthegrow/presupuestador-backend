@@ -162,7 +162,8 @@ function getBlob(path: string): Promise<Blob> {
     const res = await fetch(`${BASE_URL}${path}`, {
       headers: { ...authHeaders() },
     })
-    if (!res.ok) throw new Error(`${res.status}`)
+    // ApiError (como request): así la pantalla puede mostrar el `detail` del servidor
+    if (!res.ok) throw new ApiError(res.status, await res.text().catch(() => ''))
     return res.blob()
   })
 }
@@ -259,7 +260,10 @@ export const budgetApi = {
 
   // Excel import/export
   importExcel: (formData: FormData) => postFile<{ budget_id: string; budget_name: string; items_inserted: number; resources_inserted: number; catalog_entries: number; date_codes_corrected: number; catalog_id: string | null; catalog_reused: boolean; catalog_name: string | null; precios_actualizados: number; precios_nuevos: number; neto_excel?: number | null; neto_app?: number | null }>('/budgets/import-excel', formData),
-  exportExcel: (id: string) => getBlob(`/budgets/${id}/export/excel`),
+  // formato 'terrac': la planilla de Sol (01_C&P, una hoja por trabajo, Coeficiente de pase), que se puede volver a
+  // subir en Cargar obra. Sin formato (o 'simple'): un renglón por trabajo con su rubro y su precio.
+  exportExcel: (id: string, formato?: 'terrac' | 'simple') =>
+    getBlob(`/budgets/${id}/export/excel${formato ? `?formato=${formato}` : ''}`),
   // vista 'cliente': PDF con el precio de venta por trabajo, sin costos internos
   exportPdf: (id: string, vista?: 'cliente') =>
     getBlob(`/budgets/${id}/export/pdf${vista ? `?vista=${vista}` : ''}`),

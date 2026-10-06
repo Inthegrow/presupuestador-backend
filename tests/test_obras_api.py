@@ -12,6 +12,7 @@ from unittest.mock import patch
 os.environ.setdefault("SUPABASE_URL", "https://test.supabase.co")
 os.environ.setdefault("SUPABASE_KEY", "test-key")
 
+import openpyxl
 import pytest
 from fastapi.testclient import TestClient
 
@@ -362,6 +363,27 @@ class TestAnalizar:
         res = client.post("/obras/analizar",
                           files={"file": ("Edificio Las Heras - cómputo.xlsx", _excel(wb), XLSX)})
         assert res.json()["titulo_dudoso"] is False
+
+    def test_the_apps_own_simple_export_says_what_it_is(self, client, db):
+        """Carlos, 06/10: the old "Excel Formato Terrac" downloaded the simple sheet; uploading it
+        must say what it is and what to upload instead, not just "no tiene la hoja"."""
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Presupuesto"
+        ws.append(["Codigo", "Descripcion", "Unidad", "Cantidad", "Directo Total", "Neto Total"])
+        res = client.post("/obras/analizar", files={"file": ("Ginkgo_terrac.xlsx", _excel(wb), XLSX)})
+        assert res.status_code == 400
+        assert "planilla simple que baja la app" in res.json()["detail"]
+        assert "Planilla Terrac" in res.json()["detail"]
+
+    def test_missing_sheet_lists_the_sheets_it_has(self, client, db):
+        wb = openpyxl.Workbook()
+        wb.active.title = "Hoja1"
+        wb.create_sheet("Cómputo")
+        res = client.post("/obras/analizar", files={"file": ("otra.xlsx", _excel(wb), XLSX)})
+        assert res.status_code == 400
+        detail = res.json()["detail"]
+        assert "no tiene la hoja 01_C&P" in detail and "Hoja1, Cómputo" in detail
 
     def test_rejects_other_files(self, client, db):
         res = client.post("/obras/analizar", files={"file": ("obra.csv", b"a,b", "text/csv")})
