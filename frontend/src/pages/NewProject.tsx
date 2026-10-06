@@ -1,9 +1,7 @@
-import { useState, useCallback, useRef } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   FileText,
-  FileSpreadsheet,
-  Upload,
   Building2,
   Percent,
   CheckCircle,
@@ -15,26 +13,28 @@ import {
   Image,
   FileJson,
   Sparkles,
-  ArrowRight,
   ClipboardList,
   Link,
   AlertTriangle,
   Check,
+  RotateCcw,
 } from 'lucide-react'
-import { budgetApi, catalogApi } from '../lib/api'
+import { ApiError, budgetApi, catalogApi } from '../lib/api'
+import type { CreateFullPayload } from '../lib/api'
 import { useAuth } from '../contexts/AuthContext'
-import type { Budget, PriceCatalog, AIAnalysisResult } from '../types'
+import type { AIItemToInsert, PriceCatalog } from '../types'
 import FileUpload from '../components/ui/FileUpload'
-import GenericTaskSelector from '../components/ui/GenericTaskSelector'
-import type { SelectedTask } from '../components/ui/GenericTaskSelector'
+import GenericTaskSelector, { seleccionInicial, trabajosElegidos } from '../components/ui/GenericTaskSelector'
+import type { SelectionState } from '../components/ui/GenericTaskSelector'
+import { CLAVES_INDIRECTOS, cascadaIndirectos, indirectosCompletos } from '../lib/cascada'
+import type { ClaveIndirecto, IndirectosPct } from '../lib/cascada'
+import { fmtDate, todayIso } from '../lib/format'
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
 interface ProjectData {
   name: string
   description: string
-  superficie: string
-  duracion: string
 }
 
 interface SectionItem {
@@ -50,24 +50,10 @@ interface Section {
   items: SectionItem[]
 }
 
-interface IndirectCosts {
-  estructura: number
-  jefatura: number
-  logistica: number
-  herramientas: number
-  beneficio: number
-}
-
-type PriceOption = 'csv' | 'excel' | 'catalog' | 'skip'
-type CsvTipo = 'material' | 'mano_obra' | 'equipo' | 'subcontrato'
-
-interface CsvEntry {
-  id: string
-  nombre: string
-  tipo: CsvTipo
-  file: File
-}
 type StructureOption = 'template' | 'plan' | 'manual' | 'json'
+
+// Lo que Sol escribe en cada % (texto, para poder borrar y volver a escribir)
+type IndirectosTexto = Record<ClaveIndirecto, string>
 
 interface AIReviewItem {
   _key: string
@@ -79,26 +65,209 @@ interface AIReviewItem {
   cantidad: number
   notas: string
   notas_calculo: string
-  recursos?: object
+  recursos?: AIItemToInsert['recursos']
   template_match?: {
     id: string
     nombre: string
     score: number
-    recursos: any[]
+    recursos: unknown[]
   }
   accepted: boolean
 }
 
+// Presupuesto ya creado mientras Sol revisa lo que encontró la IA en el plano
+interface Pendiente {
+  budgetId: string
+  sectionsCount: number
+  itemsCount: number
+}
+
+type Secciones = CreateFullPayload['secciones']
+
+interface Resultado {
+  budgetId: string
+  sectionsCount: number
+  itemsCount: number
+  // Algo que no salió (ej. la IA no pudo leer el plano) aunque el presupuesto quedó creado
+  aviso?: string
+}
+
+// Only an admin can delete a budget: an editor cannot undo one already created
+function esSinPermiso(e: unknown): boolean {
+  return e instanceof ApiError && e.status === 403
+}
+
 const STEPS = [
   { label: 'Datos', icon: FileText },
-  { label: 'Precios', icon: Upload },
   { label: 'Estructura', icon: Building2 },
   { label: 'Indirectos', icon: Percent },
   { label: 'Resultado', icon: CheckCircle },
 ]
+const PASO_DATOS = 0
+const PASO_ESTRUCTURA = 1
+const PASO_INDIRECTOS = 2
+const PASO_RESULTADO = 3
+
+const NOMBRE_INDIRECTO: Record<ClaveIndirecto, string> = {
+  imprevistos_pct: 'Imprevistos',
+  estructura_pct: 'Estructura',
+  jefatura_pct: 'Jefatura',
+  logistica_pct: 'Logística',
+  herramientas_pct: 'Herramientas',
+  beneficio_pct: 'Beneficio',
+  ingresos_brutos_pct: 'Ingresos Brutos',
+  imp_cheque_pct: 'Impuesto al cheque',
+  iva_pct: 'IVA',
+}
+
+const GRUPOS_INDIRECTOS: { titulo: string; nota: string; claves: ClaveIndirecto[] }[] = [
+  {
+    titulo: 'Indirectos',
+    nota: 'sobre el costo directo',
+    claves: ['imprevistos_pct', 'estructura_pct', 'jefatura_pct', 'logistica_pct', 'herramientas_pct'],
+  },
+  { titulo: 'Beneficio', nota: 'sobre directo + indirectos', claves: ['beneficio_pct'] },
+  { titulo: 'Impuestos', nota: 'sobre el subtotal con beneficio', claves: ['ingresos_brutos_pct', 'imp_cheque_pct'] },
+  { titulo: 'IVA', nota: 'sobre el precio sin IVA', claves: ['iva_pct'] },
+]
 
 function uid() {
   return Math.random().toString(36).slice(2, 9)
+}
+
+function numero(text: string): number | null {
+  const s = text.trim().replace(',', '.')
+  if (s === '') return null
+  const n = Number(s)
+  return Number.isFinite(n) ? n : null
+}
+
+function aTexto(pct: IndirectosPct): IndirectosTexto {
+  const out = {} as IndirectosTexto
+  for (const k of CLAVES_INDIRECTOS) out[k] = String(pct[k])
+  return out
+}
+
+function trabajos(n: number): string {
+  return `${n} ${n === 1 ? 'trabajo' : 'trabajos'}`
+}
+
+function pesos(n: number): string {
+  return `$${n.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+}
+
+// Lo que dijo el servidor, en palabras (sin el "422: {json}")
+function errorText(e: unknown): string {
+  if (e instanceof ApiError) {
+    const d = e.detail
+    if (typeof d === 'string' && d.trim()) return d
+    if (Array.isArray(d)) {
+      return d
+        .map((x) => (x && typeof x === 'object' && 'msg' in x ? String((x as { msg: unknown }).msg) : String(x)))
+        .join('. ')
+    }
+    if (d && typeof d === 'object' && 'mensaje' in d) return String((d as { mensaje: unknown }).mensaje)
+    return e.message
+  }
+  if (e instanceof TypeError) return 'No se pudo conectar con el servidor. Revisá la conexión y probá de nuevo.'
+  return e instanceof Error ? e.message : String(e)
+}
+
+function normNombre(s: string): string {
+  return s.trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+}
+
+/**
+ * Rubros con sus trabajos, juntando las fuentes (trabajos típicos, JSON y los armados a mano).
+ * Dos rubros con el mismo nombre quedan en uno. Devuelve un error si algo no se puede crear.
+ */
+// Valida el contenido real de un JSON de estructura (los tipos de TypeScript no lo hacen) y lo pasa a rubros.
+// Nombre y descripción tienen que ser texto; unidad, texto o nada; cantidad, número o nada.
+function leerRubrosJson(data: unknown): { rubros: Section[] } | { error: string } {
+  const formato = 'Formato esperado: [{"nombre": "Rubro", "items": [{"descripcion": "...", "unidad": "m2", "cantidad": 10}]}].'
+  if (!Array.isArray(data)) return { error: `El archivo JSON tiene que ser una lista de rubros. ${formato}` }
+  const vacio = (v: unknown) => v === undefined || v === null
+  const rubros: Section[] = []
+  for (let i = 0; i < data.length; i++) {
+    const r = data[i] as Record<string, unknown> | null
+    const donde = `Rubro ${i + 1}`
+    if (!r || typeof r !== 'object' || Array.isArray(r)) return { error: `${donde}: tiene que ser {"nombre": ..., "items": [...]}. ${formato}` }
+    if (!vacio(r.nombre) && typeof r.nombre !== 'string') return { error: `${donde}: el nombre tiene que ser texto.` }
+    if (!vacio(r.items) && !Array.isArray(r.items)) return { error: `${donde}: "items" tiene que ser una lista de trabajos.` }
+    const items: SectionItem[] = []
+    const lista = (r.items ?? []) as unknown[]
+    for (let k = 0; k < lista.length; k++) {
+      const it = lista[k] as Record<string, unknown> | null
+      const dondeT = `${donde}, trabajo ${k + 1}`
+      if (!it || typeof it !== 'object' || Array.isArray(it)) return { error: `${dondeT}: tiene que ser {"descripcion": ..., "unidad": ..., "cantidad": ...}.` }
+      if (!vacio(it.descripcion) && typeof it.descripcion !== 'string') return { error: `${dondeT}: la descripción tiene que ser texto.` }
+      if (!vacio(it.unidad) && typeof it.unidad !== 'string') return { error: `${dondeT}: la unidad tiene que ser texto.` }
+      if (!vacio(it.cantidad) && (typeof it.cantidad !== 'number' || !Number.isFinite(it.cantidad))) {
+        return { error: `${dondeT}: la cantidad tiene que ser un número.` }
+      }
+      items.push({
+        id: uid(),
+        descripcion: (it.descripcion as string | undefined) ?? '',
+        unidad: (it.unidad as string | undefined) ?? '',
+        cantidad: vacio(it.cantidad) ? '' : String(it.cantidad),
+      })
+    }
+    rubros.push({ id: uid(), nombre: (r.nombre as string | undefined) ?? '', items })
+  }
+  return { rubros }
+}
+
+function armarRubros(
+  seleccion: SelectionState,
+  jsonSections: Section[],
+  manuales: Section[],
+): { secciones: Secciones; error: string | null } {
+  const rubros: { nombre: string; items: { descripcion: string; unidad: string; cantidad: number }[] }[] = []
+  function rubro(nombre: string) {
+    const clave = normNombre(nombre)
+    let r = rubros.find((x) => normNombre(x.nombre) === clave)
+    if (!r) {
+      r = { nombre: nombre.trim(), items: [] }
+      rubros.push(r)
+    }
+    return r
+  }
+
+  for (const t of trabajosElegidos(seleccion)) {
+    rubro(t.categoryName).items.push({ descripcion: t.descripcion, unidad: t.unidad, cantidad: t.cantidad })
+  }
+
+  const conItems = (s: Section) => s.items.filter((it) => it.descripcion.trim())
+  for (const [origen, lista] of [['Importar JSON', jsonSections], ['Definir manual', manuales]] as const) {
+    for (let i = 0; i < lista.length; i++) {
+      const s = lista[i]
+      const items = conItems(s)
+      if (!s.nombre.trim()) {
+        if (items.length > 0) {
+          return {
+            secciones: [],
+            error: `En "${origen}", el rubro ${i + 1} tiene trabajos pero no tiene nombre. Escribile un nombre o borralo.`,
+          }
+        }
+        continue
+      }
+      const r = rubro(s.nombre)
+      for (const it of items) {
+        r.items.push({
+          descripcion: it.descripcion.trim(),
+          unidad: it.unidad || 'gl',
+          cantidad: numero(it.cantidad) || 1,
+        })
+      }
+    }
+  }
+
+  const secciones: Secciones = rubros.map((r, i) => ({
+    codigo: String(i + 1),
+    nombre: r.nombre,
+    items: r.items.map((it, j) => ({ codigo: `${i + 1}.${j + 1}`, ...it })),
+  }))
+  return { secciones, error: null }
 }
 
 // ─── Main Component ────────────────────────────────────────────────────────────
@@ -106,134 +275,132 @@ function uid() {
 export default function NewProject() {
   const navigate = useNavigate()
   const { puedeEditar } = useAuth()
-  const [step, setStep] = useState(0)
+  const [step, setStep] = useState(PASO_DATOS)
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState('')
 
-  // Step 1
-  const [project, setProject] = useState<ProjectData>({
-    name: '',
-    description: '',
-    superficie: '',
-    duracion: '',
-  })
+  // Datos
+  const [project, setProject] = useState<ProjectData>({ name: '', description: '' })
+  const [listas, setListas] = useState<PriceCatalog[] | null>(null)
+  const [listasError, setListasError] = useState('')
 
-  // Step 2
-  const [priceOption, setPriceOption] = useState<PriceOption>('skip')
-  const [csvEntries, setCsvEntries] = useState<CsvEntry[]>([])
-  const [excelFile, setExcelFile] = useState<File | null>(null)
-  const [catalogs, setCatalogs] = useState<PriceCatalog[]>([])
-  const [selectedCatalog, setSelectedCatalog] = useState('')
-  const [catalogsLoaded, setCatalogsLoaded] = useState(false)
-
-  // Step 3
+  // Estructura (todo vive acá: ir y volver entre pasos no pierde nada)
   const [structureOption, setStructureOption] = useState<StructureOption>('template')
-  const [templateTasks, setTemplateTasks] = useState<SelectedTask[]>([])
+  const [seleccion, setSeleccion] = useState<SelectionState>(() => seleccionInicial())
   const [planFile, setPlanFile] = useState<File | null>(null)
-  const [aiResult, setAiResult] = useState<AIAnalysisResult | null>(null)
-  const [aiSections, setAiSections] = useState<Section[]>([])
-  const [aiAnalyzing, setAiAnalyzing] = useState(false)
-  const [aiError, setAiError] = useState('')
   const [aiReviewItems, setAiReviewItems] = useState<AIReviewItem[]>([])
   const [showAiReview, setShowAiReview] = useState(false)
-  const [sections, setSections] = useState<Section[]>([
-    { id: uid(), nombre: '', items: [] },
-  ])
+  const [pendiente, setPendiente] = useState<Pendiente | null>(null)
+  const [sections, setSections] = useState<Section[]>([{ id: uid(), nombre: '', items: [] }])
   const [jsonFile, setJsonFile] = useState<File | null>(null)
   const [jsonSections, setJsonSections] = useState<Section[]>([])
 
-  // Step 4
-  const [indirects, setIndirects] = useState<IndirectCosts>({
-    estructura: 15,
-    jefatura: 8,
-    logistica: 5,
-    herramientas: 3,
-    beneficio: 10,
-  })
+  // Indirectos: arrancan con los de la empresa
+  const [generales, setGenerales] = useState<IndirectosPct | null>(null)
+  const [indirectos, setIndirectos] = useState<IndirectosTexto | null>(null)
+  const [indirectosError, setIndirectosError] = useState('')
 
-  // Step 5
-  const [result, setResult] = useState<{
-    budgetId: string
-    sectionsCount: number
-    itemsCount: number
-  } | null>(null)
+  // Resultado
+  const [result, setResult] = useState<Resultado | null>(null)
+
+  useEffect(() => {
+    catalogApi
+      .list()
+      .then((l) => setListas(l))
+      .catch((e) => setListasError(errorText(e)))
+    cargarGenerales()
+  }, [])
+
+  function cargarGenerales() {
+    setIndirectosError('')
+    budgetApi
+      .getGeneralIndirects()
+      .then((data) => {
+        const g = indirectosCompletos(data)
+        setGenerales(g)
+        setIndirectos((prev) => prev ?? aTexto(g))
+      })
+      .catch((e) => setIndirectosError(errorText(e)))
+  }
+
+  const armado = useMemo(() => armarRubros(seleccion, jsonSections, sections), [seleccion, jsonSections, sections])
+  const trabajosTipicos = useMemo(() => trabajosElegidos(seleccion).length, [seleccion])
 
   // ─── Step navigation ───────────────────────────────────────────────────────
 
-  function canAdvance(): boolean {
-    if (step === 0) return project.name.trim().length > 0
-    return true
+  function irA(paso: number) {
+    setStep(paso)
+    setError('')
+  }
+
+  /** Los % listos para mandar, o un error si alguno no sirve. Sin los de la empresa: undefined (el servidor usa los suyos). */
+  function indirectosParaGuardar(): { valores?: IndirectosPct; error?: string } {
+    if (!indirectos) return {}
+    const valores = {} as IndirectosPct
+    for (const k of CLAVES_INDIRECTOS) {
+      const n = numero(indirectos[k])
+      if (n === null) return { error: `Falta el porcentaje de ${NOMBRE_INDIRECTO[k]}.` }
+      if (n < 0 || n > 100) return { error: `${NOMBRE_INDIRECTO[k]} tiene que estar entre 0 y 100 %.` }
+      valores[k] = n
+    }
+    return { valores }
   }
 
   async function next() {
-    if (!canAdvance()) return
-    if (step === 3) {
-      // If plan mode with a file and no pre-analyzed result, analyze first and show review
-      if (structureOption === 'plan' && planFile && aiSections.length === 0) {
-        await handleAnalyzeAndReview()
+    if (step === PASO_DATOS) {
+      if (!project.name.trim()) {
+        setError('Falta el nombre del presupuesto.')
         return
       }
-      handleCreate()
+      irA(PASO_ESTRUCTURA)
       return
     }
-    setStep((s) => Math.min(s + 1, 4))
-    setError('')
+    if (step === PASO_ESTRUCTURA) {
+      if (armado.error) {
+        setError(armado.error)
+        return
+      }
+      irA(PASO_INDIRECTOS)
+      return
+    }
+    if (step === PASO_INDIRECTOS) {
+      if (planFile) await handleAnalyzeAndReview()
+      else await handleCreate()
+    }
   }
 
   function prev() {
-    setStep((s) => Math.max(s - 1, 0))
-    setError('')
-  }
-
-  // ─── Load catalogs lazily ──────────────────────────────────────────────────
-
-  const loadCatalogs = useCallback(() => {
-    if (catalogsLoaded) return
-    catalogApi.list()
-      .then((list) => {
-        setCatalogs(list)
-        if (list.length > 0) setSelectedCatalog(list[0].id)
-      })
-      .catch(() => {/* ignore */})
-      .finally(() => setCatalogsLoaded(true))
-  }, [catalogsLoaded])
-
-  // ─── CSV multi-entry management ──────────────────────────────────────────
-
-  function addCsvEntry(nombre: string, tipo: CsvTipo, file: File) {
-    setCsvEntries((prev) => [...prev, { id: uid(), nombre, tipo, file }])
-  }
-
-  function removeCsvEntry(id: string) {
-    setCsvEntries((prev) => prev.filter((e) => e.id !== id))
+    irA(Math.max(step - 1, PASO_DATOS))
   }
 
   // ─── JSON structure import ────────────────────────────────────────────────
 
   function handleJsonFile(f: File) {
-    setJsonFile(f)
+    // Un archivo rechazado no reemplaza lo que ya estaba importado ni cuenta como importación
     const reader = new FileReader()
     reader.onload = (e) => {
+      let data: unknown
       try {
-        const data = JSON.parse(e.target?.result as string)
-        if (Array.isArray(data)) {
-          const imported: Section[] = data.map((s: { nombre?: string; items?: { descripcion?: string; unidad?: string; cantidad?: number }[] }) => ({
-            id: uid(),
-            nombre: s.nombre ?? '',
-            items: (s.items ?? []).map((it: { descripcion?: string; unidad?: string; cantidad?: number }) => ({
-              id: uid(),
-              descripcion: it.descripcion ?? '',
-              unidad: it.unidad ?? '',
-              cantidad: String(it.cantidad ?? ''),
-            })),
-          }))
-          setJsonSections(imported)
-        }
+        data = JSON.parse(e.target?.result as string)
       } catch {
-        setError('El archivo JSON no tiene un formato valido.')
+        setError('El archivo JSON no tiene un formato válido.')
+        return
       }
+      const leido = leerRubrosJson(data)
+      if ('error' in leido) {
+        setError(leido.error)
+        return
+      }
+      setJsonFile(f)
+      setJsonSections(leido.rubros)
+      setError('')
     }
     reader.readAsText(f)
+  }
+
+  function clearJson() {
+    setJsonFile(null)
+    setJsonSections([])
   }
 
   // ─── Section management ───────────────────────────────────────────────────
@@ -305,39 +472,76 @@ export default function NewProject() {
     })
   }
 
-  // ─── Analyze plan and show review panel ──────────────────────────────────
+  // ─── Crear (todo en un pedido: rubros con sus trabajos y los % de esta obra) ─
+
+  function payload(): CreateFullPayload | null {
+    if (armado.error) {
+      setError(armado.error)
+      return null
+    }
+    const ind = indirectosParaGuardar()
+    if (ind.error) {
+      setError(ind.error)
+      return null
+    }
+    return {
+      name: project.name.trim(),
+      description: project.description.trim(),
+      secciones: armado.secciones,
+      indirectos: ind.valores,
+    }
+  }
+
+  async function handleCreate() {
+    const data = payload()
+    if (!data) return
+    setCreating(true)
+    setError('')
+    try {
+      const res = await budgetApi.createFull(data)
+      setResult({ budgetId: res.budget.id, sectionsCount: res.sections_created, itemsCount: res.items_created })
+      setStep(PASO_RESULTADO)
+    } catch (e) {
+      setError(`No se pudo crear el presupuesto: ${errorText(e)}`)
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  // ─── Plano (IA): crear, analizar y mostrar lo que encontró para revisar ────
 
   async function handleAnalyzeAndReview() {
     if (!planFile) return
+    const data = payload()
+    if (!data) return
     setCreating(true)
     setError('')
-    setAiError('')
+    let creado: Pendiente | null = null
     try {
-      // Create the budget first so we have an ID to pass to analyze-plan
-      const budget = await budgetApi.create({
-        name: project.name,
-        description: project.description || undefined,
-        status: 'borrador',
-      } as Partial<Budget>)
-
-      const budgetId = budget.id
-
-      // Analyze the plan
+      // analyze-plan needs an existing budget: create it with everything else first
+      const res = await budgetApi.createFull(data)
+      creado = { budgetId: res.budget.id, sectionsCount: res.sections_created, itemsCount: res.items_created }
+    } catch (e) {
+      setError(`No se pudo crear el presupuesto: ${errorText(e)}`)
+      setCreating(false)
+      return
+    }
+    try {
       const formData = new FormData()
       formData.append('file', planFile)
-      const aiRes = await budgetApi.analyzePlan(budgetId, formData)
-      setAiResult(aiRes)
+      const aiRes = await budgetApi.analyzePlan(creado.budgetId, formData)
 
-      // Flatten into review items
-      let keyIdx = 0
+      // The plan's rubros go after the ones already created: number them from there
       const reviewItems: AIReviewItem[] = []
-      for (const sec of aiRes.secciones) {
-        for (const item of sec.items) {
+      let keyIdx = 0
+      aiRes.secciones.forEach((sec, si) => {
+        const codigoRubro = String(creado!.sectionsCount + si + 1)
+        sec.items.forEach((item, ii) => {
           reviewItems.push({
             _key: `rev-${keyIdx++}`,
             seccion_nombre: sec.nombre,
-            seccion_codigo: sec.codigo,
-            codigo: item.codigo,
+            seccion_codigo: codigoRubro,
+            codigo: `${codigoRubro}.${ii + 1}`,
             descripcion: item.descripcion,
             unidad: item.unidad,
             cantidad: item.cantidad,
@@ -347,262 +551,91 @@ export default function NewProject() {
             template_match: item.template_match,
             accepted: true,
           })
-        }
+        })
+      })
+      if (reviewItems.length === 0) {
+        throw new Error('La IA no encontró trabajos en el plano. Probá con otra imagen, o quitá el plano para crear el presupuesto sin él.')
       }
       setAiReviewItems(reviewItems)
-      // Store budget id temporarily so handleConfirmReview can use it
-      setResult({ budgetId, sectionsCount: 0, itemsCount: 0 })
+      setPendiente(creado)
       setShowAiReview(true)
     } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Error desconocido'
-      setError(`Error al analizar el plano: ${msg}`)
+      // Nothing half-made: undo the budget created for the analysis
+      const motivo = errorText(e)
+      const borrado = await budgetApi.remove(creado.budgetId).then(() => true, () => false)
+      if (borrado) {
+        setError(`No se pudo analizar el plano: ${motivo}`)
+      } else {
+        // Could not undo it (only an admin deletes budgets): say what was created, do not create another one
+        setResult({
+          ...creado,
+          aviso: `La IA no pudo analizar el plano (${motivo.replace(/\.+$/, '')}). El presupuesto se creó con los demás trabajos, sin los del plano. Podés volver a analizar el plano desde "IA + Planos" del presupuesto.`,
+        })
+        setStep(PASO_RESULTADO)
+      }
     } finally {
       setCreating(false)
     }
   }
-
-  // ─── Confirm review and finish creating the budget ────────────────────────
 
   async function handleConfirmReview() {
-    if (!result) return
-    const budgetId = result.budgetId
+    if (!pendiente) return
     setCreating(true)
     setError('')
     try {
-      const acceptedItems = aiReviewItems.filter((i) => i.accepted)
-
-      let totalItems = 0
-      let totalSections = 0
-
-      if (acceptedItems.length > 0) {
-        const payload = acceptedItems.map((i) => ({
-          seccion_nombre: i.seccion_nombre,
-          seccion_codigo: i.seccion_codigo,
-          codigo: i.codigo,
-          descripcion: i.descripcion,
-          unidad: i.unidad,
-          cantidad: i.cantidad,
-          notas: i.notas,
-          notas_calculo: i.notas_calculo,
-          recursos: i.recursos,
-        }))
-        const insertRes = await budgetApi.addItemsFromAI(budgetId, payload)
-        totalItems = insertRes.inserted
-        totalSections = insertRes.sections_created
+      const accepted = aiReviewItems.filter((i) => i.accepted)
+      let insertados = 0
+      let rubrosIA = 0
+      if (accepted.length > 0) {
+        const res = await budgetApi.addItemsFromAI(
+          pendiente.budgetId,
+          accepted.map((i) => ({
+            seccion_nombre: i.seccion_nombre,
+            seccion_codigo: i.seccion_codigo,
+            codigo: i.codigo,
+            descripcion: i.descripcion,
+            unidad: i.unidad,
+            cantidad: i.cantidad,
+            notas: i.notas,
+            notas_calculo: i.notas_calculo,
+            recursos: i.recursos,
+          })),
+        )
+        insertados = res.inserted
+        rubrosIA = res.sections_created
       }
-
-      // Apply indirects
-      try {
-        await budgetApi.updateIndirects(budgetId, {
-          estructura_pct: indirects.estructura,
-          jefatura_pct: indirects.jefatura,
-          logistica_pct: indirects.logistica,
-          herramientas_pct: indirects.herramientas,
-        })
-      } catch {
-        // continue
-      }
-
-      // Upload CSVs, Excel, or apply catalog
-      if (priceOption === 'csv' && csvEntries.length > 0) {
-        for (const entry of csvEntries) {
-          try {
-            await catalogApi.uploadCsv(entry.nombre, entry.tipo, entry.file)
-          } catch {
-            // continue
-          }
-        }
-      } else if (priceOption === 'excel' && excelFile) {
-        try {
-          await catalogApi.uploadExcel(excelFile)
-        } catch {
-          // continue
-        }
-      } else if (priceOption === 'catalog' && selectedCatalog) {
-        try {
-          await catalogApi.apply(budgetId, selectedCatalog)
-        } catch {
-          // continue
-        }
-      }
-
-      setResult({ budgetId, sectionsCount: totalSections, itemsCount: totalItems })
+      setResult({
+        budgetId: pendiente.budgetId,
+        sectionsCount: pendiente.sectionsCount + rubrosIA,
+        itemsCount: pendiente.itemsCount + insertados,
+      })
       setShowAiReview(false)
-      setStep(4)
+      setPendiente(null)
+      setStep(PASO_RESULTADO)
     } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Error desconocido'
-      setError(`Error al crear el presupuesto: ${msg}`)
+      setError(`No se pudieron agregar los trabajos del plano: ${errorText(e)}`)
     } finally {
       setCreating(false)
     }
   }
 
-  // ─── Create budget ────────────────────────────────────────────────────────
-
-  async function handleCreate() {
+  async function handleCancelReview() {
+    if (!pendiente) {
+      setShowAiReview(false)
+      return
+    }
     setCreating(true)
     setError('')
     try {
-      // 1. Create budget
-      const budget = await budgetApi.create({
-        name: project.name,
-        description: project.description || undefined,
-        status: 'borrador',
-      } as Partial<Budget>)
-
-      const budgetId = budget.id
-
-      // 2. Determine which sections/items to use (combine all sources)
-      const allSections: Section[] = []
-
-      // Template tasks grouped by category
-      if (templateTasks.length > 0) {
-        const grouped = new Map<string, { name: string; tasks: SelectedTask[] }>()
-        for (const t of templateTasks) {
-          if (!grouped.has(t.categoryCode)) {
-            grouped.set(t.categoryCode, { name: t.categoryName, tasks: [] })
-          }
-          grouped.get(t.categoryCode)!.tasks.push(t)
-        }
-        for (const [, group] of grouped) {
-          allSections.push({
-            id: uid(),
-            nombre: group.name,
-            items: group.tasks.map((t) => ({
-              id: uid(),
-              descripcion: t.descripcion,
-              unidad: t.unidad,
-              cantidad: String(t.cantidad),
-            })),
-          })
-        }
-      }
-
-      // JSON sections
-      if (jsonSections.length > 0) {
-        allSections.push(...jsonSections)
-      }
-
-      // Manual sections
-      const manualFiltered = sections.filter((s) => s.nombre.trim())
-      if (manualFiltered.length > 0) {
-        allSections.push(...manualFiltered)
-      }
-
-      // AI plan sections (if user pre-analyzed in step 3)
-      if (aiSections.length > 0) {
-        allSections.push(...aiSections)
-      }
-
-      const finalSections = allSections
-
-      // 3. Create items (sections as parent, then children)
-      let totalItems = 0
-      let totalSections = finalSections.length
-      for (let si = 0; si < finalSections.length; si++) {
-        const sec = finalSections[si]
-        // Create parent/section item
-        const parentItem = await budgetApi.createItem(budgetId, {
-          description: sec.nombre,
-          code: `${si + 1}`,
-          sort_order: (si + 1) * 100,
-          cantidad: 1,
-          unidad: 'gl',
-        })
-
-        // Create child items
-        for (let ii = 0; ii < sec.items.length; ii++) {
-          const it = sec.items[ii]
-          if (!it.descripcion.trim()) continue
-          await budgetApi.createItem(budgetId, {
-            parent_id: parentItem.id,
-            description: it.descripcion,
-            code: `${si + 1}.${ii + 1}`,
-            unidad: it.unidad || 'gl',
-            cantidad: parseFloat(it.cantidad) || 1,
-            sort_order: (si + 1) * 100 + ii + 1,
-          })
-          totalItems++
-        }
-      }
-
-      // 3b. If plan mode with file but no pre-analyzed AI sections, analyze now
-      if (structureOption === 'plan' && planFile && aiSections.length === 0) {
-        try {
-          const formData = new FormData()
-          formData.append('file', planFile)
-          const aiRes = await budgetApi.analyzePlan(budgetId, formData)
-
-          if (aiRes.secciones.length > 0) {
-            // Flatten AI sections into items and insert via from-ai endpoint
-            const payload = aiRes.secciones.flatMap((sec) =>
-              sec.items.map((item) => ({
-                seccion_nombre: sec.nombre,
-                seccion_codigo: sec.codigo,
-                codigo: item.codigo,
-                descripcion: item.descripcion,
-                unidad: item.unidad,
-                cantidad: item.cantidad,
-                notas: item.notas,
-                notas_calculo: item.notas_calculo || '',
-                recursos: item.recursos,
-              }))
-            )
-            const insertRes = await budgetApi.addItemsFromAI(budgetId, payload)
-            totalItems += insertRes.inserted
-            totalSections += insertRes.sections_created
-          }
-        } catch (aiErr) {
-          // AI analysis failed -- budget created but without AI items.
-          // User can re-analyze from the AI page later.
-          console.warn('AI plan analysis failed during wizard:', aiErr)
-        }
-      }
-
-      // 4. Set indirect costs
-      try {
-        await budgetApi.updateIndirects(budgetId, {
-          estructura_pct: indirects.estructura,
-          jefatura_pct: indirects.jefatura,
-          logistica_pct: indirects.logistica,
-          herramientas_pct: indirects.herramientas,
-        })
-      } catch {
-        // Indirects endpoint may not exist yet - continue
-      }
-
-      // 5. Upload CSVs, Excel, or apply catalog
-      if (priceOption === 'csv' && csvEntries.length > 0) {
-        for (const entry of csvEntries) {
-          try {
-            await catalogApi.uploadCsv(entry.nombre, entry.tipo, entry.file)
-          } catch {
-            // Continue even if one CSV fails
-          }
-        }
-      } else if (priceOption === 'excel' && excelFile) {
-        try {
-          await catalogApi.uploadExcel(excelFile)
-        } catch {
-          // Continue even if Excel upload fails
-        }
-      } else if (priceOption === 'catalog' && selectedCatalog) {
-        try {
-          await catalogApi.apply(budgetId, selectedCatalog)
-        } catch {
-          // Continue even if catalog fails
-        }
-      }
-
-      setResult({
-        budgetId,
-        sectionsCount: totalSections,
-        itemsCount: totalItems,
-      })
-      setStep(4)
+      await budgetApi.remove(pendiente.budgetId)
+      setPendiente(null)
+      setShowAiReview(false)
     } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Error desconocido'
-      setError(`Error al crear el presupuesto: ${msg}`)
+      setError(
+        esSinPermiso(e)
+          ? `El presupuesto ya quedó creado con ${trabajos(pendiente.itemsCount)} y solo un administrador puede borrarlo, así que no se puede cancelar. Destildá los trabajos del plano que no quieras sumar y confirmá.`
+          : `No se pudo cancelar: ${errorText(e)}`,
+      )
     } finally {
       setCreating(false)
     }
@@ -621,6 +654,13 @@ export default function NewProject() {
         </div>
       </div>
     )
+  }
+
+  const cargandoIndirectos = step === PASO_INDIRECTOS && !indirectos && !indirectosError
+  let textoBoton = 'Siguiente'
+  if (step === PASO_INDIRECTOS) {
+    if (creating) textoBoton = planFile ? 'Analizando el plano con IA...' : 'Creando...'
+    else textoBoton = planFile ? 'Analizar plano y crear' : 'Crear presupuesto'
   }
 
   return (
@@ -684,7 +724,7 @@ export default function NewProject() {
           items={aiReviewItems}
           setItems={setAiReviewItems}
           onConfirm={handleConfirmReview}
-          onCancel={() => setShowAiReview(false)}
+          onCancel={handleCancelReview}
           confirming={creating}
           error={error}
         />
@@ -692,31 +732,10 @@ export default function NewProject() {
 
       {/* Step content */}
       <div className="max-w-4xl mx-auto">
-        {error && !showAiReview && (
-          <div className="mb-4 bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-lg">
-            {error}
-          </div>
+        {step === PASO_DATOS && (
+          <StepDatos project={project} setProject={setProject} listas={listas} listasError={listasError} />
         )}
-
-        {step === 0 && (
-          <StepDatos project={project} setProject={setProject} />
-        )}
-        {step === 1 && (
-          <StepPrecios
-            priceOption={priceOption}
-            setPriceOption={setPriceOption}
-            csvEntries={csvEntries}
-            onAddCsvEntry={addCsvEntry}
-            onRemoveCsvEntry={removeCsvEntry}
-            excelFile={excelFile}
-            setExcelFile={setExcelFile}
-            catalogs={catalogs}
-            selectedCatalog={selectedCatalog}
-            setSelectedCatalog={setSelectedCatalog}
-            loadCatalogs={loadCatalogs}
-          />
-        )}
-        {step === 2 && (
+        {step === PASO_ESTRUCTURA && (
           <StepEstructura
             structureOption={structureOption}
             setStructureOption={setStructureOption}
@@ -734,45 +753,54 @@ export default function NewProject() {
             jsonFile={jsonFile}
             jsonSections={jsonSections}
             onJsonFile={handleJsonFile}
-            templateTasks={templateTasks}
-            onTemplateTasks={setTemplateTasks}
+            onClearJson={clearJson}
+            seleccion={seleccion}
+            onSeleccion={setSeleccion}
+            trabajosTipicos={trabajosTipicos}
+            secciones={armado.secciones}
           />
         )}
-        {step === 3 && (
-          <StepIndirectos indirects={indirects} setIndirects={setIndirects} />
+        {step === PASO_INDIRECTOS && (
+          <StepIndirectos
+            indirectos={indirectos}
+            setIndirectos={setIndirectos}
+            generales={generales}
+            error={indirectosError}
+            onReintentar={cargarGenerales}
+          />
         )}
-        {step === 4 && result && (
+        {step === PASO_RESULTADO && result && (
           <StepResultado result={result} navigate={navigate} />
         )}
 
+        {/* Error: above the button, with what the server said */}
+        {error && !showAiReview && step < PASO_RESULTADO && (
+          <div role="alert" className="mt-6 bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-lg flex items-start gap-2">
+            <AlertTriangle size={16} className="flex-shrink-0 mt-0.5" />
+            <span>{error}</span>
+          </div>
+        )}
+
         {/* Navigation buttons */}
-        {step < 4 && (
-          <div className="flex items-center justify-between mt-8">
+        {step < PASO_RESULTADO && (
+          <div className={`flex items-center justify-between ${error ? 'mt-4' : 'mt-8'}`}>
             <button
               onClick={prev}
-              disabled={step === 0}
+              disabled={step === PASO_DATOS || creating}
               className="flex items-center gap-1.5 text-sm font-medium text-gray-500 hover:text-gray-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
             >
               <ChevronLeft size={16} /> Anterior
             </button>
             <button
               onClick={next}
-              disabled={!canAdvance() || creating}
+              disabled={creating || cargandoIndirectos}
               className="bg-[#2D8D68] hover:bg-[#1B5E4B] disabled:opacity-50 text-white font-semibold px-6 py-2.5 rounded-lg text-sm transition-colors flex items-center gap-2"
             >
               {creating && (
                 <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
               )}
-              {step === 3
-                ? creating
-                  ? structureOption === 'plan' && planFile && aiSections.length === 0
-                    ? 'Analizando plano con IA...'
-                    : 'Creando...'
-                  : structureOption === 'plan' && planFile && aiSections.length === 0
-                    ? 'Analizar plano con IA'
-                    : 'Crear Presupuesto'
-                : 'Siguiente'}
-              {!creating && step < 3 && <ChevronRight size={16} />}
+              {textoBoton}
+              {!creating && step < PASO_INDIRECTOS && <ChevronRight size={16} />}
             </button>
           </div>
         )}
@@ -781,14 +809,96 @@ export default function NewProject() {
   )
 }
 
-// ─── Step 1: Datos del Proyecto ─────────────────────────────────────────────
+// ─── Paso 1: Datos ──────────────────────────────────────────────────────────
+
+function juntar(partes: string[]): string {
+  return partes.length <= 1 ? partes.join('') : `${partes.slice(0, -1).join(', ')} y ${partes[partes.length - 1]}`
+}
+
+// "Maestro TERRAC - Materiales" + "Maestro TERRAC - Mano de obra" → Maestro TERRAC (Materiales y Mano de obra)
+function gruposListas(l: PriceCatalog[]): { nombre: string; partes: string[] }[] {
+  const grupos: { nombre: string; partes: string[] }[] = []
+  for (const c of l) {
+    const i = c.name.lastIndexOf(' - ')
+    const nombre = i > 0 ? c.name.slice(0, i) : c.name
+    const g = grupos.find((x) => x.nombre === nombre)
+    const parte = i > 0 ? c.name.slice(i + 3) : ''
+    if (g) g.partes.push(parte)
+    else grupos.push({ nombre, partes: [parte] })
+  }
+  return grupos
+}
+
+function nombresListas(l: PriceCatalog[]) {
+  const grupos = gruposListas(l)
+  return grupos.map((g, i) => {
+    const partes = g.partes.filter(Boolean)
+    return (
+      <span key={g.nombre}>
+        {i > 0 && (i === grupos.length - 1 ? ' y ' : ', ')}
+        {g.partes.length === 1 && partes.length === 1 ? (
+          <strong>{g.nombre} - {partes[0]}</strong>
+        ) : (
+          <>
+            <strong>{g.nombre}</strong>
+            {partes.length > 0 && <> ({juntar(partes)})</>}
+          </>
+        )}
+      </span>
+    )
+  })
+}
+
+function LineaPrecios({ listas, error }: { listas: PriceCatalog[] | null; error: string }) {
+  const hoy = fmtDate(todayIso())
+  const enlace = (
+    <a href="/app/catalogs" target="_blank" rel="noreferrer" className="text-[#2D8D68] underline underline-offset-2 hover:text-[#1B5E4B]">
+      Lista de precios
+    </a>
+  )
+  let texto: React.ReactNode
+  if (error) {
+    texto = <>Precios: no se pudo leer la {enlace} ({error}).</>
+  } else if (listas === null) {
+    texto = <>Precios: buscando la lista oficial...</>
+  } else {
+    const oficiales = listas.filter((c) => c.oficial)
+    if (oficiales.length > 0 && gruposListas(oficiales).length === 1) {
+      texto = <>Precios: se usa la lista oficial {nombresListas(oficiales)}, con precios al {hoy}.</>
+    } else if (oficiales.length > 1) {
+      texto = <>Precios: se usan las listas oficiales {nombresListas(oficiales)}, con precios al {hoy}.</>
+    } else if (listas.length > 0) {
+      texto = (
+        <>
+          Precios: todavía no hay lista oficial, así que se usa el precio más nuevo de todas las listas al {hoy}.
+          Podés marcar una como oficial en {enlace}.
+        </>
+      )
+    } else {
+      texto = (
+        <>
+          Precios: todavía no hay listas de precios, así que los materiales van a quedar sin precio hasta que subas una en {enlace}.
+        </>
+      )
+    }
+  }
+  return (
+    <p data-testid="linea-precios" className="text-xs text-gray-500 mt-6 pt-4 border-t border-gray-100">
+      {texto}
+    </p>
+  )
+}
 
 function StepDatos({
   project,
   setProject,
+  listas,
+  listasError,
 }: {
   project: ProjectData
   setProject: React.Dispatch<React.SetStateAction<ProjectData>>
+  listas: PriceCatalog[] | null
+  listasError: string
 }) {
   function update(field: keyof ProjectData, value: string) {
     setProject((prev) => ({ ...prev, [field]: value }))
@@ -796,15 +906,16 @@ function StepDatos({
 
   return (
     <div className="bg-white rounded-xl border p-6 fade-in">
-      <h2 className="text-lg font-bold text-gray-900 mb-1">Datos del Proyecto</h2>
-      <p className="text-sm text-gray-500 mb-6">Informacion basica de la obra.</p>
+      <h2 className="text-lg font-bold text-gray-900 mb-1">Datos del presupuesto</h2>
+      <p className="text-sm text-gray-500 mb-6">Información básica de la obra.</p>
 
       <div className="space-y-5">
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Nombre del proyecto <span className="text-red-400">*</span>
+          <label htmlFor="np-nombre" className="block text-sm font-medium text-gray-700 mb-1">
+            Nombre del presupuesto <span className="text-red-400">*</span>
           </label>
           <input
+            id="np-nombre"
             type="text"
             value={project.name}
             onChange={(e) => update('name', e.target.value)}
@@ -815,285 +926,24 @@ function StepDatos({
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Descripcion</label>
+          <label htmlFor="np-descripcion" className="block text-sm font-medium text-gray-700 mb-1">Descripción</label>
           <textarea
+            id="np-descripcion"
             value={project.description}
             onChange={(e) => update('description', e.target.value)}
-            placeholder="Descripcion breve de la obra..."
+            placeholder="Descripción breve de la obra..."
             rows={3}
             className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#2D8D68]/30 focus:border-[#2D8D68] transition-all resize-none"
           />
         </div>
-
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Superficie total (m2)
-            </label>
-            <input
-              type="number"
-              value={project.superficie}
-              onChange={(e) => update('superficie', e.target.value)}
-              placeholder="Ej: 250"
-              className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#2D8D68]/30 focus:border-[#2D8D68] transition-all"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Duracion estimada (meses)
-            </label>
-            <input
-              type="number"
-              value={project.duracion}
-              onChange={(e) => update('duracion', e.target.value)}
-              placeholder="Ej: 12"
-              className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#2D8D68]/30 focus:border-[#2D8D68] transition-all"
-            />
-          </div>
-        </div>
       </div>
+
+      <LineaPrecios listas={listas} error={listasError} />
     </div>
   )
 }
 
-// ─── Step 2: Lista de Precios ───────────────────────────────────────────────
-
-const CSV_TIPO_LABELS: Record<CsvTipo, string> = {
-  material: 'Material',
-  mano_obra: 'Mano de obra',
-  equipo: 'Equipo',
-  subcontrato: 'Subcontrato',
-}
-
-const CSV_TIPO_COLORS: Record<CsvTipo, string> = {
-  material: 'bg-blue-50 text-blue-700',
-  mano_obra: 'bg-orange-50 text-orange-700',
-  equipo: 'bg-purple-50 text-purple-700',
-  subcontrato: 'bg-gray-100 text-gray-600',
-}
-
-function StepPrecios({
-  priceOption,
-  setPriceOption,
-  csvEntries,
-  onAddCsvEntry,
-  onRemoveCsvEntry,
-  excelFile,
-  setExcelFile,
-  catalogs,
-  selectedCatalog,
-  setSelectedCatalog,
-  loadCatalogs,
-}: {
-  priceOption: PriceOption
-  setPriceOption: (v: PriceOption) => void
-  csvEntries: CsvEntry[]
-  onAddCsvEntry: (nombre: string, tipo: CsvTipo, file: File) => void
-  onRemoveCsvEntry: (id: string) => void
-  excelFile: File | null
-  setExcelFile: (f: File | null) => void
-  catalogs: PriceCatalog[]
-  selectedCatalog: string
-  setSelectedCatalog: (v: string) => void
-  loadCatalogs: () => void
-}) {
-  const [newNombre, setNewNombre] = useState('')
-  const [newTipo, setNewTipo] = useState<CsvTipo>('material')
-  const [newFile, setNewFile] = useState<File | null>(null)
-  const fileInputRef = useRef<HTMLInputElement>(null)
-
-  function handleAgregar() {
-    if (!newNombre.trim() || !newFile) return
-    onAddCsvEntry(newNombre.trim(), newTipo, newFile)
-    setNewNombre('')
-    setNewTipo('material')
-    setNewFile(null)
-    if (fileInputRef.current) fileInputRef.current.value = ''
-  }
-
-  return (
-    <div className="fade-in space-y-4">
-      <div className="bg-white rounded-xl border p-6">
-        <h2 className="text-lg font-bold text-gray-900 mb-1">Lista de Precios</h2>
-        <p className="text-sm text-gray-500 mb-6">
-          Podés cargar una lista de precios ahora o hacerlo despues.
-        </p>
-
-        <div className="grid grid-cols-4 gap-3 mb-6">
-          <OptionCard
-            active={priceOption === 'csv'}
-            onClick={() => setPriceOption('csv')}
-            icon={<Upload size={20} />}
-            title="Subir CSVs"
-            description="Archivos por tipo"
-          />
-          <OptionCard
-            active={priceOption === 'excel'}
-            onClick={() => setPriceOption('excel')}
-            icon={<FileSpreadsheet size={20} />}
-            title="Subir Excel"
-            description="Con 4 solapas"
-          />
-          <OptionCard
-            active={priceOption === 'catalog'}
-            onClick={() => {
-              setPriceOption('catalog')
-              loadCatalogs()
-            }}
-            icon={<FileText size={20} />}
-            title="Lista existente"
-            description="Usar uno ya cargado"
-          />
-          <OptionCard
-            active={priceOption === 'skip'}
-            onClick={() => setPriceOption('skip')}
-            icon={<ChevronRight size={20} />}
-            title="Cargar despues"
-            description="Saltear este paso"
-          />
-        </div>
-
-        {priceOption === 'csv' && (
-          <div className="fade-in space-y-4">
-            {/* Add form */}
-            <div className="flex items-end gap-2">
-              <div className="flex-1">
-                <label className="block text-xs font-medium text-gray-600 mb-1">Nombre</label>
-                <input
-                  type="text"
-                  value={newNombre}
-                  onChange={(e) => setNewNombre(e.target.value)}
-                  placeholder="Ej: Materiales marzo 2025"
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#2D8D68]/30 focus:border-[#2D8D68] transition-all"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Tipo</label>
-                <select
-                  value={newTipo}
-                  onChange={(e) => setNewTipo(e.target.value as CsvTipo)}
-                  className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#2D8D68]/30 focus:border-[#2D8D68] bg-white"
-                >
-                  <option value="material">Material</option>
-                  <option value="mano_obra">Mano de obra</option>
-                  <option value="equipo">Equipo</option>
-                  <option value="subcontrato">Subcontrato</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Archivo</label>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".csv,.tsv,.txt"
-                  onChange={(e) => setNewFile(e.target.files?.[0] ?? null)}
-                  className="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white file:mr-2 file:text-xs file:font-medium file:border-0 file:bg-[#E8F5EE] file:text-[#1B5E4B] file:rounded file:px-2 file:py-0.5 cursor-pointer"
-                />
-              </div>
-              <button
-                onClick={handleAgregar}
-                disabled={!newNombre.trim() || !newFile}
-                className="flex items-center gap-1.5 bg-[#2D8D68] hover:bg-[#1B5E4B] disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold px-4 py-2 rounded-lg text-sm transition-colors whitespace-nowrap"
-              >
-                <Plus size={15} /> Agregar
-              </button>
-            </div>
-
-            {/* Uploaded CSV list */}
-            {csvEntries.length === 0 ? (
-              <div className="text-sm text-gray-400 bg-gray-50 rounded-lg p-4 text-center border border-dashed border-gray-200">
-                Aun no agregaste ningun CSV. Completa el formulario y hace clic en Agregar.
-              </div>
-            ) : (
-              <div className="space-y-2">
-                <div className="text-xs font-medium text-gray-500 mb-1">
-                  {csvEntries.length} archivo{csvEntries.length !== 1 ? 's' : ''} para subir
-                </div>
-                {csvEntries.map((entry) => (
-                  <div
-                    key={entry.id}
-                    className="flex items-center gap-3 bg-gray-50 border border-gray-200 rounded-lg px-4 py-2.5"
-                  >
-                    <span className="font-medium text-sm text-gray-800 flex-1 truncate">{entry.nombre}</span>
-                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap ${CSV_TIPO_COLORS[entry.tipo]}`}>
-                      {CSV_TIPO_LABELS[entry.tipo]}
-                    </span>
-                    <span className="text-xs text-gray-500 truncate max-w-[180px]">{entry.file.name}</span>
-                    <button
-                      onClick={() => onRemoveCsvEntry(entry.id)}
-                      className="text-gray-400 hover:text-red-500 transition-colors p-1 flex-shrink-0"
-                      title="Quitar"
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {priceOption === 'excel' && (
-          <div className="fade-in space-y-3">
-            <div className="bg-[#E8F5EE] rounded-lg px-4 py-2.5 border border-green-200 text-sm text-[#143D34]">
-              El Excel debe tener solapas: <strong>Materiales</strong>, <strong>Mano de obra</strong>, <strong>Equipos</strong>, <strong>Subcontratos</strong> (o variantes como Mat, MO, Eq, Sub).
-              Se crea un catálogo por solapa.
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Archivo Excel (.xlsx)</label>
-              <input
-                type="file"
-                accept=".xlsx,.xls"
-                onChange={(e) => setExcelFile(e.target.files?.[0] ?? null)}
-                className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm bg-white file:mr-3 file:text-sm file:font-medium file:border-0 file:bg-[#E8F5EE] file:text-[#1B5E4B] file:rounded file:px-3 file:py-1 cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#2D8D68]/30"
-              />
-              {excelFile && (
-                <div className="mt-1.5 text-xs text-[#2D8D68] font-medium">
-                  {excelFile.name} ({(excelFile.size / 1024).toFixed(0)} KB) — se va a subir al crear el presupuesto
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {priceOption === 'catalog' && (
-          <div className="fade-in">
-            {catalogs.length === 0 ? (
-              <div className="text-sm text-gray-500 bg-gray-50 rounded-lg p-4 text-center">
-                No hay listas de precios cargadas todavía. Podés subir una desde la sección Lista de precios.
-              </div>
-            ) : (
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Seleccioná una lista
-                </label>
-                <select
-                  value={selectedCatalog}
-                  onChange={(e) => setSelectedCatalog(e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#2D8D68]/30 focus:border-[#2D8D68] bg-white"
-                >
-                  {catalogs.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name} ({new Date(c.created_at).toLocaleDateString('es-AR')})
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-          </div>
-        )}
-
-        {priceOption === 'skip' && (
-          <div className="fade-in bg-[#E8F5EE] rounded-lg p-4 border border-green-200 text-sm text-[#143D34]">
-            Vas a poder cargar precios mas tarde desde el Editor o la sección Lista de precios.
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
-
-// ─── Step 3: Estructura de Obra ─────────────────────────────────────────────
+// ─── Paso 2: Estructura de obra ─────────────────────────────────────────────
 
 function StepEstructura({
   structureOption,
@@ -1112,8 +962,11 @@ function StepEstructura({
   jsonFile,
   jsonSections,
   onJsonFile,
-  templateTasks,
-  onTemplateTasks,
+  onClearJson,
+  seleccion,
+  onSeleccion,
+  trabajosTipicos,
+  secciones,
 }: {
   structureOption: StructureOption
   setStructureOption: (v: StructureOption) => void
@@ -1131,15 +984,19 @@ function StepEstructura({
   jsonFile: File | null
   jsonSections: Section[]
   onJsonFile: (f: File) => void
-  templateTasks: SelectedTask[]
-  onTemplateTasks: (tasks: SelectedTask[]) => void
+  onClearJson: () => void
+  seleccion: SelectionState
+  onSeleccion: (next: SelectionState) => void
+  trabajosTipicos: number
+  secciones: Secciones
 }) {
+  const totalTrabajos = secciones.reduce((s, r) => s + r.items.length, 0)
   return (
     <div className="fade-in space-y-4">
       <div className="bg-white rounded-xl border p-6">
-        <h2 className="text-lg font-bold text-gray-900 mb-1">Estructura de Obra</h2>
+        <h2 className="text-lg font-bold text-gray-900 mb-1">Estructura de obra</h2>
         <p className="text-sm text-gray-500 mb-6">
-          Define las secciones e items de tu presupuesto. Podes combinar varias fuentes.
+          Definí los rubros y trabajos del presupuesto. Podés combinar varias fuentes.
         </p>
 
         <div className="grid grid-cols-4 gap-3 mb-6">
@@ -1147,22 +1004,22 @@ function StepEstructura({
             active={structureOption === 'template'}
             onClick={() => setStructureOption('template')}
             icon={<ClipboardList size={20} />}
-            title="Fórmula de obra"
-            description="Tareas tipicas de obra"
+            title="Trabajos típicos"
+            description="Elegir de una lista de obra"
           />
           <OptionCard
             active={structureOption === 'plan'}
             onClick={() => setStructureOption('plan')}
             icon={<Image size={20} />}
-            title="Subir plano"
-            description="IA analiza la imagen"
+            title="Subir plano (IA)"
+            description="La IA lee el plano"
           />
           <OptionCard
             active={structureOption === 'manual'}
             onClick={() => setStructureOption('manual')}
             icon={<Building2 size={20} />}
             title="Definir manual"
-            description="Armar secciones e items"
+            description="Armar rubros y trabajos"
           />
           <OptionCard
             active={structureOption === 'json'}
@@ -1173,19 +1030,28 @@ function StepEstructura({
           />
         </div>
 
-        {/* Combined sources indicator */}
-        {templateTasks.length > 0 && structureOption !== 'template' && (
-          <div className="mb-4 bg-[#E8F5EE] rounded-lg px-4 py-2.5 border border-green-200 flex items-center gap-2 text-sm text-[#143D34]">
-            <ClipboardList size={14} className="text-[#2D8D68]" />
-            <span className="font-medium">{templateTasks.length} ítems de fórmula</span>
-            <span className="text-gray-500">se van a combinar con esta fuente.</span>
-          </div>
-        )}
+        {/* What is going to be created, from every source */}
+        <div data-testid="resumen-estructura" className="mb-4 bg-[#E8F5EE] rounded-lg px-4 py-2.5 border border-green-200 text-sm text-[#143D34]">
+          {totalTrabajos > 0 || secciones.length > 0 ? (
+            <>
+              Se van a crear <strong>{secciones.length} {secciones.length === 1 ? 'rubro' : 'rubros'}</strong> con{' '}
+              <strong>{totalTrabajos} {totalTrabajos === 1 ? 'trabajo' : 'trabajos'}</strong>
+              {trabajosTipicos > 0 && structureOption !== 'template' && (
+                <span className="text-gray-500"> ({trabajosTipicos} de trabajos típicos)</span>
+              )}
+              {planFile && <span>, más los que encuentre la IA en el plano <strong>{planFile.name}</strong></span>}.
+            </>
+          ) : planFile ? (
+            <>Se van a crear los rubros y trabajos que encuentre la IA en el plano <strong>{planFile.name}</strong>.</>
+          ) : (
+            <>Todavía no elegiste trabajos: si seguís, el presupuesto se crea vacío.</>
+          )}
+        </div>
 
-        {/* Template selector */}
+        {/* Trabajos típicos */}
         {structureOption === 'template' && (
           <div className="fade-in">
-            <GenericTaskSelector onSelectionChange={onTemplateTasks} />
+            <GenericTaskSelector selection={seleccion} onChange={onSeleccion} />
           </div>
         )}
 
@@ -1194,19 +1060,20 @@ function StepEstructura({
           <div className="fade-in">
             <FileUpload
               accept=".jpg,.jpeg,.png,.pdf"
-              label="Subi el plano de obra"
+              label="Subí el plano de obra"
               hint="JPG, PNG o PDF"
               onFile={(f) => setPlanFile(f)}
+              value={planFile}
+              onClear={() => setPlanFile(null)}
               icon={<Image size={48} className="text-gray-300" />}
             />
             {planFile && (
               <div className="mt-4 bg-[#FEF9EE] rounded-lg p-4 border border-[#E0A33A]/30 flex items-start gap-3">
                 <Sparkles size={20} className="text-[#E0A33A] flex-shrink-0 mt-0.5" />
                 <div>
-                  <p className="text-sm font-medium text-gray-800">IA va a analizar este plano automaticamente</p>
+                  <p className="text-sm font-medium text-gray-800">La IA va a analizar este plano al crear el presupuesto</p>
                   <p className="text-xs text-gray-500 mt-1">
-                    Al crear el presupuesto, la IA va a analizar el plano y generar las secciones
-                    e items automaticamente. Esto puede tardar unos segundos.
+                    Antes de sumarlos, te muestra los trabajos que encontró para que los revises. Puede tardar unos segundos.
                   </p>
                 </div>
               </div>
@@ -1228,6 +1095,7 @@ function StepEstructura({
                     <button
                       onClick={() => moveSectionUp(si)}
                       disabled={si === 0}
+                      title="Subir rubro"
                       className="text-gray-400 hover:text-gray-600 disabled:opacity-20 transition-colors"
                     >
                       <GripVertical size={14} />
@@ -1235,6 +1103,7 @@ function StepEstructura({
                     <button
                       onClick={() => moveSectionDown(si)}
                       disabled={si === sections.length - 1}
+                      title="Bajar rubro"
                       className="text-gray-400 hover:text-gray-600 disabled:opacity-20 transition-colors"
                     >
                       <GripVertical size={14} />
@@ -1245,13 +1114,13 @@ function StepEstructura({
                     type="text"
                     value={sec.nombre}
                     onChange={(e) => updateSectionName(sec.id, e.target.value)}
-                    placeholder="Nombre de seccion (ej: Tareas Preliminares)"
+                    placeholder="Nombre del rubro (ej: Tareas preliminares)"
                     className="flex-1 bg-transparent border-b border-gray-300 text-sm font-medium text-gray-800 focus:outline-none focus:border-[#2D8D68] px-1 py-0.5 transition-colors"
                   />
                   <button
                     onClick={() => removeSection(sec.id)}
                     className="text-gray-400 hover:text-red-500 transition-colors p-1"
-                    title="Eliminar seccion"
+                    title="Borrar rubro"
                   >
                     <Trash2 size={14} />
                   </button>
@@ -1268,7 +1137,7 @@ function StepEstructura({
                         type="text"
                         value={it.descripcion}
                         onChange={(e) => updateItem(sec.id, it.id, 'descripcion', e.target.value)}
-                        placeholder="Descripcion del item"
+                        placeholder="Descripción del trabajo"
                         className="flex-1 border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-[#2D8D68]/30 focus:border-[#2D8D68] transition-all"
                       />
                       <select
@@ -1283,6 +1152,7 @@ function StepEstructura({
                         <option value="kg">kg</option>
                         <option value="un">un</option>
                         <option value="hs">hs</option>
+                        <option value="mes">mes</option>
                       </select>
                       <input
                         type="number"
@@ -1293,6 +1163,7 @@ function StepEstructura({
                       />
                       <button
                         onClick={() => removeItem(sec.id, it.id)}
+                        title="Borrar trabajo"
                         className="text-gray-400 hover:text-red-500 transition-colors p-1"
                       >
                         <Trash2 size={12} />
@@ -1303,7 +1174,7 @@ function StepEstructura({
                     onClick={() => addItem(sec.id)}
                     className="flex items-center gap-1 text-xs text-[#2D8D68] font-medium hover:text-[#1B5E4B] mt-2 transition-colors"
                   >
-                    <Plus size={12} /> Agregar item
+                    <Plus size={12} /> Agregar trabajo
                   </button>
                 </div>
               </div>
@@ -1313,7 +1184,7 @@ function StepEstructura({
               onClick={addSection}
               className="w-full border-2 border-dashed border-gray-300 rounded-lg py-3 text-sm font-medium text-gray-500 hover:border-[#2D8D68] hover:text-[#2D8D68] transition-colors flex items-center justify-center gap-2"
             >
-              <Plus size={16} /> Agregar seccion
+              <Plus size={16} /> Agregar rubro
             </button>
           </div>
         )}
@@ -1323,22 +1194,24 @@ function StepEstructura({
           <div className="fade-in">
             <FileUpload
               accept=".json"
-              label="Subi un archivo JSON"
-              hint='Formato: [{"nombre": "Seccion", "items": [{"descripcion": "...", "unidad": "m2", "cantidad": 10}]}]'
+              label="Subí un archivo JSON"
+              hint='Formato: [{"nombre": "Rubro", "items": [{"descripcion": "...", "unidad": "m2", "cantidad": 10}]}]'
               onFile={onJsonFile}
+              value={jsonFile}
+              onClear={onClearJson}
               icon={<FileJson size={48} className="text-gray-300" />}
             />
             {jsonFile && jsonSections.length > 0 && (
               <div className="mt-4 bg-[#E8F5EE] rounded-lg p-4 border border-green-200">
                 <div className="text-sm font-medium text-[#143D34] mb-2">
-                  Estructura importada: {jsonSections.length} secciones,{' '}
-                  {jsonSections.reduce((s, sec) => s + sec.items.length, 0)} items
+                  Estructura importada: {jsonSections.length} rubros,{' '}
+                  {jsonSections.reduce((s, sec) => s + sec.items.length, 0)} trabajos
                 </div>
                 <div className="space-y-1">
                   {jsonSections.map((sec, i) => (
                     <div key={sec.id} className="text-xs text-gray-600">
                       <span className="font-medium">{i + 1}. {sec.nombre}</span>
-                      <span className="text-gray-400 ml-2">({sec.items.length} items)</span>
+                      <span className="text-gray-400 ml-2">({sec.items.length} trabajos)</span>
                     </div>
                   ))}
                 </div>
@@ -1351,130 +1224,183 @@ function StepEstructura({
   )
 }
 
-// ─── Step 4: Costos Indirectos ──────────────────────────────────────────────
+// ─── Paso 3: Indirectos ─────────────────────────────────────────────────────
 
 function StepIndirectos({
-  indirects,
-  setIndirects,
+  indirectos,
+  setIndirectos,
+  generales,
+  error,
+  onReintentar,
 }: {
-  indirects: IndirectCosts
-  setIndirects: React.Dispatch<React.SetStateAction<IndirectCosts>>
+  indirectos: IndirectosTexto | null
+  setIndirectos: React.Dispatch<React.SetStateAction<IndirectosTexto | null>>
+  generales: IndirectosPct | null
+  error: string
+  onReintentar: () => void
 }) {
-  function update(field: keyof IndirectCosts, value: number) {
-    setIndirects((prev) => ({ ...prev, [field]: value }))
+  if (!indirectos) {
+    return (
+      <div className="bg-white rounded-xl border p-6 fade-in">
+        <h2 className="text-lg font-bold text-gray-900 mb-1">Costos indirectos</h2>
+        {error ? (
+          <div className="mt-4 text-sm text-gray-700 space-y-3">
+            <p className="text-red-700">No se pudieron leer los indirectos de la empresa: {error}</p>
+            <p>
+              Si creás el presupuesto igual, arranca con los de la empresa y los podés cambiar después en Cadena de Markups.
+            </p>
+            <button
+              onClick={onReintentar}
+              className="flex items-center gap-1.5 text-xs font-semibold text-[#2D8D68] hover:text-[#1B5E4B]"
+            >
+              <RotateCcw size={13} /> Volver a intentar
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 text-sm text-gray-400 mt-4">
+            <div className="w-4 h-4 border-2 border-[#2D8D68] border-t-transparent rounded-full animate-spin" />
+            Cargando los de la empresa...
+          </div>
+        )}
+      </div>
+    )
   }
 
-  const chain = [
-    { label: 'Estructura', key: 'estructura' as const, color: 'bg-orange-50 text-orange-800 border-orange-200' },
-    { label: 'Jefatura', key: 'jefatura' as const, color: 'bg-orange-50 text-orange-800 border-orange-200' },
-    { label: 'Logistica', key: 'logistica' as const, color: 'bg-orange-50 text-orange-800 border-orange-200' },
-    { label: 'Herramientas', key: 'herramientas' as const, color: 'bg-orange-50 text-orange-800 border-orange-200' },
-    { label: 'Beneficio', key: 'beneficio' as const, color: 'bg-[#E8F5EE] text-[#1B5E4B] border-green-200' },
-  ]
+  const valores = {} as IndirectosPct
+  for (const k of CLAVES_INDIRECTOS) valores[k] = numero(indirectos[k]) ?? 0
+  const cascada = cascadaIndirectos(100, valores)
+  const distintos = generales ? CLAVES_INDIRECTOS.filter((k) => numero(indirectos[k]) !== generales[k]) : []
 
-  const totalPct = chain.reduce((s, c) => s + indirects[c.key], 0)
+  function update(k: ClaveIndirecto, v: string) {
+    setIndirectos((prev) => (prev ? { ...prev, [k]: v } : prev))
+  }
+
+  const fila = (label: string, valor: number, fuerte = false) => (
+    <div className={`flex items-center justify-between ${fuerte ? 'font-semibold text-gray-800' : 'text-gray-600'}`}>
+      <span>{label}</span>
+      <span className="tabular-nums">{pesos(valor)}</span>
+    </div>
+  )
 
   return (
     <div className="fade-in space-y-4">
       <div className="bg-white rounded-xl border p-6">
-        <h2 className="text-lg font-bold text-gray-900 mb-1">Costos Indirectos</h2>
+        <h2 className="text-lg font-bold text-gray-900 mb-1">Costos indirectos</h2>
         <p className="text-sm text-gray-500 mb-6">
-          Configura los porcentajes que se aplican sobre el costo directo.
+          Arrancan con los de la empresa (Cadena de Markups). Lo que cambies acá vale solo para este presupuesto.
         </p>
 
-        {/* Visual chain */}
-        <div className="bg-gray-50 rounded-lg p-4 mb-6 overflow-x-auto">
-          <div className="flex items-center gap-2 min-w-max">
-            <div className="bg-blue-100 text-blue-800 px-3 py-2 rounded-lg font-medium text-sm whitespace-nowrap">
-              Directo
-            </div>
-            {chain.map((c) => (
-              <div key={c.key} className="flex items-center gap-2">
-                <ArrowRight size={14} className="text-gray-300 flex-shrink-0" />
-                <div className={`px-3 py-2 rounded-lg text-sm border whitespace-nowrap ${c.color}`}>
-                  +{indirects[c.key]}% {c.label}
+        <div className="grid grid-cols-1 md:grid-cols-[1fr_300px] gap-6">
+          <div>
+            {GRUPOS_INDIRECTOS.map((g) => (
+              <div key={g.titulo} className="mb-4">
+                <div className="flex items-baseline gap-2 mb-2 pb-1 border-b border-gray-100">
+                  <span className="text-[11px] font-bold tracking-widest text-gray-400 uppercase">{g.titulo}</span>
+                  <span className="text-[11px] text-gray-400">({g.nota})</span>
+                </div>
+                <div className="space-y-2">
+                  {g.claves.map((k) => {
+                    const general = generales?.[k]
+                    const cambiado = general !== undefined && numero(indirectos[k]) !== general
+                    return (
+                      <div key={k} className="flex items-center justify-between gap-3">
+                        <label htmlFor={`ind-${k}`} className="text-sm text-gray-700">
+                          {NOMBRE_INDIRECTO[k]}
+                          {cambiado && (
+                            <span className="ml-2 text-[11px] text-amber-600">(empresa: {general.toLocaleString('es-AR')} %)</span>
+                          )}
+                        </label>
+                        <div className="flex items-center gap-1">
+                          <input
+                            id={`ind-${k}`}
+                            type="number"
+                            min={0}
+                            max={100}
+                            step="0.1"
+                            value={indirectos[k]}
+                            onChange={(e) => update(k, e.target.value)}
+                            className="w-20 border border-gray-300 rounded px-2 py-1 text-sm text-right font-semibold text-[#2D8D68] tabular-nums focus:outline-none focus:ring-1 focus:ring-[#2D8D68]/30"
+                          />
+                          <span className="text-sm text-gray-500">%</span>
+                        </div>
+                      </div>
+                    )
+                  })}
                 </div>
               </div>
             ))}
-            <ArrowRight size={14} className="text-gray-300 flex-shrink-0" />
-            <div className="bg-[#2D8D68] text-white px-3 py-2 rounded-lg font-bold text-sm whitespace-nowrap">
-              NETO
-            </div>
+            {generales && distintos.length > 0 && (
+              <button
+                onClick={() => setIndirectos(aTexto(generales))}
+                className="flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-gray-700"
+              >
+                <RotateCcw size={12} /> Volver a los de la empresa
+              </button>
+            )}
+          </div>
+
+          {/* The same cascade the app uses, over $100 */}
+          <div className="bg-gray-50 rounded-lg border border-gray-100 p-4 self-start text-xs space-y-1.5">
+            <div className="text-[11px] font-bold text-gray-500 tracking-wider mb-2">CADA $100 DE COSTO DIRECTO</div>
+            {fila('Costo directo', cascada.directo)}
+            {fila('+ Indirectos', cascada.indirecto)}
+            {fila('+ Beneficio', cascada.beneficio)}
+            {fila('+ Impuestos', cascada.impuestos)}
+            <div className="border-t border-dashed border-gray-200 my-1" />
+            {fila('= Precio sin IVA', cascada.neto, true)}
+            {fila('+ IVA', cascada.iva)}
+            <div className="border-t border-gray-200 my-1" />
+            {fila('= Precio final', cascada.total_final, true)}
           </div>
         </div>
 
-        {/* Sliders */}
-        <div className="space-y-5">
-          {chain.map((c) => (
-            <div key={c.key}>
-              <div className="flex items-center justify-between mb-1">
-                <label className="text-sm font-medium text-gray-700">{c.label}</label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="number"
-                    min={0}
-                    max={50}
-                    value={indirects[c.key]}
-                    onChange={(e) => update(c.key, parseFloat(e.target.value) || 0)}
-                    className="w-16 border border-gray-300 rounded px-2 py-1 text-sm text-right font-bold text-[#2D8D68] focus:outline-none focus:ring-1 focus:ring-[#2D8D68]/30"
-                  />
-                  <span className="text-sm text-gray-500">%</span>
-                </div>
-              </div>
-              <input
-                type="range"
-                min={0}
-                max={50}
-                step={0.5}
-                value={indirects[c.key]}
-                onChange={(e) => update(c.key, parseFloat(e.target.value))}
-                className="w-full accent-[#2D8D68] h-2"
-              />
-            </div>
-          ))}
-        </div>
-
-        <div className="mt-6 pt-4 border-t border-gray-100 flex items-center justify-between">
-          <span className="text-sm text-gray-500">
-            Total sobre costo directo
+        <div className="mt-6 pt-4 border-t border-gray-100 flex items-center justify-between gap-4">
+          <span className="text-sm text-gray-600">Precio final por cada $100 de costo directo</span>
+          <span data-testid="precio-final-100" className="text-lg font-bold text-[#2D8D68] tabular-nums">
+            {pesos(cascada.total_final)}
           </span>
-          <span className="text-lg font-bold text-[#2D8D68]">{totalPct.toFixed(1)}%</span>
         </div>
       </div>
     </div>
   )
 }
 
-// ─── Step 5: Resultado ──────────────────────────────────────────────────────
+// ─── Paso 4: Resultado ──────────────────────────────────────────────────────
 
 function StepResultado({
   result,
   navigate,
 }: {
-  result: { budgetId: string; sectionsCount: number; itemsCount: number }
+  result: Resultado
   navigate: (path: string) => void
 }) {
   return (
     <div className="fade-in">
       <div className="bg-white rounded-xl border p-8 text-center">
-        {/* Success animation */}
-        <div className="w-20 h-20 bg-[#E8F5EE] rounded-full flex items-center justify-center mx-auto mb-4 animate-bounce">
+        <div className="w-20 h-20 bg-[#E8F5EE] rounded-full flex items-center justify-center mx-auto mb-4">
           <CheckCircle size={40} className="text-[#2D8D68]" />
         </div>
 
         <h2 className="text-xl font-bold text-gray-900 mb-2">Presupuesto creado</h2>
         <p className="text-sm text-gray-500 mb-6">
-          Tu presupuesto fue creado exitosamente y esta listo para editar.
+          Quedó creado y está listo para editar.
         </p>
+
+        {result.aviso && (
+          <div role="status" className="mb-6 mx-auto max-w-xl text-left bg-amber-50 border border-amber-200 text-amber-800 text-sm px-4 py-3 rounded-lg flex items-start gap-2">
+            <AlertTriangle size={16} className="flex-shrink-0 mt-0.5" />
+            <span>{result.aviso}</span>
+          </div>
+        )}
 
         <div className="flex justify-center gap-4 mb-8">
           <div className="bg-[#E8F5EE] rounded-lg px-6 py-4 text-center">
-            <div className="text-2xl font-bold text-[#2D8D68]">{result.sectionsCount}</div>
-            <div className="text-[10px] text-gray-500 font-medium">SECCIONES</div>
+            <div data-testid="rubros-creados" className="text-2xl font-bold text-[#2D8D68]">{result.sectionsCount}</div>
+            <div className="text-[10px] text-gray-500 font-medium">RUBROS</div>
           </div>
           <div className="bg-[#E8F5EE] rounded-lg px-6 py-4 text-center">
-            <div className="text-2xl font-bold text-[#2D8D68]">{result.itemsCount}</div>
-            <div className="text-[10px] text-gray-500 font-medium">ITEMS</div>
+            <div data-testid="trabajos-creados" className="text-2xl font-bold text-[#2D8D68]">{result.itemsCount}</div>
+            <div className="text-[10px] text-gray-500 font-medium">TRABAJOS</div>
           </div>
         </div>
 
@@ -1483,13 +1409,13 @@ function StepResultado({
             onClick={() => navigate(`/app/budgets/${result.budgetId}/editor`)}
             className="bg-[#2D8D68] hover:bg-[#1B5E4B] text-white font-semibold px-6 py-2.5 rounded-lg text-sm transition-colors"
           >
-            Abrir en Editor
+            Abrir en el editor
           </button>
           <button
             onClick={() => navigate('/app/dashboard')}
             className="bg-white border text-gray-600 px-6 py-2.5 rounded-lg text-sm hover:bg-gray-50 transition-colors"
           >
-            Volver al Dashboard
+            Volver a Mis Presupuestos
           </button>
         </div>
       </div>
@@ -1535,25 +1461,18 @@ function AIReviewPanel({
         <div className="bg-[#2D8D68] text-white rounded-t-2xl px-6 py-4 flex-shrink-0">
           <div className="flex items-center gap-2 mb-1">
             <CheckCircle size={18} />
-            <span className="font-bold text-base">REVISION DE ITEMS GENERADOS POR IA</span>
+            <span className="font-bold text-base">REVISIÓN DE LOS TRABAJOS QUE ENCONTRÓ LA IA</span>
           </div>
           <p className="text-xs text-white/80">
-            La IA genero {items.length} items.{' '}
+            La IA encontró {trabajos(items.length)}.{' '}
             {withTemplate.length > 0 && (
               <span className="text-green-200 font-medium">
                 {withTemplate.length} coinciden con tus fórmulas.{' '}
               </span>
             )}
-            Revisa y ajusta antes de crear el presupuesto.
+            Revisalos y ajustalos antes de sumarlos al presupuesto.
           </p>
         </div>
-
-        {/* Error */}
-        {error && (
-          <div className="bg-red-50 border-b border-red-200 text-red-700 text-xs px-6 py-2.5 flex-shrink-0">
-            {error}
-          </div>
-        )}
 
         {/* Toolbar */}
         <div className="px-6 py-2.5 border-b bg-gray-50 flex items-center justify-between flex-shrink-0">
@@ -1562,18 +1481,18 @@ function AIReviewPanel({
               onClick={() => setItems((prev) => prev.map((i) => ({ ...i, accepted: true })))}
               className="text-[10px] font-medium text-[#2D8D68] hover:text-[#1B5E4B] transition-colors"
             >
-              Seleccionar todos
+              Tildar todos
             </button>
             <span className="text-gray-300">|</span>
             <button
               onClick={() => setItems((prev) => prev.map((i) => ({ ...i, accepted: false })))}
               className="text-[10px] font-medium text-gray-500 hover:text-gray-700 transition-colors"
             >
-              Deseleccionar todos
+              Destildar todos
             </button>
           </div>
           <span className="text-[10px] text-gray-400">
-            {accepted.length} de {items.length} seleccionados
+            {accepted.length} de {items.length} tildados
           </span>
         </div>
 
@@ -1589,6 +1508,9 @@ function AIReviewPanel({
               {/* Checkbox */}
               <button
                 onClick={() => toggle(item._key)}
+                role="checkbox"
+                aria-checked={item.accepted}
+                aria-label={item.descripcion}
                 className={`mt-0.5 w-5 h-5 rounded border-2 flex-shrink-0 flex items-center justify-center transition-colors ${
                   item.accepted
                     ? 'bg-[#2D8D68] border-[#2D8D68] text-white'
@@ -1600,7 +1522,6 @@ function AIReviewPanel({
 
               {/* Content */}
               <div className="flex-1 min-w-0">
-                {/* Top row: code + description + unidad + cantidad */}
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-[10px] text-gray-400 font-mono">{item.codigo}</span>
                   <span className="text-xs font-medium text-gray-800 flex-1 min-w-0 truncate">
@@ -1610,7 +1531,7 @@ function AIReviewPanel({
                     {item.unidad}
                   </span>
                   <div className="flex items-center gap-1 flex-shrink-0">
-                    <span className="text-[10px] text-gray-400">Cant:</span>
+                    <span className="text-[10px] text-gray-400">Cant.:</span>
                     <input
                       type="number"
                       value={item.cantidad}
@@ -1632,7 +1553,7 @@ function AIReviewPanel({
                   ) : (
                     <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
                       <AlertTriangle size={9} />
-                      Sin fórmula — se usara composicion estimada por IA
+                      Sin fórmula: se usa la composición que estimó la IA
                     </span>
                   )}
                 </div>
@@ -1641,6 +1562,13 @@ function AIReviewPanel({
           ))}
         </div>
 
+        {/* Error: above the buttons */}
+        {error && (
+          <div role="alert" className="bg-red-50 border-t border-red-200 text-red-700 text-xs px-6 py-2.5 flex-shrink-0">
+            {error}
+          </div>
+        )}
+
         {/* Footer */}
         <div className="px-6 py-4 border-t bg-gray-50 rounded-b-2xl flex items-center justify-between flex-shrink-0">
           <button
@@ -1648,17 +1576,21 @@ function AIReviewPanel({
             disabled={confirming}
             className="text-sm text-gray-500 hover:text-gray-700 disabled:opacity-40 transition-colors"
           >
-            Cancelar
+            Cancelar (no se crea nada)
           </button>
           <button
             onClick={onConfirm}
-            disabled={accepted.length === 0 || confirming}
+            disabled={confirming}
             className="bg-[#2D8D68] hover:bg-[#1B5E4B] disabled:opacity-50 text-white font-semibold px-6 py-2.5 rounded-lg text-sm transition-colors flex items-center gap-2"
           >
             {confirming && (
               <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
             )}
-            {confirming ? 'Creando...' : `Confirmar y crear (${accepted.length} items)`}
+            {confirming
+              ? 'Creando...'
+              : accepted.length === 0
+                ? 'Crear sin los trabajos del plano'
+                : `Confirmar y crear (${trabajos(accepted.length)})`}
           </button>
         </div>
       </div>
@@ -1684,6 +1616,7 @@ function OptionCard({
   return (
     <button
       onClick={onClick}
+      aria-pressed={active}
       className={`p-4 rounded-lg border-2 text-left transition-all ${
         active
           ? 'border-[#2D8D68] bg-[#E8F5EE]'

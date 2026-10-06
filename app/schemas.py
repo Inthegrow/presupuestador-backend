@@ -167,10 +167,16 @@ class SeccionInput(BaseModel):
 
 
 class IndirectConfigInput(BaseModel):
-    estructura_pct: float = 0
-    jefatura_pct: float = 0
-    logistica_pct: float = 0
-    herramientas_pct: float = 0
+    """% of this budget only (whole numbers: 15 = 15%). A missing one keeps the general value."""
+    imprevistos_pct: float | None = Field(default=None, ge=0, le=100)
+    estructura_pct: float | None = Field(default=None, ge=0, le=100)
+    jefatura_pct: float | None = Field(default=None, ge=0, le=100)
+    logistica_pct: float | None = Field(default=None, ge=0, le=100)
+    herramientas_pct: float | None = Field(default=None, ge=0, le=100)
+    beneficio_pct: float | None = Field(default=None, ge=0, le=100)
+    ingresos_brutos_pct: float | None = Field(default=None, ge=0, le=100)
+    imp_cheque_pct: float | None = Field(default=None, ge=0, le=100)
+    iva_pct: float | None = Field(default=None, ge=0, le=100)
 
 
 class CreateFullBudget(BaseModel):

@@ -86,9 +86,10 @@ async def create_full_budget(payload: CreateFullBudget, user: dict = Depends(req
     org_id = user["org_id"]
 
     # 1. Create the budget record (indirect % start with the general ones)
+    # Only this budget: the general values (indirect_config) do not change.
     indirectos = initial_indirects(db, org_id)
     if payload.indirectos:
-        indirectos.update(payload.indirectos.model_dump())
+        indirectos.update(payload.indirectos.model_dump(exclude_none=True))
     budget_data: dict = {
         "org_id": org_id,
         "name": payload.name,

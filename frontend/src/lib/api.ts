@@ -18,6 +18,7 @@ import type {
   TemplateResource,
   Me,
 } from '../types'
+import type { IndirectosPct } from './cascada'
 
 const BASE_URL = (import.meta.env.VITE_API_URL as string) || '/api'
 
@@ -136,7 +137,7 @@ function postFile<T>(path: string, formData: FormData): Promise<T> {
     })
     if (!res.ok) {
       const text = await res.text()
-      throw new Error(`${res.status}: ${text}`)
+      throw new ApiError(res.status, text)
     }
     return res.json() as Promise<T>
   })
@@ -260,13 +261,9 @@ export const budgetApi = {
   // Analysis
   getAnalysis: (id: string) => get<AnalysisResponse>(`/budgets/${id}/analysis`),
 
-  // Create full budget (wizard)
-  createFull: (data: {
-    name: string
-    description?: string
-    sections?: { nombre: string; items: { descripcion: string; unidad: string; cantidad: number }[] }[]
-    indirects?: { estructura_pct: number; jefatura_pct: number; logistica_pct: number; herramientas_pct: number }
-  }) => post<{ budget_id: string; sections_created: number; items_created: number }>('/budgets/create-full', data),
+  // Presupuesto completo de una vez (asistente "Nuevo Presupuesto"): rubros con sus trabajos adentro
+  // y los % de esta obra (los que falten quedan como los de la empresa)
+  createFull: (data: CreateFullPayload) => post<CreateFullResult>('/budgets/create-full', data),
 
   // Versions
   getVersions: (id: string) => get<BudgetVersion[]>(`/budgets/${id}/versions`),
@@ -275,6 +272,25 @@ export const budgetApi = {
   updatePrices: (id: string, fecha?: string) =>
     post<PriceUpdateResult>(`/budgets/${id}/actualizar-precios`, fecha ? { fecha } : {}),
   getVersion: (id: string, vid: string) => get<BudgetVersion>(`/budgets/${id}/versions/${vid}`),
+}
+
+// ─── Asistente "Nuevo Presupuesto" ─────────────────────────────────────────────
+
+export interface CreateFullPayload {
+  name: string
+  description?: string
+  secciones: {
+    codigo: string
+    nombre: string
+    items: { codigo: string; descripcion: string; unidad: string; cantidad: number }[]
+  }[]
+  indirectos?: Partial<IndirectosPct>
+}
+
+export interface CreateFullResult {
+  budget: Budget
+  sections_created: number
+  items_created: number
 }
 
 // ─── Template API ──────────────────────────────────────────────────────────────

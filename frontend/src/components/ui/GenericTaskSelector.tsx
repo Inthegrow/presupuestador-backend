@@ -18,11 +18,13 @@ interface ItemSelection {
   cantidad: string
 }
 
-type SelectionState = Record<string, Record<number, ItemSelection>>
+// Lo tildado y la cantidad escrita, por rubro y renglón. Lo guarda quien usa el selector,
+// así no se pierde al ir y volver entre pasos.
+export type SelectionState = Record<string, Record<number, ItemSelection>>
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-function buildInitialState(template: GenericTaskCategory[]): SelectionState {
+export function seleccionInicial(template: GenericTaskCategory[] = GENERIC_TASK_TEMPLATE): SelectionState {
   const state: SelectionState = {}
   for (const cat of template) {
     state[cat.code] = {}
@@ -38,65 +40,42 @@ function buildInitialState(template: GenericTaskCategory[]): SelectionState {
   return state
 }
 
+/** Los trabajos tildados, en el orden de la lista. Cantidad vacía o inválida = 1. */
+export function trabajosElegidos(selection: SelectionState): SelectedTask[] {
+  const tasks: SelectedTask[] = []
+  for (const cat of GENERIC_TASK_TEMPLATE) {
+    const catSel = selection[cat.code] ?? {}
+    for (let i = 0; i < cat.items.length; i++) {
+      const itemSel = catSel[i]
+      if (itemSel?.selected) {
+        tasks.push({
+          categoryCode: cat.code,
+          categoryName: cat.nombre,
+          descripcion: cat.items[i].descripcion,
+          unidad: cat.items[i].unidad,
+          cantidad: parseFloat(itemSel.cantidad.replace(',', '.')) || 1,
+        })
+      }
+    }
+  }
+  return tasks
+}
+
 // ─── Component ──────────────────────────────────────────────────────────────
 
 interface GenericTaskSelectorProps {
-  onSelectionChange: (tasks: SelectedTask[]) => void
+  selection: SelectionState
+  onChange: (next: SelectionState) => void
 }
 
-export default function GenericTaskSelector({ onSelectionChange }: GenericTaskSelectorProps) {
-  const [selection, setSelection] = useState<SelectionState>(() =>
-    buildInitialState(GENERIC_TASK_TEMPLATE)
-  )
+export default function GenericTaskSelector({ selection, onChange }: GenericTaskSelectorProps) {
   const [expanded, setExpanded] = useState<Record<string, boolean>>(() => {
     const e: Record<string, boolean> = {}
     for (const cat of GENERIC_TASK_TEMPLATE) e[cat.code] = true
     return e
   })
 
-  // Derive selected tasks and notify parent
-  const selectedTasks = useMemo(() => {
-    const tasks: SelectedTask[] = []
-    for (const cat of GENERIC_TASK_TEMPLATE) {
-      const catSel = selection[cat.code]
-      for (let i = 0; i < cat.items.length; i++) {
-        const itemSel = catSel[i]
-        if (itemSel.selected) {
-          tasks.push({
-            categoryCode: cat.code,
-            categoryName: cat.nombre,
-            descripcion: cat.items[i].descripcion,
-            unidad: cat.items[i].unidad,
-            cantidad: parseFloat(itemSel.cantidad) || 1,
-          })
-        }
-      }
-    }
-    return tasks
-  }, [selection])
-
-  // Fire callback on change
-  function updateSelection(next: SelectionState) {
-    setSelection(next)
-    // Derive tasks from next state directly to avoid stale closure
-    const tasks: SelectedTask[] = []
-    for (const cat of GENERIC_TASK_TEMPLATE) {
-      const catSel = next[cat.code]
-      for (let i = 0; i < cat.items.length; i++) {
-        const itemSel = catSel[i]
-        if (itemSel.selected) {
-          tasks.push({
-            categoryCode: cat.code,
-            categoryName: cat.nombre,
-            descripcion: cat.items[i].descripcion,
-            unidad: cat.items[i].unidad,
-            cantidad: parseFloat(itemSel.cantidad) || 1,
-          })
-        }
-      }
-    }
-    onSelectionChange(tasks)
-  }
+  const selectedTasks = useMemo(() => trabajosElegidos(selection), [selection])
 
   function toggleItem(catCode: string, itemIdx: number) {
     const next = { ...selection }
@@ -105,14 +84,14 @@ export default function GenericTaskSelector({ onSelectionChange }: GenericTaskSe
       ...next[catCode][itemIdx],
       selected: !next[catCode][itemIdx].selected,
     }
-    updateSelection(next)
+    onChange(next)
   }
 
   function updateCantidad(catCode: string, itemIdx: number, value: string) {
     const next = { ...selection }
     next[catCode] = { ...next[catCode] }
     next[catCode][itemIdx] = { ...next[catCode][itemIdx], cantidad: value }
-    updateSelection(next)
+    onChange(next)
   }
 
   function toggleCategory(catCode: string) {
@@ -127,11 +106,19 @@ export default function GenericTaskSelector({ onSelectionChange }: GenericTaskSe
         next[cat.code][i] = { ...selection[cat.code][i], selected: true }
       }
     }
-    updateSelection(next)
+    onChange(next)
   }
 
   function deselectAll() {
-    updateSelection(buildInitialState(GENERIC_TASK_TEMPLATE))
+    // Keeps the quantities already typed
+    const next: SelectionState = {}
+    for (const cat of GENERIC_TASK_TEMPLATE) {
+      next[cat.code] = {}
+      for (let i = 0; i < cat.items.length; i++) {
+        next[cat.code][i] = { ...selection[cat.code][i], selected: false }
+      }
+    }
+    onChange(next)
   }
 
   function selectCategory(catCode: string, value: boolean) {
@@ -141,7 +128,7 @@ export default function GenericTaskSelector({ onSelectionChange }: GenericTaskSe
     for (let i = 0; i < cat.items.length; i++) {
       next[catCode][i] = { ...next[catCode][i], selected: value }
     }
-    updateSelection(next)
+    onChange(next)
   }
 
   // Count helpers
@@ -158,20 +145,20 @@ export default function GenericTaskSelector({ onSelectionChange }: GenericTaskSe
       {/* Header with bulk actions */}
       <div className="flex items-center justify-between">
         <div className="text-sm text-gray-500">
-          <span className="font-semibold text-[#2D8D68]">{totalSelected}</span> de {totalItems} items seleccionados
+          <span className="font-semibold text-[#2D8D68]">{totalSelected}</span> de {totalItems} trabajos elegidos
         </div>
         <div className="flex gap-2">
           <button
             onClick={selectAll}
             className="text-xs font-medium text-[#2D8D68] hover:text-[#1B5E4B] bg-[#E8F5EE] hover:bg-[#D4EDDF] px-3 py-1.5 rounded-md transition-colors"
           >
-            Seleccionar todos
+            Tildar todos
           </button>
           <button
             onClick={deselectAll}
             className="text-xs font-medium text-gray-500 hover:text-gray-700 bg-gray-100 hover:bg-gray-200 px-3 py-1.5 rounded-md transition-colors"
           >
-            Deseleccionar todos
+            Destildar todos
           </button>
         </div>
       </div>
@@ -204,6 +191,9 @@ export default function GenericTaskSelector({ onSelectionChange }: GenericTaskSe
                   e.stopPropagation()
                   selectCategory(cat.code, !allSelected)
                 }}
+                role="checkbox"
+                aria-checked={allSelected ? true : someSelected ? 'mixed' : false}
+                aria-label={`Todo el rubro ${cat.nombre}`}
                 className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors flex-shrink-0 ${
                   allSelected
                     ? 'bg-[#2D8D68] border-[#2D8D68] text-white'
@@ -237,6 +227,9 @@ export default function GenericTaskSelector({ onSelectionChange }: GenericTaskSe
                       {/* Checkbox */}
                       <button
                         onClick={() => toggleItem(cat.code, idx)}
+                        role="checkbox"
+                        aria-checked={itemSel.selected}
+                        aria-label={item.descripcion}
                         className="flex-shrink-0 text-gray-400 hover:text-[#2D8D68] transition-colors"
                       >
                         {itemSel.selected ? (
@@ -266,7 +259,8 @@ export default function GenericTaskSelector({ onSelectionChange }: GenericTaskSe
                           type="number"
                           value={itemSel.cantidad}
                           onChange={(e) => updateCantidad(cat.code, idx, e.target.value)}
-                          placeholder="Cant."
+                          placeholder="1"
+                          aria-label={`Cantidad de ${item.descripcion}`}
                           min={0}
                           step="any"
                           className="w-20 border border-gray-200 rounded px-2 py-1 text-sm text-right focus:outline-none focus:ring-1 focus:ring-[#2D8D68]/30 focus:border-[#2D8D68] transition-all"
