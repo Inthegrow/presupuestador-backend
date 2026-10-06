@@ -149,7 +149,7 @@ export default function Sidebar() {
         <div className="border-t my-2 mx-1" />
         <div className="text-[10px] font-bold text-gray-400 tracking-wider mb-1 px-1">CONFIGURACION</div>
         <nav className="space-y-0.5 text-[13px]">
-          <NavItem to="/app/settings/markups" icon={<Settings size={15} />} label="Cadena de Markups" />
+          <NavItem to="/app/settings/markups" icon={<Settings size={15} />} label="Coeficiente de pase" />
           <NavItem to="/app/catalogs" icon={<BookOpen size={15} />} label="Lista de precios" />
           <NavItem to="/app/templates" icon={<Library size={15} />} label="Fórmulas" />
         </nav>

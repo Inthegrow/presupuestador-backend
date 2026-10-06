@@ -73,10 +73,19 @@ recetas que no se entienden solos ("DE CASCOTE"). Código `eps` en el Excel cont
 *Presupuesto a mano (Nuevo Presupuesto), auditoría del 05/10:* https://claude.ai/artifact/3KfqizZ6HkfNGqtUmSpDiL
 (informe con 26 fricciones). Hoy el precio sale mal sin aviso (contrapiso m² calculado como m³, aplicar dos veces suma
 los materiales, faltantes en $0 sin marca) y "Vista Cliente" bajaba el PDF interno con el margen. Ocho entregas:
-1 ✅ precio seguro (`PLAN_PRECIO_SEGURO.md`, PR #37) · 2 ✅ buscador y semáforo en el detalle (`PLAN_BUSCADOR_EN_DETALLE.md`, PR #38) · 3 asistente (`PLAN_ASISTENTE.md`, en curso) · 4 agregar
+1 ✅ precio seguro (`PLAN_PRECIO_SEGURO.md`, PR #37) · 2 ✅ buscador y semáforo en el detalle (`PLAN_BUSCADOR_EN_DETALLE.md`, PR #38) · 3 ✅ asistente (`PLAN_ASISTENTE.md`, PR #39) · comparar al mismo nivel del Excel + "Coeficiente de pase" (`PLAN_COMPARAR_MISMO_NIVEL.md`, en curso; pedido de Carlos del 06/10) · 4 agregar
 trabajo en un renglón · 5 un solo total (**decide Carlos**: suma de netos por trabajo o cascada con imprevistos, IIBB
 y cheque) · 6 exportar (resto) · 7 coherencia con Cargar obra y tildes · 8 celular. La guía de Ayuda de este camino,
 después de la 5.
+
+*Ginkgo, diferencias (06/10):* página de seguimiento para Sol https://claude.ai/artifact/2aCjCgazrgST4HfvSbfeT5 (grupos A:
+fórmula mal → Claude con revisión de Emilia; B: decidir quién tiene razón → Sol/Emilia; C: errores del Excel de Sol →
+Sol). Grupo A detallado en https://claude.ai/artifact/TJaNo3kKcXaqMuuVGfQmJB (6 fórmulas, 21 renglones, 2 fórmulas nuevas
+5.5.6 y 6.11, 2 precios a cargar, preguntas para Sol). Carlos prefiere corregir **desde la pantalla Fórmulas**, no por SQL
+(el SQL está en el scratchpad por si hace falta). Los cambios de regla (MAPEO: yeso proyectado → 5.5.6, cielorraso
+suspendido → 6.1, aplicado → 6.11) son un PR mío que tiene que salir **el mismo día** que se corrigen las fórmulas.
+Margen: el Excel de Sol corta en indirectos (34%); la app suma beneficio + IIBB + cheque (59,5%): pregunta abierta a Carlos
+(¿Terrac cobra beneficio e impuestos arriba?).
 
 *Etapas siguientes:* B (estado de cada precio y frase de confianza), C (agentes de recetas y precios, plano →
 cómputo, recargo por piso que pidió Carlos), D (certificación de avance).

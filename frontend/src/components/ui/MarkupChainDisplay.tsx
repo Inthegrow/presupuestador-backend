@@ -34,7 +34,7 @@ export default function MarkupChainDisplay({ directo, neto, links, budgetId }: P
             className={`text-gray-400 transition-transform duration-200 ${expanded ? 'rotate-90' : ''}`}
           />
           <span className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold group-hover:text-gray-600 transition-colors">
-            Cadena de Markups
+            Coeficiente de pase
           </span>
           {!expanded && (
             <span className="text-[10px] font-medium text-[#E8663C] bg-[#E8663C]/8 px-2 py-0.5 rounded-full">

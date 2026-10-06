@@ -97,8 +97,9 @@ export default function Ayuda() {
             materiales quedan en $0 y después se completan en Lista de precios. Puede tardar un minuto.
           </li>
           <li>
-            <b>Ver diferencias con el Excel.</b> Arranca en costo directo: ahí se ven las fórmulas. "Precio final" suma
-            el margen de cada uno. Si el Excel no traía precios, no hay con qué comparar.
+            <b>Ver diferencias con el Excel.</b> Arranca en costo directo: ahí se ven las fórmulas. "Al nivel del Excel"
+            compara la app hasta donde llega tu Excel (por ejemplo, hasta los indirectos), sin sumarle el beneficio ni
+            los impuestos que el Excel no tiene. Si el Excel no traía precios, no hay con qué comparar.
           </li>
         </Pasos>
       </Seccion>

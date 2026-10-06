@@ -33,7 +33,7 @@ function fmtSigned(n: number): string {
 
 type Tono = 'caro' | 'barato' | 'parecido'
 type Filtro = 'todos' | Tono | 'sin_receta'
-type Modo = 'directo' | 'neto'
+type Modo = 'directo' | 'nivel'
 
 const UMBRAL = 5
 
@@ -63,7 +63,7 @@ function Diferencia({ valor, pct, tono }: { valor: number; pct: number | null; t
   )
 }
 
-// The numbers of a job in the chosen mode (direct cost without margin, or final price)
+// The numbers of a job in the chosen mode (direct cost, or the app up to the level the Excel reaches)
 function valoresDe(t: ObraDiferenciaTrabajo, modo: Modo) {
   return modo === 'directo'
     ? {
@@ -75,12 +75,13 @@ function valoresDe(t: ObraDiferenciaTrabajo, modo: Modo) {
         appUnit: t.app_unitario_directo,
       }
     : {
+        // Al nivel del Excel: el lado Excel es siempre excel_neto / excel_unitario
         excel: t.excel_neto,
-        app: t.app_neto,
-        diferencia: t.diferencia,
-        pct: t.diferencia_pct,
+        app: t.app_nivel ?? 0,
+        diferencia: t.diferencia_nivel ?? 0,
+        pct: t.diferencia_nivel_pct ?? null,
         excelUnit: t.excel_unitario,
-        appUnit: t.app_unitario,
+        appUnit: t.app_unitario_nivel ?? null,
       }
 }
 
@@ -135,8 +136,8 @@ function TrabajoRow({ t, modo }: { t: ObraDiferenciaTrabajo; modo: Modo }) {
               <tbody>
                 {t.items.map((it) => {
                   const iExcel = modo === 'directo' ? it.excel_directo : it.excel_neto
-                  const iApp = modo === 'directo' ? it.app_directo : it.app_neto
-                  const iDif = modo === 'directo' ? it.diferencia_directo : it.diferencia
+                  const iApp = modo === 'directo' ? it.app_directo : (it.app_nivel ?? 0)
+                  const iDif = modo === 'directo' ? it.diferencia_directo : (it.diferencia_nivel ?? 0)
                   const pct = iExcel ? Math.round((iDif / iExcel) * 1000) / 10 : null
                   const tonoItem = tonoDe(iApp, iExcel, pct)
                   return (
@@ -192,10 +193,13 @@ export default function DiferenciasExcel() {
 
   const directo = modo === 'directo'
   const trabajosServidor = data?.trabajos || []
-  // The server orders by final-price difference; in direct-cost mode the list follows direct cost
+  // Sin nivel_excel el servidor es viejo y no trae la comparación al nivel del Excel
+  const nivelExcel = data?.nivel_excel
+  const sinNivel = !directo && !nivelExcel
+  // Cada vista ordena por su propia diferencia (de mayor a menor, en valor absoluto)
   const trabajos = directo
     ? [...trabajosServidor].sort((a, b) => Math.abs(b.diferencia_directo) - Math.abs(a.diferencia_directo))
-    : trabajosServidor
+    : [...trabajosServidor].sort((a, b) => Math.abs(b.diferencia_nivel ?? 0) - Math.abs(a.diferencia_nivel ?? 0))
   const tonoTrabajo = (t: ObraDiferenciaTrabajo) => {
     const v = valoresDe(t, modo)
     return tonoDe(v.app, v.excel, v.pct)
@@ -205,10 +209,10 @@ export default function DiferenciasExcel() {
     barato: trabajos.filter((t) => tonoTrabajo(t) === 'barato').length,
     parecido: trabajos.filter((t) => tonoTrabajo(t) === 'parecido').length,
   }
-  const rd = data?.resumen?.directo
+  const rd = directo ? data?.resumen?.directo : data?.resumen?.nivel
   const cuenta = {
     todos: trabajos.length,
-    ...(directo && rd
+    ...(rd
       ? { caro: rd.mas_caros, barato: rd.mas_baratos, parecido: rd.parecidos }
       : cuentaLocal),
     sin_receta: trabajos.filter((t) => t.sin_receta).length,
@@ -220,11 +224,22 @@ export default function DiferenciasExcel() {
   })
 
   const total = data?.total
-  const tot = total
+  // Total al nivel del Excel: el del servidor si lo trae; si no, la suma de los trabajos
+  const totalNivel = () => {
+    const app = total?.app_nivel ?? trabajosServidor.reduce((s, t) => s + (t.app_nivel ?? 0), 0)
+    const excel = total?.excel_neto ?? 0
+    const diferencia = total?.diferencia_nivel ?? app - excel
+    const pct = total?.diferencia_nivel_pct !== undefined
+      ? total.diferencia_nivel_pct
+      : excel ? Math.round((diferencia / excel) * 1000) / 10 : null
+    return { excel, app, diferencia, pct }
+  }
+  const tot = total && !sinNivel
     ? directo
       ? { excel: total.excel_directo, app: total.app_directo, diferencia: total.diferencia_directo, pct: total.diferencia_directo_pct }
-      : { excel: total.excel_neto, app: total.app_neto, diferencia: total.diferencia, pct: total.diferencia_pct }
+      : totalNivel()
     : null
+  const precioFinalApp = data?.resumen?.app_neto ?? total?.app_neto
   const tonoTotal: Tono = tot ? tonoDe(tot.app, tot.excel, tot.pct) : 'parecido'
   const muyDistinto = tot?.pct != null && Math.abs(tot.pct) > 20
 
@@ -278,13 +293,13 @@ export default function DiferenciasExcel() {
           </div>
         )}
 
-        {data && total && tot && (
+        {data && total && (
           <>
             <div>
               <div className="inline-flex rounded-lg border bg-white p-0.5 gap-0.5">
                 {([
-                  ['directo', 'Costo directo (sin margen)'],
-                  ['neto', 'Precio final'],
+                  ['directo', 'Costo directo'],
+                  ['nivel', 'Al nivel del Excel'],
                 ] as [Modo, string][]).map(([k, txt]) => (
                   <button
                     key={k}
@@ -296,87 +311,107 @@ export default function DiferenciasExcel() {
                   </button>
                 ))}
               </div>
-              <p className="text-[11px] text-gray-500 mt-1.5">
-                {directo
-                  ? 'Acá se ven las fórmulas: lo que cuesta hacer cada trabajo, sin margen.'
-                  : 'Lo que cobra cada uno, con su margen.'}
-              </p>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-              <div className="bg-white border rounded-xl p-4">
-                <div className="text-[11px] text-gray-500">Excel de Sol</div>
-                <div className="text-xl font-bold text-gray-900">{fmtCurrency(tot.excel)}</div>
-              </div>
-              <div className="bg-[#E8F5EE] rounded-xl p-4">
-                <div className="text-[11px] text-gray-500">La app</div>
-                <div className="text-xl font-bold text-[#2D8D68]">{fmtCurrency(tot.app)}</div>
-              </div>
-              <div className={`${FONDO[tonoTotal]} rounded-xl p-4`}>
-                <div className="text-[11px] text-gray-500">Diferencia</div>
-                <div className={`text-xl font-bold ${COLOR[tonoTotal]}`}>
-                  {fmtSigned(tot.diferencia)}
-                  {tot.pct != null && (
-                    <span className="text-sm font-semibold ml-2">{fmtPct(tot.pct)}</span>
+              {directo && (
+                <p className="text-[11px] text-gray-500 mt-1.5">
+                  Acá se ven las fórmulas: lo que cuesta hacer cada trabajo, sin margen.
+                </p>
+              )}
+              {!directo && nivelExcel && (
+                <div className="mt-2">
+                  <p className="text-sm text-gray-800">{nivelExcel.texto}</p>
+                  {precioFinalApp != null && (
+                    <p className="text-[11px] text-gray-500 mt-1">
+                      Precio final de la app (con todo): {fmtCurrency(precioFinalApp)}
+                    </p>
                   )}
                 </div>
-              </div>
-              <div className="bg-white border rounded-xl p-4">
-                <div className="text-[11px] text-gray-500">Margen</div>
-                <div className="text-sm font-bold text-gray-900 mt-1">
-                  Tu Excel: {fmtMargen(total.margen_excel_pct)} promedio · La app: {fmtMargen(total.margen_app_pct)}
-                </div>
-                <div className="text-[11px] text-gray-500 mt-1">
-                  Si querés que coincidan, ajustá la cadena de markups del presupuesto.
-                </div>
-              </div>
+              )}
             </div>
 
-            {muyDistinto && tot.pct != null && (
+            {sinNivel && (
               <div className="bg-amber-50 border border-amber-200 text-amber-800 text-sm px-4 py-3 rounded-lg">
-                El total da {new Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(Math.abs(tot.pct))}%{' '}
-                {tot.pct > 0 ? 'más caro' : 'más barato'} que tu Excel. Mirá las diferencias antes de usarlo.
+                Actualizá la app para ver esta comparación.
               </div>
             )}
 
-            <div className="flex flex-wrap gap-2">
-              {([
-                ['todos', 'Todos', cuenta.todos],
-                ['caro', 'Más caros', cuenta.caro],
-                ['barato', 'Más baratos', cuenta.barato],
-                ['parecido', 'Parecidos', cuenta.parecido],
-                ['sin_receta', 'Sin fórmula', cuenta.sin_receta],
-              ] as [Filtro, string, number][]).map(([k, txt, n]) => (
-                <button
-                  key={k}
-                  onClick={() => setFiltro(k)}
-                  className={`text-xs font-semibold px-3 py-1.5 rounded-full border ${filtro === k ? 'bg-[#143D34] text-white border-[#143D34]' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
-                >
-                  {txt} ({n})
-                </button>
-              ))}
-            </div>
+            {tot && (
+              <>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                  <div className="bg-white border rounded-xl p-4">
+                    <div className="text-[11px] text-gray-500">Excel de Sol</div>
+                    <div className="text-xl font-bold text-gray-900">{fmtCurrency(tot.excel)}</div>
+                  </div>
+                  <div className="bg-[#E8F5EE] rounded-xl p-4">
+                    <div className="text-[11px] text-gray-500">La app</div>
+                    <div className="text-xl font-bold text-[#2D8D68]">{fmtCurrency(tot.app)}</div>
+                  </div>
+                  <div className={`${FONDO[tonoTotal]} rounded-xl p-4`}>
+                    <div className="text-[11px] text-gray-500">Diferencia</div>
+                    <div className={`text-xl font-bold ${COLOR[tonoTotal]}`}>
+                      {fmtSigned(tot.diferencia)}
+                      {tot.pct != null && (
+                        <span className="text-sm font-semibold ml-2">{fmtPct(tot.pct)}</span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="bg-white border rounded-xl p-4">
+                    <div className="text-[11px] text-gray-500">Margen</div>
+                    <div className="text-sm font-bold text-gray-900 mt-1">
+                      Tu Excel: {fmtMargen(total.margen_excel_pct)} promedio · La app: {fmtMargen(total.margen_app_pct)}
+                    </div>
+                    <div className="text-[11px] text-gray-500 mt-1">
+                      Si querés que coincidan, ajustá el coeficiente de pase del presupuesto.
+                    </div>
+                  </div>
+                </div>
 
-            <div className="bg-white border rounded-xl overflow-x-auto">
-              <table className="w-full text-left min-w-[640px]">
-                <thead>
-                  <tr className="text-[10px] uppercase tracking-wide text-gray-400">
-                    <th className="w-6" />
-                    <th className="font-semibold py-2 pr-3">Trabajo</th>
-                    <th className="font-semibold py-2 pr-3">Fórmula</th>
-                    <th className="font-semibold py-2 pr-3 text-right">{directo ? 'Excel (costo)' : 'Excel'}</th>
-                    <th className="font-semibold py-2 pr-3 text-right">{directo ? 'App (costo)' : 'App'}</th>
-                    <th className="font-semibold py-2 pr-3 text-right">Diferencia</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {visibles.map((t) => <TrabajoRow key={t.clave} t={t} modo={modo} />)}
-                </tbody>
-              </table>
-              {visibles.length === 0 && (
-                <div className="px-4 py-4 text-xs text-gray-500 border-t">No hay trabajos en esta lista.</div>
-              )}
-            </div>
+                {muyDistinto && tot.pct != null && (
+                  <div className="bg-amber-50 border border-amber-200 text-amber-800 text-sm px-4 py-3 rounded-lg">
+                    El total da {new Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(Math.abs(tot.pct))}%{' '}
+                    {tot.pct > 0 ? 'más caro' : 'más barato'} que tu Excel. Mirá las diferencias antes de usarlo.
+                  </div>
+                )}
+
+                <div className="flex flex-wrap gap-2">
+                  {([
+                    ['todos', 'Todos', cuenta.todos],
+                    ['caro', 'Más caros', cuenta.caro],
+                    ['barato', 'Más baratos', cuenta.barato],
+                    ['parecido', 'Parecidos', cuenta.parecido],
+                    ['sin_receta', 'Sin fórmula', cuenta.sin_receta],
+                  ] as [Filtro, string, number][]).map(([k, txt, n]) => (
+                    <button
+                      key={k}
+                      onClick={() => setFiltro(k)}
+                      className={`text-xs font-semibold px-3 py-1.5 rounded-full border ${filtro === k ? 'bg-[#143D34] text-white border-[#143D34]' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+                    >
+                      {txt} ({n})
+                    </button>
+                  ))}
+                </div>
+
+                <div className="bg-white border rounded-xl overflow-x-auto">
+                  <table className="w-full text-left min-w-[640px]">
+                    <thead>
+                      <tr className="text-[10px] uppercase tracking-wide text-gray-400">
+                        <th className="w-6" />
+                        <th className="font-semibold py-2 pr-3">Trabajo</th>
+                        <th className="font-semibold py-2 pr-3">Fórmula</th>
+                        <th className="font-semibold py-2 pr-3 text-right">{directo ? 'Excel (costo)' : 'Excel'}</th>
+                        <th className="font-semibold py-2 pr-3 text-right">{directo ? 'App (costo)' : 'App'}</th>
+                        <th className="font-semibold py-2 pr-3 text-right">Diferencia</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {visibles.map((t) => <TrabajoRow key={t.clave} t={t} modo={modo} />)}
+                    </tbody>
+                  </table>
+                  {visibles.length === 0 && (
+                    <div className="px-4 py-4 text-xs text-gray-500 border-t">No hay trabajos en esta lista.</div>
+                  )}
+                </div>
+              </>
+            )}
           </>
         )}
       </div>

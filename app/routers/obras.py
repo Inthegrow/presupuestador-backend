@@ -30,10 +30,12 @@ from io import BytesIO
 from uuid import UUID
 
 import openpyxl
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 
 from app.auth import get_current_user, require_editor
 from app.budget_prices import (
+    INDIRECT_DEFAULTS,
+    budget_config,
     fetch_all,
     find_entry,
     initial_indirects,
@@ -43,7 +45,7 @@ from app.budget_prices import (
     pick_price,
     today,
 )
-from app.calculations import calc_resource_subtotal
+from app.calculations import calc_resource_subtotal, pct_or_default
 from app.catalog_prices import normalize_codigo, parse_fecha
 from app.db import get_data_db
 from app.obra_import import (
@@ -850,7 +852,68 @@ def _comparison(app_neto: float, excel_neto: float, app_directo: float, excel_di
             "margen_app_pct": _margin(app_neto, app_directo), "margen_excel_pct": _margin(excel_neto, excel_directo)}
 
 
-MODOS = {"neto": ("diferencia_pct", "app_neto"), "directo": ("diferencia_directo_pct", "app_directo")}
+def _level_comparison(app_nivel: float, excel_neto: float) -> dict:
+    """The app up to where the Excel goes, against the Excel's final price (excel_neto)."""
+    diferencia, pct = _diff(app_nivel, excel_neto)
+    return {"app_nivel": _money(app_nivel), "diferencia_nivel": diferencia, "diferencia_nivel_pct": pct}
+
+
+MODOS = {
+    "neto": ("diferencia_pct", "app_neto"),
+    "directo": ("diferencia_directo_pct", "app_directo"),
+    "nivel": ("diferencia_nivel_pct", "app_nivel"),
+}
+
+# Levels of the cascade, in order: what each one adds to the direct cost (budget_items columns)
+NIVELES = ("directo", "indirectos", "beneficio", "neto")
+HASTA = {"indirectos": "los indirectos", "beneficio": "el beneficio", "neto": "los impuestos"}
+SIN_MARGEN = 1.0005  # an Excel that adds up to 0.05 % over the direct cost adds nothing
+
+
+def _app_level(item: dict, nivel: str) -> float:
+    """What the app says for an item up to ``nivel`` (old items may have null indirect/benefit: 0)."""
+    if nivel == "neto":
+        return _amount(item.get("neto_total"))
+    total = _amount(item.get("directo_total"))
+    if nivel in ("indirectos", "beneficio"):
+        total += _amount(item.get("indirecto_total"))
+    if nivel == "beneficio":
+        total += _amount(item.get("beneficio_total"))
+    return total
+
+
+def _app_factors(config: dict) -> dict[str, float]:
+    """Price over direct cost at each level, with the same % (and defaults) as calc_cascade_indirects."""
+    def pct(key: str) -> float:
+        return pct_or_default(config, key, INDIRECT_DEFAULTS[key]) / 100
+
+    f_ind = 1 + sum(pct(k) for k in ("imprevistos_pct", "estructura_pct", "jefatura_pct", "logistica_pct",
+                                      "herramientas_pct"))
+    f_ben = f_ind * (1 + pct("beneficio_pct"))
+    f_neto = f_ben * (1 + pct("ingresos_brutos_pct") + pct("imp_cheque_pct"))
+    return {"directo": 1.0, "indirectos": f_ind, "beneficio": f_ben, "neto": f_neto}
+
+
+def _pct_text(value: float) -> str:
+    """34.0 -> '34', 33.75 -> '33,8' (Argentine decimal comma)."""
+    rounded = round(value, 1)
+    return f"{rounded:.0f}" if rounded == int(rounded) else f"{rounded:.1f}".replace(".", ",")
+
+
+def _excel_level(excel_neto: float, excel_directo: float, factores: dict[str, float]) -> dict:
+    """How far the Excel goes over the direct cost: the app level whose factor is closest to the Excel's."""
+    if not excel_directo:  # no direct cost in the Excel: only its final price can be compared
+        return {"nivel": "neto", "factor_excel": None, "factor_app": round(factores["neto"], 4),
+                "texto": "Tu Excel no trae el costo directo: comparo el precio final."}
+    r = excel_neto / excel_directo
+    if r <= SIN_MARGEN:
+        nivel = "directo"
+        texto = "Tu Excel no le suma nada al costo directo: comparo costo directo."
+    else:
+        nivel = min(NIVELES[1:], key=lambda n: abs(factores[n] - r))  # ties: the lower level
+        texto = (f"Tu Excel le suma {_pct_text((r - 1) * 100)}% al costo directo: llega hasta {HASTA[nivel]}. "
+                 "Comparo la app hasta ahí.")
+    return {"nivel": nivel, "factor_excel": round(r, 4), "factor_app": round(factores[nivel], 4), "texto": texto}
 
 
 def _how_different(t: dict, modo: str = "neto") -> str:
@@ -870,8 +933,16 @@ def _amount(value: object) -> float:
 
 
 @router.get("/{budget_id}/diferencias")
-async def diferencias_con_excel(budget_id: UUID, user: dict = Depends(get_current_user)):
-    """Compara, trabajo por trabajo, lo que calcula la app contra lo que decía el Excel. No escribe nada."""
+async def diferencias_con_excel(
+    budget_id: UUID, user: dict = Depends(get_current_user), modo: str = Query("neto"),
+):
+    """Compara, trabajo por trabajo, lo que calcula la app contra lo que decía el Excel. No escribe nada.
+
+    Además de costo directo y precio final, compara "al nivel del Excel": la app hasta donde llega el
+    Excel (directo, indirectos, beneficio o impuestos). ``modo`` (neto, directo o nivel) elige el orden.
+    """
+    if modo not in MODOS:
+        raise HTTPException(422, f"modo debe ser uno de: {', '.join(MODOS)}")
     db = get_data_db()
     org_id = user["org_id"]
     bid = str(budget_id)
@@ -898,6 +969,11 @@ async def diferencias_con_excel(budget_id: UUID, user: dict = Depends(get_curren
     for item in items:
         grupos.setdefault(task_key(item.get("description") or "", item.get("unidad")), []).append(item)
 
+    nivel_excel = _excel_level(sum(_amount(i.get("excel_neto")) for i in items),
+                               sum(_amount(i.get("excel_directo")) for i in items),
+                               _app_factors(budget_config(db, org_id, budget)))
+    nivel = nivel_excel["nivel"]
+
     template_ids = sorted({str(g[0]["template_id"]) for g in grupos.values() if g[0].get("template_id")})
     recetas: dict[str, dict] = {}
     if template_ids:
@@ -911,6 +987,7 @@ async def diferencias_con_excel(budget_id: UUID, user: dict = Depends(get_curren
         receta = recetas.get(str(first.get("template_id"))) if first.get("template_id") else None
         comp = _comparison(*(sum(_amount(i.get(k)) for i in its)
                              for k in ("neto_total", "excel_neto", "directo_total", "excel_directo")))
+        comp.update(_level_comparison(sum(_app_level(i, nivel) for i in its), comp["excel_neto"]))
         detalle = []
         for i in its:
             parent = by_id.get(str(i.get("parent_id"))) if i.get("parent_id") else None
@@ -922,6 +999,8 @@ async def diferencias_con_excel(budget_id: UUID, user: dict = Depends(get_curren
                 "diferencia": _diff(app_neto, excel_neto)[0],
                 "app_directo": _money(app_directo), "excel_directo": _money(excel_directo),
                 "diferencia_directo": _diff(app_directo, excel_directo)[0],
+                "app_nivel": _money(_app_level(i, nivel)),
+                "diferencia_nivel": _diff(_app_level(i, nivel), excel_neto)[0],
             })
         trabajos.append({
             "clave": clave, "descripcion": first.get("description"), "unidad": first.get("unidad"),
@@ -932,19 +1011,24 @@ async def diferencias_con_excel(budget_id: UUID, user: dict = Depends(get_curren
             "excel_unitario": _money(comp["excel_neto"] / cantidad) if cantidad else None,
             "app_unitario_directo": _money(comp["app_directo"] / cantidad) if cantidad else None,
             "excel_unitario_directo": _money(comp["excel_directo"] / cantidad) if cantidad else None,
+            "app_unitario_nivel": _money(comp["app_nivel"] / cantidad) if cantidad else None,
             "items": detalle,
         })
-    trabajos.sort(key=lambda t: -abs(t["diferencia"]))
+    diferencia_key = MODOS[modo][0].removesuffix("_pct")  # diferencia, diferencia_directo, diferencia_nivel
+    trabajos.sort(key=lambda t: -abs(t[diferencia_key]))
 
     clases = [_how_different(t) for t in trabajos]
     clases_directo = [_how_different(t, "directo") for t in trabajos]
+    clases_nivel = [_how_different(t, "nivel") for t in trabajos]
     total = _comparison(*(sum(_amount(i.get(k)) for i in items)
                           for k in ("neto_total", "excel_neto", "directo_total", "excel_directo")))
+    total.update(_level_comparison(sum(_app_level(i, nivel) for i in items), total["excel_neto"]))
     return {
         "budget_id": bid,
         "nombre": budget.get("name"),
         "precios_al": budget.get("precios_al"),
         "source_file": budget.get("source_file"),
+        "nivel_excel": nivel_excel,
         "total": total,
         "resumen": {
             "trabajos": len(trabajos),
@@ -957,6 +1041,12 @@ async def diferencias_con_excel(budget_id: UUID, user: dict = Depends(get_curren
                 "mas_baratos": clases_directo.count("mas_baratos"),
                 "parecidos": clases_directo.count("parecidos"),
             },
+            "nivel": {
+                "mas_caros": clases_nivel.count("mas_caros"),
+                "mas_baratos": clases_nivel.count("mas_baratos"),
+                "parecidos": clases_nivel.count("parecidos"),
+            },
+            "app_neto": total["app_neto"],  # precio final de la app (con todo), whatever the level
         },
         "trabajos": trabajos,
     }

@@ -741,7 +741,7 @@ export default function Editor() {
           </div>
           <div className="px-5 py-2.5 bg-gradient-to-r from-[#E8F5EE] to-[#E8F5EE]/50 text-[10px] text-[#1B5E4B] border-t flex items-center gap-1.5 flex-shrink-0">
             <span className="w-1 h-1 rounded-full bg-[#2D8D68] inline-block" />
-            Click en celdas punteadas para editar. Totales se recalculan automaticamente por la cadena de markups.
+            Click en celdas punteadas para editar. Totales se recalculan automaticamente por el coeficiente de pase.
           </div>
         </div>
       </div>
