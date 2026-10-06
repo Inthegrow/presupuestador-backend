@@ -104,7 +104,8 @@ async def update_general_indirects(
         for budget in budgets:
             items = _get_items(str(budget["id"]), org_id)
             done.append((str(budget["id"]), items))
-            reprice_budget(db, org_id, budget, {**new_config, **effective_indirects(new_config, budget)}, items)
+            reprice_budget(db, org_id, budget, {**new_config, **effective_indirects(new_config, budget)}, items,
+                           strict=True)
         saved = save_org_config(db, org_id, data)
     except Exception as exc:
         logger.exception("Saving the general indirects failed; restoring %d budgets", len(done))

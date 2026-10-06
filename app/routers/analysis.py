@@ -84,11 +84,14 @@ def _is_leaf_item(item: dict) -> bool:
 
 
 def reprice_budget(db, org_id: str, budget: dict, config: dict | None = None,
-                   items: list[dict] | None = None) -> list[dict]:
+                   items: list[dict] | None = None, strict: bool = False) -> list[dict]:
     """Price every leaf item of a budget from its saved direct cost (price_item).
 
     Used when only the percentages change: resources and quantities stay as they are.
     ``config``: the cascade config (default: the budget's own, read here).
+    ``strict``: every item must be written whole: a failed write (or one that updates no
+    row) raises, never falls back to the three legacy columns. Callers that save the
+    percentages use it, so a failure can be undone and retried.
     Returns the written cascade values, one dict per item (with "id" and "directo_total").
     """
     if config is None:
@@ -103,18 +106,23 @@ def reprice_budget(db, org_id: str, budget: dict, config: dict | None = None,
             continue
         priced = price_item(dict(item), config)
         upd = {k: priced[k] for k in CASCADE_FIELDS}
-        try:
-            db.table("budget_items").update(upd).eq("id", item["id"]).execute()
-        except Exception:
-            # Columns impuestos_total / iva_total / total_final may not exist yet
-            logger.warning(
-                "Full cascade update failed for item %s, falling back to legacy fields",
-                item["id"],
-                exc_info=True,
-            )
-            db.table("budget_items").update({
-                k: upd[k] for k in ("indirecto_total", "beneficio_total", "neto_total")
-            }).eq("id", item["id"]).execute()
+        if strict:
+            result = db.table("budget_items").update(upd).eq("id", item["id"]).eq("org_id", org_id).execute()
+            if not result.data:
+                raise RuntimeError(f"No se actualizó el ítem {item['id']}")
+        else:
+            try:
+                db.table("budget_items").update(upd).eq("id", item["id"]).execute()
+            except Exception:
+                # Columns impuestos_total / iva_total / total_final may not exist yet
+                logger.warning(
+                    "Full cascade update failed for item %s, falling back to legacy fields",
+                    item["id"],
+                    exc_info=True,
+                )
+                db.table("budget_items").update({
+                    k: upd[k] for k in ("indirecto_total", "beneficio_total", "neto_total")
+                }).eq("id", item["id"]).execute()
         written.append({"id": item["id"], "directo_total": float(item.get("directo_total") or 0), **upd})
     return written
 
@@ -205,7 +213,17 @@ async def update_indirects(
 
     actualizados = 0
     if pct:
-        reprice_budget(db, org_id, budget, {**org_config, **effective_indirects(org_config, budget)})
+        # Strict: a failed write is an error (saving the same values again finishes the job)
+        try:
+            reprice_budget(db, org_id, budget, {**org_config, **effective_indirects(org_config, budget)},
+                           strict=True)
+        except Exception as exc:
+            logger.exception("Repricing budget %s after a change of its indirects failed", bid)
+            raise HTTPException(500, {
+                "codigo": "A_MEDIAS",
+                "mensaje": "Se guardaron los porcentajes, pero no pude actualizar todos los precios. "
+                           "Volvé a guardar: la app termina de actualizarlos.",
+            }) from exc
         actualizados = 1
 
     return {**_indirects_response(org_config, budget), "actualizados": actualizados}

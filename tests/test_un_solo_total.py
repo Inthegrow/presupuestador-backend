@@ -502,6 +502,55 @@ class TestGeneralSaveIsAtomic:
             check(client, db, bid)
 
 
+class TestRepriceWritesTheWholeCascade:
+    """Codex PR #42 re-audit [P1]: a failed write of an item must not fall back to the three
+    legacy columns (leaving taxes, IVA and the price with IVA old) when the percentages are saved."""
+
+    def _first_full_write_fails(self):
+        from tests.test_recipes_api import Query
+        real = Query.execute
+        state = {"failed": False}
+
+        def execute(self):
+            if (not state["failed"] and self.name == "budget_items" and self.action == "update"
+                    and isinstance(self.payload, dict) and "impuestos_total" in self.payload):
+                state["failed"] = True
+                raise RuntimeError("corte de la base en la escritura")
+            return real(self)
+        return patch.object(Query, "execute", execute)
+
+    def _assert_whole(self, db, beneficio):
+        w1 = item(db, W1)
+        expected = calc_cascade_indirects({"directo_total": w1["directo_total"]}, {"beneficio_pct": beneficio})
+        for key in CASCADE_FIELDS:
+            assert cents(w1[key]) == cents(expected[key]), key
+
+    def test_general_save(self, client, db):
+        antes = numbers(db)
+        with self._first_full_write_fails():
+            r = client.patch("/indirects/general", json={"beneficio_pct": 20, "aplicar": True})
+        assert r.status_code == 500 and r.json()["detail"]["codigo"] == "NO_SE_APLICO"
+        assert db.tables["indirect_config"][0].get("beneficio_pct") is None
+        assert numbers(db) == antes
+        # The retry still sees the budget and writes every field of the cascade
+        assert client.post("/indirects/general/afectados", json={"beneficio_pct": 20}).json()["presupuestos"]
+        r = client.patch("/indirects/general", json={"beneficio_pct": 20, "aplicar": True})
+        assert r.status_code == 200 and r.json()["actualizados"] == 1
+        self._assert_whole(db, 20)
+        check(client, db)
+
+    def test_budget_save(self, client, db):
+        with self._first_full_write_fails():
+            r = client.patch(url(B1, "indirects"), json={"beneficio_pct": 20})
+        assert r.status_code == 500 and r.json()["detail"]["codigo"] == "A_MEDIAS"
+        assert "Volvé a guardar" in r.json()["detail"]["mensaje"]
+        # Saving the same values again finishes the job: every field of the cascade
+        r = client.patch(url(B1, "indirects"), json={"beneficio_pct": 20})
+        assert r.status_code == 200 and r.json()["actualizados"] == 1
+        self._assert_whole(db, 20)
+        check(client, db)
+
+
 class TestOldItemsUseTheirBudgetIva:
     """Codex PR #42 [P2]: items saved before iva_total existed take their budget's IVA everywhere."""
 
