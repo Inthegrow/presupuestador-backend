@@ -274,6 +274,85 @@ class TestIndirectsApi:
         assert new["precios_al"] == "2026-03-01"
 
 
+# ── Asistente "Nuevo Presupuesto": POST /budgets/create-full ────────────────
+
+
+def create_full(client, **over):
+    payload = {
+        "name": "Casa Lugones",
+        "description": "PH dos plantas",
+        "secciones": [
+            {"codigo": "1", "nombre": "Tareas Preliminares", "items": [
+                {"codigo": "1.1", "descripcion": "Obrador", "unidad": "gl", "cantidad": 1},
+                {"codigo": "1.2", "descripcion": "Cerco perimetral", "unidad": "ml", "cantidad": 40},
+            ]},
+            {"codigo": "2", "nombre": "Estructura", "items": [
+                {"codigo": "2.1", "descripcion": "Contrapiso", "unidad": "m2", "cantidad": 120},
+            ]},
+        ],
+        **over,
+    }
+    r = client.post("/budgets/create-full", json=payload)
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+class TestCreateFull:
+    def test_each_work_goes_inside_its_rubro(self, client, db):
+        data = create_full(client)
+        new_id = data["budget"]["id"]
+        assert data["sections_created"] == 2
+        assert data["items_created"] == 3
+        rows = [i for i in db.tables["budget_items"] if i["budget_id"] == new_id]
+        rubros = {r["description"]: r for r in rows if r["parent_id"] is None}
+        assert set(rubros) == {"Tareas Preliminares", "Estructura"}
+        parent_of = {r["description"]: r["parent_id"] for r in rows if r["parent_id"] is not None}
+        assert parent_of == {
+            "Obrador": rubros["Tareas Preliminares"]["id"],
+            "Cerco perimetral": rubros["Tareas Preliminares"]["id"],
+            "Contrapiso": rubros["Estructura"]["id"],
+        }
+        cerco = next(r for r in rows if r["description"] == "Cerco perimetral")
+        assert (cerco["code"], cerco["unidad"], cerco["cantidad"]) == ("1.2", "ml", 40)
+
+    def test_saves_every_indirect_of_this_budget_and_not_the_general_ones(self, client, db):
+        mios = {
+            "imprevistos_pct": 2, "estructura_pct": 14, "jefatura_pct": 9, "logistica_pct": 4,
+            "herramientas_pct": 2.5, "beneficio_pct": 20, "ingresos_brutos_pct": 3.5,
+            "imp_cheque_pct": 0.6, "iva_pct": 10.5,
+        }
+        general_antes = copy.deepcopy(db.tables["indirect_config"])
+        data = create_full(client, indirectos=mios)
+        new = next(b for b in db.tables["budgets"] if b["id"] == data["budget"]["id"])
+        assert new["indirectos"] == mios
+        assert db.tables["indirect_config"] == general_antes
+        # The budget's own % are the ones the app uses for it
+        got = client.get(f"/budgets/{new['id']}/indirects").json()
+        assert got["beneficio_pct"] == 20
+        assert got["general"]["beneficio_pct"] == 10
+        assert got["propios"] is True
+
+    def test_missing_indirect_keeps_the_general_value(self, client, db):
+        data = create_full(client, indirectos={"beneficio_pct": 20})
+        new = next(b for b in db.tables["budgets"] if b["id"] == data["budget"]["id"])
+        assert new["indirectos"]["beneficio_pct"] == 20
+        # general row: estructura 20; defaults for the rest
+        assert new["indirectos"]["estructura_pct"] == 20
+        assert new["indirectos"]["jefatura_pct"] == 8
+        assert new["indirectos"]["iva_pct"] == 21
+
+    def test_without_indirects_starts_with_the_general_ones(self, client, db):
+        data = create_full(client)
+        new = next(b for b in db.tables["budgets"] if b["id"] == data["budget"]["id"])
+        assert new["indirectos"] == general_indirects(db.tables["indirect_config"][0])
+        assert new["precios_al"] == "2026-09-30"
+
+    def test_negative_percentage_is_rejected(self, client, db):
+        r = client.post("/budgets/create-full", json={"name": "X", "indirectos": {"beneficio_pct": -5}})
+        assert r.status_code == 422
+        assert len(db.tables["budgets"]) == 1
+
+
 # ── Actualizar a precios de hoy ─────────────────────────────────────────────
 
 
