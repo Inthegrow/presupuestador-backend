@@ -11,16 +11,20 @@ export const ESTILO: Record<Semaforo, { borde: string; chip: string; texto: stri
 /**
  * Estado de un trabajo en el detalle, con lo que la pantalla ya sabe:
  * - rojo: faltan precios, o no tiene ningún recurso
- * - amarillo: tiene recursos pero ninguna fórmula (cargado a mano)
- * - verde: tiene fórmula y no faltan precios
+ * - amarillo: tiene recursos pero ninguna fórmula (cargado a mano), o no se pudo revisar los precios
+ * - verde: tiene fórmula y el servidor confirmó que no faltan precios
+ *
+ * `preciosVerificados` es true solo si el servidor contestó la lista de faltantes de lo que hay
+ * guardado ahora: una consulta que falló nunca cuenta como "no falta nada".
  */
 export function estadoDeTrabajo(datos: {
   tieneFormula: boolean
   recursos: number
   preciosFaltantes: number
+  preciosVerificados: boolean
 }): { estado: Semaforo; frase: string } {
-  const { tieneFormula, recursos, preciosFaltantes } = datos
-  if (preciosFaltantes > 0) {
+  const { tieneFormula, recursos, preciosFaltantes, preciosVerificados } = datos
+  if (preciosVerificados && preciosFaltantes > 0) {
     return {
       estado: 'rojo',
       frase: preciosFaltantes === 1 ? 'Falta 1 precio' : `Faltan ${preciosFaltantes} precios`,
@@ -29,6 +33,7 @@ export function estadoDeTrabajo(datos: {
   if (recursos === 0) {
     return { estado: 'rojo', frase: 'Sin fórmula: cargá una o completá los recursos a mano' }
   }
+  if (!preciosVerificados) return { estado: 'amarillo', frase: 'No pude revisar los precios' }
   if (!tieneFormula) return { estado: 'amarillo', frase: 'Cargado a mano, sin fórmula' }
   return { estado: 'verde', frase: 'Con fórmula y con todos los precios' }
 }

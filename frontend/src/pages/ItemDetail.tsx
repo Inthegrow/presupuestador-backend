@@ -1043,8 +1043,9 @@ export default function ItemDetail() {
   const [templateModalOpen, setTemplateModalOpen] = useState(false)
   // Materiales sin precio, tal como los calcula el servidor sobre lo guardado
   const [faltantes, setFaltantes] = useState<PrecioFaltante[]>([])
-  // false hasta que el servidor contestó (o falló) la primera vez: así el chip no pasa por verde sin saber
-  const [faltantesListos, setFaltantesListos] = useState(false)
+  // 'cargando' hasta que el servidor contesta por lo guardado ahora; 'error' si no se pudo revisar.
+  // Solo 'ok' permite el verde: una consulta fallida nunca cuenta como "no falta ningún precio".
+  const [faltantesEstado, setFaltantesEstado] = useState<'cargando' | 'ok' | 'error'>('cargando')
   const faltantesReq = useRef(0)
   const [verCuenta, setVerCuenta] = useState<boolean>(leerVerCuenta)
   const alternarVerCuenta = () => {
@@ -1053,20 +1054,23 @@ export default function ItemDetail() {
     try { localStorage.setItem(VER_CUENTA_KEY, nuevo ? '1' : '0') } catch { /* sin almacenamiento: vale solo por ahora */ }
   }
 
-  // Pide el aviso al servidor; si falla, sin aviso. Se ignoran respuestas viejas si hubo un pedido más nuevo.
+  // Pide los faltantes al servidor. Mientras tanto, la verificación anterior deja de valer (el chip se
+  // esconde); si falla o la respuesta no sirve, queda en 'error' (amarillo, con Reintentar), nunca en verde.
+  // Se ignoran respuestas viejas si hubo un pedido más nuevo.
   const refrescarFaltantes = useCallback(async () => {
     if (!id || !itemId) return
     const req = ++faltantesReq.current
-    let lista: PrecioFaltante[] = []
+    setFaltantesEstado('cargando')
+    let lista: PrecioFaltante[] | null = null
     try {
       const r = await budgetApi.preciosFaltantes(id, itemId)
-      lista = Array.isArray(r?.precios_faltantes) ? r.precios_faltantes : []
+      if (Array.isArray(r?.precios_faltantes)) lista = r.precios_faltantes
     } catch {
-      lista = []
+      lista = null
     }
     if (req === faltantesReq.current) {
-      setFaltantes(lista)
-      setFaltantesListos(true)
+      setFaltantes(lista ?? [])
+      setFaltantesEstado(lista ? 'ok' : 'error')
     }
   }, [id, itemId])
 
@@ -1145,6 +1149,7 @@ export default function ItemDetail() {
     tieneFormula: !!item?.template_id,
     recursos: recursos.length,
     preciosFaltantes: faltantes.length,
+    preciosVerificados: faltantesEstado === 'ok',
   })
 
   if (loading) {
@@ -1243,12 +1248,20 @@ export default function ItemDetail() {
               <h1 className="text-xl font-extrabold text-[#143D34] min-w-0 break-words">
                 {item ? `${item.code ?? ''} ${item.description ?? ''}`.trim().toUpperCase() : 'DETALLE DE ITEM'}
               </h1>
-              {item && faltantesListos && (
+              {item && faltantesEstado !== 'cargando' && (
                 <div className="flex items-center gap-2 flex-wrap pt-1" data-testid="estado-trabajo">
                   <span className={`inline-block text-[10px] font-bold rounded px-1.5 py-0.5 ${ESTILO[estado.estado].chip}`}>
                     {ESTILO[estado.estado].texto}
                   </span>
                   <span className="text-xs text-gray-700">{estado.frase}</span>
+                  {faltantesEstado === 'error' && (
+                    <button
+                      onClick={() => refrescarFaltantes()}
+                      className="text-xs font-semibold text-[#2D8D68] underline hover:text-[#143D34]"
+                    >
+                      Reintentar
+                    </button>
+                  )}
                 </div>
               )}
             </div>
