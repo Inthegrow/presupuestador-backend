@@ -199,7 +199,7 @@ const valor = async (loc) => Number(await loc.getAttribute('data-valor'))
   await page.getByText('Listo: precios recalculados').waitFor({ timeout: 60000 }).catch(() => {})
   check(await errRecalc.count() === 0, 'al volver a probar y andar, el aviso rojo se va')
   const e2 = await leerEscalera(page)
-  check(cerca(e2.neto, e1.neto, 10), `recalcular todo no mueve el total (más que redondeos de centavos) (${pesos(e1.neto)} → ${pesos(e2.neto)})`)
+  check(cerca(e2.neto, e1.neto), `recalcular todo no mueve el total, ni un centavo (${pesos(e1.neto)} → ${pesos(e2.neto)})`)
 
   // 7. Coeficiente de pase general. Cada presupuesto guarda los % con los que se creó (Ginkgo los tiene propios);
   //    solo cambian los que siguen los generales: una obra vieja sin % propios.

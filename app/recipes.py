@@ -268,6 +268,9 @@ def apply_purchase_rounding(rows: list[dict]) -> list[dict]:
 
     summary = []
     for (_tipo, _name, _unidad, unidad_compra), group in groups.items():
+        # Always the same order (whatever order the rows were read in): the share of each
+        # item, and so the budget total, must not change when the budget is recalculated
+        group.sort(key=lambda r: (str(r.get("item_id") or ""), str(r.get("id") or "")))
         necesaria = sum(float(r.get("cantidad_efectiva") or 0) for r in group)
         if necesaria <= 0:
             continue
