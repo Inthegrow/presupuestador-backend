@@ -550,6 +550,16 @@ export interface ObraDiferenciaItem {
   app_directo: number
   excel_directo: number
   diferencia_directo: number
+  // Comparación al nivel del Excel (servidores viejos no lo traen)
+  app_nivel?: number
+  diferencia_nivel?: number
+}
+
+export interface ObraNivelExcel {
+  nivel: 'directo' | 'indirectos' | 'beneficio' | 'neto'
+  factor_excel: number | null
+  factor_app: number
+  texto: string
 }
 
 export interface ObraDiferenciaTrabajo {
@@ -574,6 +584,11 @@ export interface ObraDiferenciaTrabajo {
   margen_excel_pct: number | null
   app_unitario_directo: number | null
   excel_unitario_directo: number | null
+  // Al nivel del Excel: la app hasta donde llega el Excel (el lado Excel es excel_neto / excel_unitario)
+  app_nivel?: number
+  diferencia_nivel?: number
+  diferencia_nivel_pct?: number | null
+  app_unitario_nivel?: number | null
   items: ObraDiferenciaItem[]
 }
 
@@ -582,11 +597,17 @@ export interface ObraDiferencias {
   nombre: string
   precios_al: string | null
   source_file: string | null
+  // Hasta dónde llega el Excel (ausente en servidores viejos)
+  nivel_excel?: ObraNivelExcel
   total: {
     app_neto: number
     excel_neto: number
     diferencia: number
     diferencia_pct: number | null
+    // Total de la app al nivel del Excel y su diferencia (ausentes en servidores viejos)
+    app_nivel?: number
+    diferencia_nivel?: number
+    diferencia_nivel_pct?: number | null
     app_directo: number
     excel_directo: number
     diferencia_directo: number
@@ -601,6 +622,9 @@ export interface ObraDiferencias {
     parecidos: number
     sin_receta: number
     directo: { mas_caros: number; mas_baratos: number; parecidos: number }
+    nivel?: { mas_caros: number; mas_baratos: number; parecidos: number }
+    // Precio final de la app (con todo)
+    app_neto?: number
   }
   trabajos: ObraDiferenciaTrabajo[]
 }

@@ -1247,7 +1247,7 @@ function StepIndirectos({
           <div className="mt-4 text-sm text-gray-700 space-y-3">
             <p className="text-red-700">No se pudieron leer los indirectos de la empresa: {error}</p>
             <p>
-              Si creás el presupuesto igual, arranca con los de la empresa y los podés cambiar después en Cadena de Markups.
+              Si creás el presupuesto igual, arranca con los de la empresa y los podés cambiar después en Coeficiente de pase.
             </p>
             <button
               onClick={onReintentar}
@@ -1287,7 +1287,7 @@ function StepIndirectos({
       <div className="bg-white rounded-xl border p-6">
         <h2 className="text-lg font-bold text-gray-900 mb-1">Costos indirectos</h2>
         <p className="text-sm text-gray-500 mb-6">
-          Arrancan con los de la empresa (Cadena de Markups). Lo que cambies acá vale solo para este presupuesto.
+          Arrancan con los de la empresa (Coeficiente de pase). Lo que cambies acá vale solo para este presupuesto.
         </p>
 
         <div className="grid grid-cols-1 md:grid-cols-[1fr_300px] gap-6">

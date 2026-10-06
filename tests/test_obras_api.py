@@ -784,17 +784,23 @@ class TestDiferencias:
         res = diferencias(client)
         assert res.status_code == 200, res.text
         body = res.json()
-        assert set(body) == {"budget_id", "nombre", "precios_al", "source_file", "total", "resumen", "trabajos"}
+        assert set(body) == {"budget_id", "nombre", "precios_al", "source_file", "nivel_excel", "total", "resumen",
+                             "trabajos"}
         assert (body["budget_id"], body["nombre"], body["precios_al"], body["source_file"]) == (
             BUDGET_ID, "EDIFICIO GINKGO", "2026-10-03", "ginkgo.xlsx")
         # The hand-added item without Excel totals is left out
         assert body["total"] == {"app_neto": 3880.0, "excel_neto": 4000.0, "diferencia": -120.0,
                                  "diferencia_pct": -3.0, "app_directo": 2150.0, "excel_directo": 2400.0,
                                  "diferencia_directo": -250.0, "diferencia_directo_pct": -10.4,
-                                 "margen_app_pct": 80.5, "margen_excel_pct": 66.7}
+                                 "margen_app_pct": 80.5, "margen_excel_pct": 66.7,
+                                 # This Excel adds 66.7 %: closest to the app's final price (59.5 %)
+                                 "app_nivel": 3880.0, "diferencia_nivel": -120.0, "diferencia_nivel_pct": -3.0}
+        assert body["nivel_excel"]["nivel"] == "neto"
         assert body["resumen"] == {"trabajos": 5, "mas_caros": 2, "mas_baratos": 1, "parecidos": 2,
                                    "sin_receta": 4,
-                                   "directo": {"mas_caros": 1, "mas_baratos": 1, "parecidos": 3}}
+                                   "directo": {"mas_caros": 1, "mas_baratos": 1, "parecidos": 3},
+                                   "nivel": {"mas_caros": 2, "mas_baratos": 1, "parecidos": 2},
+                                   "app_neto": 3880.0}
         # Biggest difference first (in absolute value)
         assert [t["descripcion"] for t in body["trabajos"]] == [
             "OBRADOR", "MURO HUECO 18", "AYUDA DE GREMIOS", "LIMPIEZA", "CERO"]
@@ -804,7 +810,8 @@ class TestDiferencias:
                              "app_neto", "excel_neto", "diferencia", "diferencia_pct", "app_directo",
                              "excel_directo", "app_unitario", "excel_unitario", "items",
                              "diferencia_directo", "diferencia_directo_pct", "margen_app_pct", "margen_excel_pct",
-                             "app_unitario_directo", "excel_unitario_directo"}
+                             "app_unitario_directo", "excel_unitario_directo",
+                             "app_nivel", "diferencia_nivel", "diferencia_nivel_pct", "app_unitario_nivel"}
         assert muro["clave"] == "MURO HUECO 18 | m2"  # m² and m2 are the same task
         assert (muro["veces"], muro["cantidad_total"]) == (2, 150.0)
         assert (muro["receta"], muro["sin_receta"]) == ({"codigo": "5.1.4", "nombre": "Receta 5.1.4"}, False)
@@ -815,10 +822,10 @@ class TestDiferencias:
         assert muro["items"] == [
             {"id": "i-m1", "code": "4.2.1", "piso": "PRIMER PISO", "cantidad": 100.0, "app_neto": 1200.0,
              "excel_neto": 1000.0, "diferencia": 200.0, "app_directo": 900.0, "excel_directo": 800.0,
-             "diferencia_directo": 100.0},
+             "diferencia_directo": 100.0, "app_nivel": 1200.0, "diferencia_nivel": 200.0},
             {"id": "i-m2", "code": "4.3.1", "piso": "SEGUNDO PISO", "cantidad": 50.0, "app_neto": 600.0,
              "excel_neto": 500.0, "diferencia": 100.0, "app_directo": 450.0, "excel_directo": 400.0,
-             "diferencia_directo": 50.0},
+             "diferencia_directo": 50.0, "app_nivel": 600.0, "diferencia_nivel": 100.0},
         ]
 
         obrador, ayuda, cero = body["trabajos"][0], body["trabajos"][2], body["trabajos"][4]
@@ -877,6 +884,134 @@ class TestDiferencias:
         db.tables["budgets"][-1]["org_id"] = "otra-org"
         assert diferencias(client).status_code == 404
         assert diferencias(client, "00000000-0000-0000-0000-00000000dead").status_code == 404
+
+
+# ── Diferencias al nivel del Excel ───────────────────────────────────────────
+
+
+def _cascada(directo):
+    """(indirecto, beneficio, neto) with the default config: 34 % indirect, 10 % benefit, 8.2 % taxes."""
+    indirecto = round(directo * 0.34, 2)
+    beneficio = round((directo + indirecto) * 0.10, 2)
+    return indirecto, beneficio, round((directo + indirecto + beneficio) * 1.082, 2)
+
+
+def _budget_al_nivel(db, excel, **budget):
+    """MURO (directo 1000) and REVOQUE (directo 500) calculated by the app's cascade;
+    ``excel`` gives (excel_directo, excel_neto) for each one."""
+    db.tables["budgets"].append({"id": BUDGET_ID, "org_id": ORG, "name": "OBRA", "precios_al": None,
+                                 "source_file": "obra.xlsx", **budget})
+    for (id_, desc, cantidad, directo, sort), (excel_dir, excel_neto) in zip(
+            (("i-muro", "MURO", 100, 1000, 1), ("i-rev", "REVOQUE", 10, 500, 2)), excel):
+        indirecto, beneficio, neto = _cascada(directo)
+        db.tables["budget_items"].append({
+            **_item(id_, f"1.{sort}", desc, "m2", cantidad, neto=neto, excel=excel_neto, directo=directo,
+                    excel_dir=excel_dir, sort=sort),
+            "indirecto_total": indirecto, "beneficio_total": beneficio})
+
+
+class TestDiferenciasAlNivel:
+    def test_excel_up_to_the_indirects(self, client, db):
+        """Sol's Excel adds 34 % (Ginkgo): the app is compared up to its indirects, not its final price."""
+        _budget_al_nivel(db, [(900, 1206), (500, 670)])
+        body = diferencias(client).json()
+        assert body["nivel_excel"] == {
+            "nivel": "indirectos", "factor_excel": 1.34, "factor_app": 1.34,
+            "texto": "Tu Excel le suma 34% al costo directo: llega hasta los indirectos. Comparo la app hasta ahí."}
+        muro, revoque = body["trabajos"]
+        # app_nivel = directo + indirecto, against the Excel's final price
+        assert (muro["app_nivel"], muro["excel_neto"], muro["diferencia_nivel"], muro["diferencia_nivel_pct"]) == (
+            1340.0, 1206.0, 134.0, 11.1)
+        assert (muro["app_unitario_nivel"], muro["excel_unitario"]) == (13.4, 12.06)
+        assert (revoque["app_nivel"], revoque["diferencia_nivel"], revoque["diferencia_nivel_pct"]) == (
+            670.0, 0.0, 0.0)
+        assert muro["items"][0]["app_nivel"] == 1340.0
+        assert muro["items"][0]["diferencia_nivel"] == 134.0
+        assert (body["total"]["app_nivel"], body["total"]["diferencia_nivel"],
+                body["total"]["diferencia_nivel_pct"]) == (2010.0, 134.0, 7.1)
+        assert body["resumen"]["nivel"] == {"mas_caros": 1, "mas_baratos": 0, "parecidos": 1}
+        # The old fields do not change: final price and direct cost as always
+        assert (muro["app_neto"], muro["diferencia"], muro["diferencia_pct"]) == (1594.87, 388.87, 32.2)
+        assert (muro["app_directo"], muro["diferencia_directo"], muro["diferencia_directo_pct"]) == (
+            1000.0, 100.0, 11.1)
+        assert (muro["app_unitario"], muro["excel_unitario_directo"]) == (15.95, 9.0)
+        assert body["total"]["app_neto"] == body["resumen"]["app_neto"] == 2392.30
+        assert (body["resumen"]["mas_caros"], body["resumen"]["parecidos"]) == (2, 0)
+        assert body["resumen"]["directo"] == {"mas_caros": 1, "mas_baratos": 0, "parecidos": 1}
+
+    def test_excel_up_to_the_final_price(self, client, db):
+        _budget_al_nivel(db, [(1000, 1594.87), (500, 797.43)])
+        body = diferencias(client).json()
+        assert body["nivel_excel"] == {
+            "nivel": "neto", "factor_excel": 1.5949, "factor_app": 1.5949,
+            "texto": "Tu Excel le suma 59,5% al costo directo: llega hasta los impuestos. Comparo la app hasta ahí."}
+        for t in body["trabajos"]:
+            assert (t["app_nivel"], t["diferencia_nivel"]) == (t["app_neto"], 0.0)
+            assert t["app_unitario_nivel"] == t["app_unitario"]
+        assert body["resumen"]["nivel"] == {"mas_caros": 0, "mas_baratos": 0, "parecidos": 2}
+
+    def test_excel_up_to_the_benefit(self, client, db):
+        _budget_al_nivel(db, [(1000, 1480), (500, 730)])  # 47.3 %: 34 % + 10 % on top
+        body = diferencias(client).json()
+        assert body["nivel_excel"]["nivel"] == "beneficio"
+        assert body["nivel_excel"]["factor_app"] == 1.474
+        assert body["nivel_excel"]["texto"] == (
+            "Tu Excel le suma 47,3% al costo directo: llega hasta el beneficio. Comparo la app hasta ahí.")
+        muro = body["trabajos"][0]
+        assert (muro["app_nivel"], muro["diferencia_nivel"]) == (1474.0, -6.0)
+
+    def test_excel_without_margin(self, client, db):
+        _budget_al_nivel(db, [(900, 900), (500, 500)])
+        body = diferencias(client).json()
+        assert body["nivel_excel"] == {
+            "nivel": "directo", "factor_excel": 1.0, "factor_app": 1.0,
+            "texto": "Tu Excel no le suma nada al costo directo: comparo costo directo."}
+        muro = body["trabajos"][0]
+        assert (muro["app_nivel"], muro["diferencia_nivel"], muro["diferencia_nivel_pct"]) == (1000.0, 100.0, 11.1)
+        assert (muro["app_nivel"], muro["diferencia_nivel"]) == (muro["app_directo"], muro["diferencia_directo"])
+
+    def test_old_items_without_indirect_or_benefit(self, client, db):
+        _budget_al_nivel(db, [(900, 1206), (500, 670)])
+        muro = next(i for i in db.tables["budget_items"] if i["id"] == "i-muro")
+        muro["indirecto_total"] = None
+        muro.pop("beneficio_total")
+        body = diferencias(client).json()
+        assert body["nivel_excel"]["nivel"] == "indirectos"
+        assert body["trabajos"][0]["app_nivel"] == 1000.0  # null counts as 0
+
+    def test_factors_follow_the_budget_config(self, client, db):
+        """The same % as the cascade: the obra's own values over the organization's, over the defaults."""
+        db.tables["indirect_config"][0]["estructura_pct"] = 0  # the organization: 19 % of indirects
+        _budget_al_nivel(db, [(1000, 1190), (500, 595)])
+        nivel = diferencias(client).json()["nivel_excel"]
+        assert (nivel["nivel"], nivel["factor_excel"], nivel["factor_app"]) == ("indirectos", 1.19, 1.19)
+        assert nivel["texto"].startswith("Tu Excel le suma 19% al costo directo: llega hasta los indirectos.")
+        db.tables["budgets"][0]["indirectos"] = {"estructura_pct": 15}  # this obra: 34 % again
+        nivel = diferencias(client).json()["nivel_excel"]
+        assert (nivel["nivel"], nivel["factor_excel"], nivel["factor_app"]) == ("indirectos", 1.19, 1.34)
+        db.tables["budgets"][0]["indirectos"] = {"estructura_pct": 0, "beneficio_pct": 0, "ingresos_brutos_pct": 0,
+                                                 "imp_cheque_pct": 0, "imprevistos_pct": 0, "jefatura_pct": 0,
+                                                 "logistica_pct": 0, "herramientas_pct": 19}
+        assert diferencias(client).json()["nivel_excel"]["factor_app"] == 1.19  # an explicit 0 is respected
+
+    def test_order_by_mode(self, client, db):
+        _budget_al_nivel(db, [(900, 1206), (500, 670)])
+        db.tables["budget_items"].append({  # its final price is close to the Excel, its indirects are not
+            **_item("i-ay", "1.3", "AYUDA", "gl", 1, neto=300, excel=134, directo=100, excel_dir=100, sort=3),
+            "indirecto_total": 300, "beneficio_total": 0})
+        orden = {modo: [t["descripcion"] for t in client.get(
+            f"/obras/{BUDGET_ID}/diferencias", params={"modo": modo} if modo else None).json()["trabajos"]]
+            for modo in (None, "neto", "directo", "nivel")}
+        assert orden[None] == orden["neto"] == ["MURO", "AYUDA", "REVOQUE"]
+        assert orden["directo"][0] == "MURO"
+        assert orden["nivel"] == ["AYUDA", "MURO", "REVOQUE"]
+        assert client.get(f"/obras/{BUDGET_ID}/diferencias", params={"modo": "otro"}).status_code == 422
+
+    def test_excel_without_direct_cost(self, client, db):
+        _budget_al_nivel(db, [(0, 1206), (0, 670)])
+        nivel = diferencias(client).json()["nivel_excel"]
+        assert (nivel["nivel"], nivel["factor_excel"]) == ("neto", None)
+        assert nivel["texto"] == "Tu Excel no trae el costo directo: comparo el precio final."
 
 
 # ── Excel sin precios ────────────────────────────────────────────────────────

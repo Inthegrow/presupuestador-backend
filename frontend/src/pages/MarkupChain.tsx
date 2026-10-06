@@ -3,6 +3,8 @@ import { useParams, useSearchParams } from 'react-router-dom'
 import { Settings } from 'lucide-react'
 import { budgetApi } from '../lib/api'
 import { useAuth } from '../contexts/AuthContext'
+import { cascadaIndirectos, indirectosCompletos } from '../lib/cascada'
+import { fmtNumber } from '../lib/format'
 import type { CascadeResult, IndirectConfig } from '../types'
 
 const DEFAULT_CONFIG: IndirectConfig = {
@@ -198,6 +200,9 @@ export default function MarkupChain() {
     0,
   )
 
+  // Por cada $100 de costo directo, el precio sin IVA (misma cuenta que la cascada del servidor)
+  const precioPor100 = cascadaIndirectos(100, indirectosCompletos(cfg)).neto
+
   return (
     <div className="p-6 fade-in">
       <div className="flex items-center gap-2 text-[#2D8D68] text-[11px] font-bold tracking-wider mb-1">
@@ -205,8 +210,12 @@ export default function MarkupChain() {
       </div>
       <div className="flex items-center gap-3 mb-2">
         <div className="w-1 h-7 bg-[#2D8D68] rounded-full" />
-        <h1 className="text-xl font-extrabold text-gray-900">CADENA DE COSTOS INDIRECTOS</h1>
+        <h1 className="text-xl font-extrabold text-gray-900">COEFICIENTE DE PASE</h1>
       </div>
+      <p className="text-gray-700 text-sm mb-1 ml-4 max-w-2xl">
+        Lo que se le suma al costo directo para llegar al precio: indirectos, beneficio e impuestos. Por cada $100 de
+        costo directo, el precio sin IVA es ${fmtNumber(precioPor100)}.
+      </p>
       <p className="text-gray-500 text-sm mb-6 ml-4">
         {id
           ? 'Porcentajes de esta obra. Arrancan con los valores generales; cambiarlos acá no toca las otras obras.'
