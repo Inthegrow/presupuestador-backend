@@ -7,7 +7,7 @@ from uuid import UUID
 from fastapi import APIRouter, Body, Depends, HTTPException
 
 from app.auth import get_current_user, require_admin, require_editor
-from app.budget_prices import initial_indirects, today
+from app.budget_prices import initial_indirects, precios_faltantes, today
 from app.calculations import (
     calc_budget_summary,
     calc_item_totals,
@@ -447,6 +447,37 @@ async def get_item_resources(
         .execute()
     )
     return result.data or []
+
+
+@router.get("/{budget_id}/items/{item_id}/precios-faltantes")
+async def get_item_missing_prices(
+    budget_id: UUID,
+    item_id: UUID,
+    user: dict = Depends(get_current_user),
+):
+    """Codes of the item's saved resources without a price (Codex, PR #37): what the
+    screen shows when the item is opened, with the same rule as applying a recipe."""
+    db = get_data_db()
+    org_id = user["org_id"]
+    item = (
+        db.table("budget_items")
+        .select("id")
+        .eq("id", str(item_id))
+        .eq("budget_id", str(budget_id))
+        .eq("org_id", org_id)
+        .execute()
+    )
+    if not item.data:
+        raise HTTPException(404, "Item no encontrado")
+    resources = (
+        db.table("item_resources")
+        .select("*")
+        .eq("item_id", str(item_id))
+        .eq("org_id", org_id)
+        .order("id")
+        .execute()
+    )
+    return {"precios_faltantes": precios_faltantes(resources.data or [])}
 
 
 # ── Resource helpers ────────────────────────────────────────────────────────

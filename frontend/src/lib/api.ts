@@ -206,6 +206,10 @@ export const budgetApi = {
   deleteResource: (budgetId: string, itemId: string, resourceId: string) =>
     del<void>(`/budgets/${budgetId}/items/${itemId}/resources/${resourceId}`),
 
+  // Materiales sin precio, calculado por el servidor sobre los recursos guardados
+  preciosFaltantes: (budgetId: string, itemId: string) =>
+    get<{ precios_faltantes: PrecioFaltante[] }>(`/budgets/${budgetId}/items/${itemId}/precios-faltantes`),
+
   // Full recalculation: formulas, inherited waste, purchase rounding, indirects
   cascadeRecalculate: (budgetId: string) =>
     post<CascadeResult>(`/budgets/${budgetId}/cascade-recalculate`),
@@ -302,6 +306,19 @@ export function esFaltaConversion(err: unknown): err is ApiError & { detail: Fal
   return !!d && typeof d === 'object' && d.codigo === 'FALTA_CONVERSION'
 }
 
+// Detalle del 409 cuando el trabajo ya tiene recursos y no se mandó `reemplazar: true`
+export interface ConfirmarReemplazo {
+  codigo: 'CONFIRMAR_REEMPLAZO'
+  mensaje: string
+  recursos: number
+}
+
+export function esConfirmarReemplazo(err: unknown): err is ApiError & { detail: ConfirmarReemplazo } {
+  if (!(err instanceof ApiError) || err.status !== 409) return false
+  const d = err.detail as { codigo?: unknown } | null
+  return !!d && typeof d === 'object' && d.codigo === 'CONFIRMAR_REEMPLAZO'
+}
+
 export const templateApi = {
   list: (categoria?: string) =>
     get<any[]>(`/templates${categoria ? `?categoria=${encodeURIComponent(categoria)}` : ''}`),
@@ -314,11 +331,11 @@ export const templateApi = {
     templateId: string,
     budgetId: string,
     itemId: string,
-    opts?: { parametros?: Record<string, number>; factor?: number },
+    opts?: { parametros?: Record<string, number>; factor?: number; reemplazar?: boolean },
   ) =>
     post<TemplateApplyResult>(
       `/templates/${templateId}/apply/${budgetId}/items/${itemId}`,
-      opts && (opts.parametros || opts.factor !== undefined) ? opts : undefined,
+      opts && (opts.parametros || opts.factor !== undefined || opts.reemplazar !== undefined) ? opts : undefined,
     ),
   preview: (data: {
     cantidad: number

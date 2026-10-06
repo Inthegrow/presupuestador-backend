@@ -14,8 +14,20 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import create_app
-from app.routers.templates import factor_propuesto, scale_resource
-from tests.test_recipes_api import BUDGET, ITEM, MOCK_USER, ORG, PLATEA, TEMPLATE, FakeDB, base_tables
+from app.budget_prices import falta_precio, precios_faltantes
+from app.routers.templates import A_MEDIAS, NO_SE_APLICO, factor_propuesto, scale_resource
+from tests.test_recipes_api import (
+    BUDGET,
+    ITEM,
+    ITEM2,
+    MOCK_USER,
+    ORG,
+    PLATEA,
+    RESOURCE_DEFAULTS,
+    TEMPLATE,
+    FakeDB,
+    base_tables,
+)
 
 CASCOTE = "tmpl-cascote"
 OFICIAL = "cat-oficial"
@@ -86,7 +98,7 @@ class TestReplace:
         primera = sorted(r["codigo"] for r in resources(db))
         directo = item(db)["directo_total"]
 
-        r = apply(client)
+        r = apply(client, reemplazar=True)
         assert r.status_code == 200, r.text
         assert sorted(r["codigo"] for r in resources(db)) == primera
         assert len(resources(db)) == len(PLATEA["recursos"])
@@ -96,7 +108,7 @@ class TestReplace:
     def test_another_formula_leaves_only_the_new_one(self, client, db):
         apply(client)
         item(db)["unidad"] = "m3"
-        assert apply(client, CASCOTE).status_code == 200
+        assert apply(client, CASCOTE, reemplazar=True).status_code == 200
         assert sorted(r["codigo"] for r in resources(db)) == ["CASC", "MO-OF"]
         assert item(db)["template_id"] == CASCOTE
         # 20 m³ × $1000 + 10 días × $200
@@ -105,15 +117,15 @@ class TestReplace:
     def test_other_items_keep_their_resources(self, client, db):
         db.tables["item_resources"].append(
             {"id": "otro", "item_id": "otro-item", "org_id": ORG, "tipo": "material", "codigo": "X"})
-        apply(client)
-        apply(client)
+        assert apply(client).status_code == 200
+        assert apply(client, reemplazar=True).status_code == 200
         assert any(r["id"] == "otro" for r in db.tables["item_resources"])
 
     def test_bad_formula_keeps_what_the_item_had(self, client, db):
         apply(client)
         antes = copy.deepcopy(resources(db))
         db.tables["item_templates"][0]["recursos"].append({"tipo": "material", "codigo": "X", "formula": "Q / nada"})
-        assert apply(client).status_code == 422
+        assert apply(client, reemplazar=True).status_code == 422
         assert resources(db) == antes
 
 
@@ -158,7 +170,7 @@ class TestConversion:
 
         # The same formula on an item already in m³ (factor 1)
         item(db)["unidad"] = "m3"
-        assert apply(client, CASCOTE).status_code == 200
+        assert apply(client, CASCOTE, reemplazar=True).status_code == 200
         assert item(db)["directo_total"] == pytest.approx(directo * 10)
         assert directo == pytest.approx(3300)  # 3 m³ × $1000 + 1,5 días × $200
 
@@ -276,3 +288,216 @@ class TestNetAfterApply:
         r = client.post(f"/budgets/{BUDGET}/cascade-recalculate")
         assert r.status_code == 200, r.text
         assert item(db)["neto_total"] == pytest.approx(neto)
+
+
+# ── Confirmar antes de reemplazar (Codex, PR #37) ───────────────────────────
+
+# Loaded by hand: the item has no recipe
+MANUAL = {**RESOURCE_DEFAULTS, "id": "manual", "item_id": ITEM, "org_id": ORG, "tipo": "material",
+          "codigo": "ARENA", "descripcion": "Arena", "cantidad": 1, "desperdicio_pct": 0,
+          "precio_unitario": 300, "cantidad_efectiva": 1, "subtotal": 300}
+
+CONFIRMAR = {
+    "codigo": "CONFIRMAR_REEMPLAZO",
+    "mensaje": "Este trabajo ya tiene 1 recurso cargado (material, mano de obra o subcontrato). La fórmula lo reemplaza.",
+    "recursos": 1,
+}
+
+
+class TestConfirmReplace:
+    def test_hand_loaded_resources_ask_first(self, client, db):
+        db.tables["item_resources"].append(copy.deepcopy(MANUAL))
+        r = apply(client)
+        assert r.status_code == 409, r.text
+        assert r.json()["detail"] == CONFIRMAR
+        assert resources(db) == [MANUAL]
+        assert item(db)["template_id"] is None
+
+    def test_confirmed_replaces(self, client, db):
+        db.tables["item_resources"].append(copy.deepcopy(MANUAL))
+        r = apply(client, reemplazar=True)
+        assert r.status_code == 200, r.text
+        assert sorted(x["codigo"] for x in resources(db)) == sorted(x["codigo"] for x in PLATEA["recursos"])
+        assert item(db)["template_id"] == TEMPLATE
+
+    def test_without_resources_nothing_is_asked(self, client, db):
+        r = apply(client)
+        assert r.status_code == 200, r.text
+        assert len(resources(db)) == len(PLATEA["recursos"])
+
+    def test_confirm_comes_before_the_conversion(self, client, db):
+        as_contrapiso(db)
+        db.tables["item_resources"].append(copy.deepcopy(MANUAL))
+        r = apply(client, CASCOTE)
+        assert r.status_code == 409 and r.json()["detail"] == CONFIRMAR
+        r = apply(client, CASCOTE, reemplazar=True)
+        assert r.status_code == 409 and r.json()["detail"]["codigo"] == "FALTA_CONVERSION"
+        assert resources(db) == [MANUAL]
+        r = apply(client, CASCOTE, reemplazar=True, factor=0.08)
+        assert r.status_code == 200, r.text
+        assert sorted(x["codigo"] for x in resources(db)) == ["CASC", "MO-OF"]
+
+
+# ── Todo o nada (Codex, PR #37) ──────────────────────────────────────────────
+
+
+def fail_writes(db, falla, veces=1):
+    """Make the next ``veces`` writes matching ``falla(table, query)`` raise (None: all of them),
+    like FailingDB in test_budget_prices."""
+    original = db.table
+    left = {"n": veces}
+
+    def table(name):
+        query = original(name)
+        execute = query.execute
+
+        def guarded():
+            if query.action in ("insert", "update", "delete") and left["n"] != 0 and falla(name, query):
+                if left["n"] is not None:
+                    left["n"] -= 1
+                raise RuntimeError("write failed")
+            return execute()
+
+        query.execute = guarded
+        return query
+
+    db.table = table
+
+
+def by_id(rows) -> dict:
+    return {r["id"]: r for r in rows}
+
+
+def item_update(name, query):
+    return name == "budget_items" and query.action == "update"
+
+
+class TestAtomicApply:
+    def _with_other_item(self, db):
+        """A second item with a resource, whose saved values a recalculation would change."""
+        db.tables["budget_items"].append({
+            "id": ITEM2, "budget_id": BUDGET, "org_id": ORG, "code": "4.2", "cantidad": 10,
+            "notas": None, "template_id": None, "parametros": {}, "directo_total": 999,
+        })
+        db.tables["item_resources"].append({
+            **RESOURCE_DEFAULTS, "id": "r-otro", "item_id": ITEM2, "org_id": ORG, "tipo": "material",
+            "codigo": "H30", "cantidad": 2, "desperdicio_pct": 0, "precio_unitario": 100,
+            "cantidad_efectiva": 2, "subtotal": 1,
+        })
+
+    def _state(self, db) -> tuple:
+        return (
+            copy.deepcopy(by_id(db.tables["budget_items"])),
+            copy.deepcopy(by_id(db.tables["item_resources"])),
+        )
+
+    def test_failed_item_update_puts_back_the_old_resources(self, client, db):
+        assert apply(client).status_code == 200
+        antes = self._state(db)
+        fail_writes(db, item_update)
+
+        r = apply(client, CASCOTE, reemplazar=True)
+        assert r.status_code == 500, r.text
+        assert r.json()["detail"] == NO_SE_APLICO
+        # Same resources (ids and values) and the item still on its recipe
+        assert self._state(db) == antes
+        assert item(db)["template_id"] == TEMPLATE
+
+    def test_failed_cascade_is_not_a_200(self, client, db):
+        self._with_other_item(db)
+        assert apply(client).status_code == 200
+        # Stale values of the other item: a recalculation would change them
+        next(i for i in db.tables["budget_items"] if i["id"] == ITEM2)["directo_total"] = 999
+        next(x for x in db.tables["item_resources"] if x["id"] == "r-otro")["subtotal"] = 1
+        antes = self._state(db)
+        directo = item(db)["directo_total"]
+        fail_writes(db, lambda name, q: name == "item_resources" and q.action == "update"
+                    and ("id", "r-otro") in q.filters)
+
+        r = apply(client, CASCOTE, reemplazar=True)
+        assert r.status_code == 500, r.text
+        assert r.json()["detail"] == NO_SE_APLICO
+        assert self._state(db) == antes
+        assert item(db)["directo_total"] == directo
+
+    def test_failed_restore_says_so(self, client, db):
+        assert apply(client).status_code == 200
+        fail_writes(db, item_update, veces=None)
+        r = apply(client, CASCOTE, reemplazar=True)
+        assert r.status_code == 500
+        assert r.json()["detail"] == A_MEDIAS
+
+    def test_happy_path(self, client, db):
+        self._with_other_item(db)
+        r = apply(client)
+        assert r.status_code == 200, r.text
+        assert set(r.json()) == {"resources_created", "item_updated", "parametros", "factor", "precios_faltantes"}
+        assert r.json()["resources_created"] == len(PLATEA["recursos"])
+        assert item(db)["template_id"] == TEMPLATE and item(db)["neto_total"] > 0
+        assert any(x["id"] == "r-otro" for x in db.tables["item_resources"])
+
+
+# ── Precios que faltan al abrir el trabajo (Codex, PR #37) ───────────────────
+
+
+def _res(**kw) -> dict:
+    return {"codigo": "H30", "descripcion": "Hormigón", "tipo": "material", "precio_unitario": 0,
+            "precio_fecha": None, "lo_compra_cliente": False, **kw}
+
+
+class TestMissingPriceRule:
+    def test_rule(self):
+        assert falta_precio(_res()) is True
+        assert falta_precio(_res(precio_unitario=None)) is True
+        assert falta_precio(_res(precio_fecha="2026-08-01")) is False  # a dated $0 is a price
+        assert falta_precio(_res(lo_compra_cliente=True)) is False
+        assert falta_precio(_res(precio_unitario=1200)) is False
+        assert falta_precio(_res(codigo=None)) is False
+        assert falta_precio(_res(codigo=" ")) is False
+        assert falta_precio(_res(tipo="mano_obra", codigo="MO-OF")) is True
+
+    def test_one_line_per_code(self):
+        faltan = precios_faltantes([_res(), _res(codigo="h30 ", descripcion="Otra"), _res(codigo="X")])
+        assert faltan == [
+            {"codigo": "H30", "descripcion": "Hormigón", "motivo": "No tiene precio"},
+            {"codigo": "X", "descripcion": "Hormigón", "motivo": "No tiene precio"},
+        ]
+
+
+class TestMissingPricesOnOpen:
+    def _get(self, client):
+        return client.get(f"/budgets/{BUDGET}/items/{ITEM}/precios-faltantes")
+
+    def _add(self, db, rid, **kw):
+        db.tables["item_resources"].append({**RESOURCE_DEFAULTS, "id": rid, "item_id": ITEM, "org_id": ORG,
+                                             **_res(**kw)})
+
+    def test_missing(self, client, db):
+        self._add(db, "r1", codigo="SIN", descripcion="Sin precio")
+        self._add(db, "r2", codigo="CERO", precio_fecha="2026-08-01")
+        self._add(db, "r3", codigo="NYL", lo_compra_cliente=True)
+        self._add(db, "r4", codigo="CON", precio_unitario=500, precio_fecha="2026-08-01")
+        self._add(db, "r5", codigo="MO-OF", descripcion="Oficial", tipo="mano_obra")
+        self._add(db, "r6", codigo="sin", descripcion="Repetido")
+        r = self._get(client)
+        assert r.status_code == 200, r.text
+        assert r.json() == {"precios_faltantes": [
+            {"codigo": "SIN", "descripcion": "Sin precio", "motivo": "No tiene precio"},
+            {"codigo": "MO-OF", "descripcion": "Oficial", "motivo": "No tiene precio"},
+        ]}
+
+    def test_none_missing(self, client, db):
+        self._add(db, "r1", precio_unitario=500)
+        assert self._get(client).json() == {"precios_faltantes": []}
+
+    def test_after_apply_matches_the_apply_answer(self, client, db):
+        db.tables["catalog_entries"] = [e for e in db.tables["catalog_entries"] if e["codigo"] != "MO-OF"]
+        db.tables["catalog_entries"].append({"id": "c4", "org_id": ORG, "codigo": "MO-OF", "precio_sin_iva": 0})
+        r = apply(client)
+        assert r.status_code == 200, r.text
+        assert self._get(client).json()["precios_faltantes"] == r.json()["precios_faltantes"]
+
+    def test_other_company(self, client, db):
+        self._add(db, "r1")
+        item(db)["org_id"] = "other-org"
+        assert self._get(client).status_code == 404

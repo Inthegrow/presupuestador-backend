@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import {
   ChevronRight,
@@ -19,7 +19,7 @@ import {
   Library,
   AlertTriangle,
 } from 'lucide-react'
-import { budgetApi, templateApi, esFaltaConversion } from '../lib/api'
+import { budgetApi, templateApi, esFaltaConversion, esConfirmarReemplazo } from '../lib/api'
 import type { FaltaConversion, PrecioFaltante } from '../lib/api'
 import { useAuth } from '../contexts/AuthContext'
 import { fmtCurrency, fmtNumber, fmtPercent } from '../lib/format'
@@ -725,18 +725,20 @@ function ItemParams({
 interface TemplateModalProps {
   budgetId: string
   itemId: string
-  // true si el trabajo ya tiene fórmula: aplicar otra reemplaza lo que tiene
+  // true si el trabajo ya tiene fórmula o recursos: aplicar otra los reemplaza
   reemplaza: boolean
-  onApplied: (faltantes: PrecioFaltante[]) => Promise<void> | void
+  // cuántos recursos tiene cargados ahora (para el texto de la confirmación)
+  recursosCargados: number
+  onApplied: () => Promise<void> | void
   onClose: () => void
 }
 
 // Paso intermedio antes de aplicar: confirmar el reemplazo o responder la conversión de unidades
 type Paso =
-  | { tipo: 'confirmar'; tmpl: any }
-  | { tipo: 'conversion'; tmpl: any; det: FaltaConversion; valor: string }
+  | { tipo: 'confirmar'; tmpl: any; mensaje: string }
+  | { tipo: 'conversion'; tmpl: any; det: FaltaConversion; valor: string; reemplazar: boolean }
 
-function TemplateModal({ budgetId, itemId, reemplaza, onApplied, onClose }: TemplateModalProps) {
+function TemplateModal({ budgetId, itemId, reemplaza, recursosCargados, onApplied, onClose }: TemplateModalProps) {
   const [templates, setTemplates] = useState<any[]>([])
   const [categories, setCategories] = useState<string[]>([])
   const [selectedCat, setSelectedCat] = useState<string | null>(null)
@@ -761,22 +763,37 @@ function TemplateModal({ budgetId, itemId, reemplaza, onApplied, onClose }: Temp
     ? templates.filter((t) => t.categoria === selectedCat)
     : templates
 
-  // Pide al servidor aplicar la fórmula; si falta la conversión de unidades, abre el recuadro para responderla
-  const aplicar = async (tmpl: any, factor?: number) => {
+  // Texto de la confirmación según lo que la pantalla sabe del trabajo
+  const mensajeReemplazo = () =>
+    recursosCargados > 0
+      ? recursosCargados === 1
+        ? 'Este trabajo ya tiene 1 recurso cargado (material, mano de obra o subcontrato). La fórmula lo reemplaza.'
+        : `Este trabajo ya tiene ${recursosCargados} recursos cargados (materiales, mano de obra o subcontratos). La fórmula los reemplaza.`
+      : 'Reemplaza los materiales y la mano de obra que tiene ahora.'
+
+  // Pide al servidor aplicar la fórmula. Si el trabajo ya tiene recursos pide confirmar (409 CONFIRMAR_REEMPLAZO);
+  // si falta la conversión de unidades, abre el recuadro para responderla. `reemplazar` se arrastra en todos los reenvíos.
+  const aplicar = async (tmpl: any, opts: { factor?: number; reemplazar?: boolean } = {}) => {
     setApplying(tmpl.id)
     setError(null)
     try {
-      const res = await templateApi.apply(tmpl.id, budgetId, itemId, factor !== undefined ? { factor } : undefined)
-      await onApplied(res.precios_faltantes ?? [])
+      const body: { factor?: number; reemplazar?: boolean } = {}
+      if (opts.factor !== undefined) body.factor = opts.factor
+      if (opts.reemplazar) body.reemplazar = true
+      await templateApi.apply(tmpl.id, budgetId, itemId, Object.keys(body).length ? body : undefined)
+      await onApplied()
       onClose()
     } catch (err) {
-      if (esFaltaConversion(err)) {
+      if (esConfirmarReemplazo(err)) {
+        setPaso({ tipo: 'confirmar', tmpl, mensaje: err.detail.mensaje || mensajeReemplazo() })
+      } else if (esFaltaConversion(err)) {
         const prop = err.detail.factor_propuesto
         setPaso({
           tipo: 'conversion',
           tmpl,
           det: err.detail,
           valor: prop != null ? String(prop).replace('.', ',') : '',
+          reemplazar: !!opts.reemplazar,
         })
       } else {
         setPaso(null)
@@ -789,7 +806,7 @@ function TemplateModal({ budgetId, itemId, reemplaza, onApplied, onClose }: Temp
   // Al elegir una fórmula: si el trabajo ya tiene una, primero se pide confirmación en la misma ventana
   const handleElegir = (tmpl: any) => {
     setError(null)
-    if (reemplaza) setPaso({ tipo: 'confirmar', tmpl })
+    if (reemplaza) setPaso({ tipo: 'confirmar', tmpl, mensaje: mensajeReemplazo() })
     else aplicar(tmpl)
   }
 
@@ -800,7 +817,7 @@ function TemplateModal({ budgetId, itemId, reemplaza, onApplied, onClose }: Temp
       setError('Escribí un número mayor que cero.')
       return
     }
-    aplicar(paso.tmpl, n)
+    aplicar(paso.tmpl, { factor: n, reemplazar: paso.reemplazar })
   }
 
   return (
@@ -844,10 +861,10 @@ function TemplateModal({ budgetId, itemId, reemplaza, onApplied, onClose }: Temp
           <div className="px-4 py-4 flex-shrink-0">
             <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-800">
               <div className="font-semibold text-[#143D34] mb-1">{paso.tmpl.nombre}</div>
-              <p>Reemplaza los materiales y la mano de obra que tiene ahora.</p>
+              <p>{paso.mensaje}</p>
               <div className="flex items-center gap-2 mt-3">
                 <button
-                  onClick={() => aplicar(paso.tmpl)}
+                  onClick={() => aplicar(paso.tmpl, { reemplazar: true })}
                   disabled={applying !== null}
                   className="flex items-center gap-1.5 text-xs bg-[#2D8D68] hover:bg-[#1E6B4E] text-white px-3 py-1.5 rounded-lg font-medium transition-colors disabled:opacity-50"
                 >
@@ -1018,8 +1035,23 @@ export default function ItemDetail() {
   const [memoriaDraft, setMemoriaDraft] = useState('')
   const [memoriaSaving, setMemoriaSaving] = useState(false)
   const [templateModalOpen, setTemplateModalOpen] = useState(false)
-  // Materiales que el servidor no pudo valuar al aplicar la fórmula
+  // Materiales sin precio, tal como los calcula el servidor sobre lo guardado
   const [faltantes, setFaltantes] = useState<PrecioFaltante[]>([])
+  const faltantesReq = useRef(0)
+
+  // Pide el aviso al servidor; si falla, sin aviso. Se ignoran respuestas viejas si hubo un pedido más nuevo.
+  const refrescarFaltantes = useCallback(async () => {
+    if (!id || !itemId) return
+    const req = ++faltantesReq.current
+    let lista: PrecioFaltante[] = []
+    try {
+      const r = await budgetApi.preciosFaltantes(id, itemId)
+      lista = Array.isArray(r?.precios_faltantes) ? r.precios_faltantes : []
+    } catch {
+      lista = []
+    }
+    if (req === faltantesReq.current) setFaltantes(lista)
+  }, [id, itemId])
 
   const loadData = useCallback(async (cancelled?: { v: boolean }) => {
     if (!id || !itemId) {
@@ -1043,12 +1075,13 @@ export default function ItemDetail() {
       setRecursos(Array.isArray(res) ? res : [])
       if (ind) setIndirects(ind)
       if (!it) setError('No se encontro el item.')
+      refrescarFaltantes()
     } catch {
       if (!cancelled?.v) setError('Error cargando datos del item.')
     } finally {
       if (!cancelled?.v) setLoading(false)
     }
-  }, [id, itemId])
+  }, [id, itemId, refrescarFaltantes])
 
   const reloadResources = useCallback(async () => {
     if (!id || !itemId) return
@@ -1063,16 +1096,8 @@ export default function ItemDetail() {
     } catch {
       // silent
     }
-  }, [id, itemId])
-
-  // El aviso de precios faltantes se va solo cuando ya no queda ningún recurso de esos códigos en $0
-  useEffect(() => {
-    setFaltantes((prev) => {
-      if (prev.length === 0) return prev
-      const sigue = prev.filter((f) => recursos.some((r) => r.codigo === f.codigo && !(r.precio_unitario > 0)))
-      return sigue.length === prev.length ? prev : sigue
-    })
-  }, [recursos])
+    refrescarFaltantes()
+  }, [id, itemId, refrescarFaltantes])
 
   useEffect(() => {
     const cancelled = { v: false }
@@ -1177,11 +1202,9 @@ export default function ItemDetail() {
         <TemplateModal
           budgetId={id}
           itemId={itemId}
-          reemplaza={!!item?.template_id}
-          onApplied={async (lista) => {
-            await reloadResources()
-            setFaltantes(lista)
-          }}
+          reemplaza={!!item?.template_id || recursos.length > 0}
+          recursosCargados={recursos.length}
+          onApplied={reloadResources}
           onClose={() => setTemplateModalOpen(false)}
         />
       )}

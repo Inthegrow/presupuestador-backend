@@ -293,6 +293,8 @@ class TemplateApply(BaseModel):
     parametros: dict[str, float] = {}  # budget values that replace the defaults
     # Units of the recipe per unit of the item, when they differ (m³ per m²: the thickness)
     factor: float | None = None
+    # The item already has resources: true confirms the recipe replaces them (409 CONFIRMAR_REEMPLAZO)
+    reemplazar: bool = False
 
 
 class ItemParamsUpdate(BaseModel):

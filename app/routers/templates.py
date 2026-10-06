@@ -8,6 +8,7 @@ template has parameters with default values, waste is inherited
 from __future__ import annotations
 
 import json
+import logging
 from datetime import date
 
 from fastapi import APIRouter, Body, Depends, HTTPException
@@ -23,11 +24,16 @@ from app.db import get_data_db
 from app.formulas import FormulaError
 from app.obra_import import _scale, _scale_rendimiento, espesor_m_from, match_recipe, unit_key
 from app.recipes import expand_resource, merge_params, param_defaults, validate_template
-from app.routers.analysis import _run_cascade
+from app.routers.analysis import _restore, _run_cascade, _snapshot
 from app.routers.obras import MOTIVOS, PriceBook
 from app.schemas import TemplateApply, TemplateCreate, TemplatePreview, TemplateUpdate
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
+
+NO_SE_APLICO = "No se pudo aplicar la fórmula. El trabajo quedó como estaba; probá de nuevo."
+A_MEDIAS = "No se pudo aplicar la fórmula y el presupuesto puede haber quedado a medias. Avisá antes de seguir."
 
 
 def _json_list(value: object) -> list:
@@ -43,6 +49,14 @@ def _check_template(recursos: list[dict], parametros: list[dict]) -> None:
     errors = validate_template(recursos, parametros)
     if errors:
         raise HTTPException(422, errors)
+
+
+def _budget_items(db, budget_id: str, org_id: str) -> list[dict]:
+    """Every item of the budget (all pages), in a stable order."""
+    return fetch_all(
+        lambda: db.table("budget_items").select("*")
+        .eq("budget_id", budget_id).eq("org_id", org_id).order("id")
+    )
 
 
 def _precios_al(budget: dict) -> date:
@@ -290,6 +304,15 @@ async def preview_template(body: TemplatePreview, user: dict = Depends(require_e
     }
 
 
+def mensaje_reemplazo(n: int) -> str:
+    """Warning before a formula replaces what the item already has."""
+    if n == 1:
+        return ("Este trabajo ya tiene 1 recurso cargado (material, mano de obra o subcontrato). "
+                "La fórmula lo reemplaza.")
+    return (f"Este trabajo ya tiene {n} recursos cargados (materiales, mano de obra o subcontratos). "
+            "La fórmula los reemplaza.")
+
+
 @router.post("/{template_id}/apply/{budget_id}/items/{item_id}")
 async def apply_template(
     template_id: str,
@@ -345,6 +368,21 @@ async def apply_template(
     # Units: the recipe's and the item's must match, or the conversion must be given
     if body.factor is not None and body.factor <= 0:
         raise HTTPException(422, ["El factor tiene que ser mayor que cero"])
+    # Codex (PR #37): resources already in the item (loaded by hand, or another recipe)
+    # are not replaced without asking. Asked before the conversion, so the screen confirms
+    # first and then sends reemplazar=true (and the factor, when it is asked for).
+    if not body.reemplazar:
+        tiene = (
+            db.table("item_resources").select("id").eq("item_id", item_id).eq("org_id", org_id).execute().data
+            or []
+        )
+        if tiene:
+            raise HTTPException(409, {
+                "codigo": "CONFIRMAR_REEMPLAZO",
+                "mensaje": mensaje_reemplazo(len(tiene)),
+                "recursos": len(tiene),
+            })
+
     uf, ut = unit_key(template.get("unidad")), unit_key(item.get("unidad"))
     factor = 1.0
     if uf and ut and uf != ut:
@@ -403,41 +441,54 @@ async def apply_template(
         calc_resource_subtotal(row)
 
     # The recipe replaces what the item had (applying twice must not add it twice).
-    # All rows go in one insert; if it fails, the old resources are put back.
-    anteriores = (
-        db.table("item_resources").select("*").eq("item_id", item_id).eq("org_id", org_id).execute().data or []
-    )
-    db.table("item_resources").delete().eq("item_id", item_id).eq("org_id", org_id).execute()
+    # Codex (PR #37): all or nothing. The whole budget is read first; if any write fails
+    # (resources, the item, the cascade), everything goes back to how it was.
     try:
-        created = (db.table("item_resources").insert(rows).execute().data or []) if rows else []
-    except Exception:
-        if anteriores:
-            db.table("item_resources").insert(anteriores).execute()
-        raise
+        items = _budget_items(db, budget_id, org_id)
+        before = _snapshot(db, org_id, budget.data[0], items)
+    except Exception as exc:
+        logger.exception("Could not read budget %s before applying template %s", budget_id, template_id)
+        raise HTTPException(500, NO_SE_APLICO) from exc
+    anteriores = [r for r in before["resources"] if str(r.get("item_id")) == item_id]
 
-    # Recalculate the item from its new resources (non-cost fields + a provisional total)
-    all_resources = (
-        db.table("item_resources")
-        .select("*")
-        .eq("item_id", item_id)
-        .eq("org_id", org_id)
-        .execute()
-    )
-    updated_item = calc_item_from_resources(dict(item), all_resources.data or [])
-    db.table("budget_items").update({
-        "template_id": template_id,
-        "parametros": params,
-        "mat_unitario": updated_item["mat_unitario"],
-        "mo_unitario": updated_item["mo_unitario"],
-    }).eq("id", item_id).execute()
-    # Then the same full recalculation as "Recálculo completo" (inherited waste, purchase
-    # rounding over the whole budget, cascade indirects), so the item shows its final price
-    # right away and a later full recalculation does not move it
-    items = fetch_all(
-        lambda: db.table("budget_items").select("*")
-        .eq("budget_id", budget_id).eq("org_id", org_id).order("id")
-    )
-    _run_cascade(db, org_id, budget.data[0], items)
+    try:
+        db.table("item_resources").delete().eq("item_id", item_id).eq("org_id", org_id).execute()
+        created = (db.table("item_resources").insert(rows).execute().data or []) if rows else []
+        if len(created) != len(rows):
+            raise RuntimeError(f"Se guardaron {len(created)} de {len(rows)} recursos")
+
+        # Recalculate the item from its new resources (non-cost fields + a provisional total)
+        all_resources = (
+            db.table("item_resources").select("*").eq("item_id", item_id).eq("org_id", org_id).execute()
+        )
+        updated_item = calc_item_from_resources(dict(item), all_resources.data or [])
+        written = db.table("budget_items").update({
+            "template_id": template_id,
+            "parametros": params,
+            "mat_unitario": updated_item["mat_unitario"],
+            "mo_unitario": updated_item["mo_unitario"],
+        }).eq("id", item_id).eq("org_id", org_id).execute()
+        if not written.data:
+            raise RuntimeError(f"No se actualizó el ítem {item_id}")
+        # Then the same full recalculation as "Recálculo completo" (inherited waste, purchase
+        # rounding over the whole budget, cascade indirects), so the item shows its final price
+        # right away and a later full recalculation does not move it
+        _run_cascade(db, org_id, budget.data[0], _budget_items(db, budget_id, org_id), strict=True)
+    except Exception as exc:
+        logger.exception("Applying template %s to item %s failed", template_id, item_id)
+        try:
+            # The item's old resources were deleted: put them back with their ids,
+            # then every item and resource of the budget as it was
+            db.table("item_resources").delete().eq("item_id", item_id).eq("org_id", org_id).execute()
+            if anteriores:
+                back = db.table("item_resources").insert(anteriores).execute().data or []
+                if len(back) != len(anteriores):
+                    raise RuntimeError(f"Se restauraron {len(back)} de {len(anteriores)} recursos")
+            _restore(db, org_id, before)
+        except Exception:
+            logger.exception("Could not restore budget %s after a failed apply", budget_id)
+            raise HTTPException(500, A_MEDIAS) from exc
+        raise HTTPException(500, NO_SE_APLICO) from exc
 
     return {
         "resources_created": len(created),
