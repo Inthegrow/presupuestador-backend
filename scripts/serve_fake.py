@@ -8,6 +8,14 @@ Los dos Excel se bajan de Drive (ver HANDOFF, sección 7). La primera corrida ta
 El usuario falso es admin de TERRAC SA. Con FAKE_DOS_EMPRESAS=1 tiene dos empresas: TERRAC SA (leader) y
 "Obra Demo" vacía (admin); GET /me devuelve las dos y el header X-Org-Id decide (sin header: 428 "Elegí la empresa").
 Para las pruebas: POST /__fake/insert/<tabla> con una lista de filas las mete tal cual (scripts/e2e_formulas.cjs).
+Correcciones (Fórmulas → Correcciones): salen del archivo real, app/data/correcciones_ginkgo.json, contra las fórmulas
+del Maestro de la base falsa.
+Buscador de precios: con FAKE_BUSCADOR=1 no sale a internet; devuelve las opciones fijas de
+scripts/buscador_ejemplo.json (precios inventados, links de ejemplo con ?ejemplo=prueba). Ese archivo también simula
+"sin resultados" (buscar "zzz"), una falla ("falla") y el buscador sin configurar ("sin configurar"). Otro archivo:
+FAKE_BUSCADOR_ARCHIVO=<ruta>. Sin FAKE_BUSCADOR (y sin OPENAI_API_KEY) el buscador responde "no está configurado".
+Las listas arrancan todas "solo consulta": para que "Usar este precio" y los precios de las correcciones tengan dónde
+guardarse, marcá como oficial el Maestro (en Lista de precios, o PATCH /catalogs/<id> {"oficial": true}).
 """
 from __future__ import annotations
 
@@ -129,6 +137,10 @@ def fake_session(x_org_id: str | None = Header(None, alias="X-Org-Id")) -> dict:
 
 
 def main() -> None:
+    if os.environ.get("FAKE_BUSCADOR") == "1":
+        # Gancho de app/price_search.py: las opciones salen del archivo, sin red ni OPENAI_API_KEY
+        os.environ.setdefault("FAKE_BUSCADOR_ARCHIVO", str(HERE / "buscador_ejemplo.json"))
+        print("Buscador de precios falso:", os.environ["FAKE_BUSCADOR_ARCHIVO"])
     tables = build_tables()
     print({k: len(v) for k, v in tables.items()})
     fake = FakeDB(tables)

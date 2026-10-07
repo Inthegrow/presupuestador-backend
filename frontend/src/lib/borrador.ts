@@ -36,8 +36,13 @@ export interface Borrador {
   guardadoEn: string
 }
 
+// One connection, opened once and kept: a save started while the tab is closing (pagehide) has to reach
+// the store in the same turn, without waiting for another open
+let conexion: Promise<IDBDatabase> | null = null
+
 function abrir(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
+  if (conexion) return conexion
+  conexion = new Promise<IDBDatabase>((resolve, reject) => {
     if (typeof indexedDB === 'undefined') {
       reject(new Error('IndexedDB no disponible'))
       return
@@ -46,25 +51,36 @@ function abrir(): Promise<IDBDatabase> {
     req.onupgradeneeded = () => {
       if (!req.result.objectStoreNames.contains(STORE)) req.result.createObjectStore(STORE)
     }
-    req.onsuccess = () => resolve(req.result)
+    req.onsuccess = () => {
+      const db = req.result
+      // another tab upgrading the database, or the browser closing it: open again next time
+      db.onversionchange = () => {
+        db.close()
+        conexion = null
+      }
+      db.onclose = () => {
+        conexion = null
+      }
+      resolve(db)
+    }
     req.onerror = () => reject(req.error)
     req.onblocked = () => reject(new Error('IndexedDB bloqueada'))
   })
+  conexion.catch(() => {
+    conexion = null
+  })
+  return conexion
 }
 
 async function conStore<T>(modo: IDBTransactionMode, op: (s: IDBObjectStore) => IDBRequest): Promise<T> {
   const db = await abrir()
-  try {
-    return await new Promise<T>((resolve, reject) => {
-      const tx = db.transaction(STORE, modo)
-      const req = op(tx.objectStore(STORE))
-      tx.oncomplete = () => resolve(req.result as T)
-      tx.onerror = () => reject(tx.error)
-      tx.onabort = () => reject(tx.error)
-    })
-  } finally {
-    db.close()
-  }
+  return await new Promise<T>((resolve, reject) => {
+    const tx = db.transaction(STORE, modo)
+    const req = op(tx.objectStore(STORE))
+    tx.oncomplete = () => resolve(req.result as T)
+    tx.onerror = () => reject(tx.error)
+    tx.onabort = () => reject(tx.error)
+  })
 }
 
 // Writes go one after the other, so a late save can never undo a delete

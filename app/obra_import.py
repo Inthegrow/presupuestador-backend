@@ -43,6 +43,21 @@ COL_NETO_TOTAL = 26  # Z: total neto
 #   espesor:    True = el factor de la plantilla que viene con factor None es el espesor
 #               en metros que dice el nombre ("e=8cm" → 0,08 m³ por m², espesor_m_from);
 #               si el nombre no lo dice, "factor_defecto".
+#   alternativa: la regla de antes de una corrección de la revisión de Ginkgo (Fórmulas →
+#               Correcciones). Si la empresa todavía no tiene la fórmula "si_falta" (la crea la
+#               corrección al aplicarse), se usan las plantillas (y la nota) de la alternativa.
+#               Así el deploy no cambia nada hasta que se aplica la corrección, y aplicarla no
+#               exige otro deploy. Ver match_recipe.
+#   variante:   otra receta cuando la obra lo pide y la empresa ya tiene la fórmula "requiere":
+#               "si_dice" (regex sobre la descripción del trabajo) o "si_obra_usa" (regex sobre los
+#               renglones de las hojas de detalle del Excel de la obra, ver obra_usa). Trae sus
+#               plantillas, su nota y el motivo ("La obra usa hormigón celular (hoja 4.1-6)").
+#               Sin la fórmula, o si la obra no lo pide, la regla sigue como siempre.
+CONTRAPISO_CELULAR_TEXTO = r"\b(CELULAR|ALIVIANADO|BOMBEADO)\b"
+OBRA_CELULAR = r"\bHORMIGON CELULAR\b"
+MOTIVO_CELULAR_TEXTO = "El texto dice que el contrapiso es de hormigón celular"
+MOTIVO_CELULAR_OBRA = "La obra usa hormigón celular (hoja {hoja})"
+
 MAPEO: list[dict] = [
     {"patron": r"^BASES AISLADAS", "plantillas": [("4.1.3", 1.0)], "obra": "u",
      "nota": "1 m³ por base: en la solapa 3.1-1 de la obra son 35 m³ para 35 bases, llenadas junto con los troncos."},
@@ -59,21 +74,42 @@ MAPEO: list[dict] = [
     {"patron": r"LADRILLO HUECO DEL 18", "plantillas": [("5.1.4", 1.0)]},
     {"patron": r"LADRILLO HUECO DEL 12", "plantillas": [("5.1.5", 1.0)]},
     {"patron": r"LADRILLO HUECO DEL 8\b", "plantillas": [("5.1.6", 1.0)]},
-    {"patron": r"^YESO PROYECTADO", "plantillas": [("5.5.5", 1.0)]},
-    {"patron": r"^REVOQUE EXTERIOR CON HIDROFUGO CON SILLETA", "plantillas": [("5.5.3", 1.0)],
-     "nota": "La silleta no está en la fórmula: el Excel de la obra cobra este trabajo bastante más caro."},
+    # Revisión de Ginkgo (A2): el yeso proyectado tiene fórmula propia (5.5.6); la 5.5.5 es yeso aplicado
+    {"patron": r"^YESO PROYECTADO", "plantillas": [("5.5.6", 1.0)],
+     "alternativa": {"si_falta": "5.5.6", "plantillas": [("5.5.5", 1.0)]}},
+    # Revisión de Ginkgo (B5): el revoque con silleta tiene fórmula propia (5.5.7, con el subcontrato SILL-RE)
+    {"patron": r"^REVOQUE EXTERIOR\b.*\bSILLETA\b", "plantillas": [("5.5.7", 1.0)],
+     "nota": "Revoque exterior con silleta: materiales del revoque exterior + subcontrato con silleta (incluye "
+             "la mano de obra).",
+     "alternativa": {"si_falta": "5.5.7", "plantillas": [("5.5.3", 1.0)],
+                     "nota": "La silleta no está en la fórmula: el Excel de la obra cobra este trabajo bastante "
+                             "más caro."}},
     {"patron": r"^REVOQUE EXTERIOR CON HIDROFUGO", "plantillas": [("5.5.3", 1.0)]},
     {"patron": r"^REVOQUE (INTERIOR )?GRUESO FRATAZADO \+ HIDROFUGO", "plantillas": [("5.5.4", 1.0)],
      "nota": "La fórmula de grueso interior no lleva hidrófugo."},
     {"patron": r"^REVOQUE INTERIOR$", "plantillas": [("5.5.4", 1.0)],
      "nota": "¿Lleva también fino interior (5.5.2)?"},
+    # Revisión de Ginkgo (B4): contrapiso de hormigón celular bombeado (5.2.4, en m² con el espesor como
+    # parámetro espesor_m). Los textos de Ginkgo no dicen "celular": lo dice el Excel (hoja 4.1-6, SUB-CONT)
     {"patron": r"^TELGOPOR 50 ?MM \+ CONTRAPISO", "plantillas": [("8.3", 1.0), ("5.2.3", None)], "obra": "m2",
      "espesor": True, "factor_defecto": 0.08,
-     "nota": "Compuesto: placas EPS (8.3) + contrapiso de cascote (5.2.3)."},
+     "nota": "Compuesto: placas EPS (8.3) + contrapiso de cascote (5.2.3).",
+     "variante": {"requiere": "5.2.4", "si_dice": CONTRAPISO_CELULAR_TEXTO, "si_obra_usa": OBRA_CELULAR,
+                  "motivo_dice": MOTIVO_CELULAR_TEXTO, "motivo_obra": MOTIVO_CELULAR_OBRA,
+                  "plantillas": [("8.3", 1.0), ("5.2.4", 1.0)],
+                  "nota": "Compuesto: placas EPS (8.3) + contrapiso de hormigón celular (5.2.4)."}},
+    {"patron": r"CONTRAPISO\b.*" + CONTRAPISO_CELULAR_TEXTO, "plantillas": [("5.2.4", 1.0)], "obra": "m2",
+     "espesor": True, "factor_defecto": 0.10, "porque": MOTIVO_CELULAR_TEXTO,
+     "nota": MOTIVO_CELULAR_TEXTO + ": contrapiso de hormigón celular bombeado (5.2.4).",
+     "alternativa": {"si_falta": "5.2.4", "plantillas": [("5.2.3", None)]}},
     {"patron": r"^CONTRAPISO/ ?CARPETA EN BALCONES", "plantillas": [("5.4.1", 1.0)],
      "nota": "En el Excel de la obra lleva el precio de la carpeta. ¿Va con hidrófugo (5.4.2)?"},
     {"patron": r"^CONTRAPISO", "plantillas": [("5.2.3", None)], "obra": "m2",
-     "espesor": True, "factor_defecto": 0.10},
+     "espesor": True, "factor_defecto": 0.10,
+     "variante": {"requiere": "5.2.4", "si_obra_usa": OBRA_CELULAR, "motivo_obra": MOTIVO_CELULAR_OBRA,
+                  "plantillas": [("5.2.4", 1.0)],
+                  "nota": "Contrapiso de hormigón celular bombeado (5.2.4). Si es de cascote, elegir 5.2.3 a "
+                          "mano."}},
     {"patron": r"^CARPETA", "plantillas": [("5.4.1", 1.0)],
      "nota": "La fórmula no tiene espesor: es la misma para 3 y 4 cm."},
     {"patron": r"REVESTIMIENTOS EN PISOS", "plantillas": [("7.1.1", 1.0)], "cliente": ["RP-PORC"],
@@ -83,9 +119,16 @@ MAPEO: list[dict] = [
     {"patron": r"^AZOTADO HIDROFUGO \+ PINTURA ASFALTICA", "plantillas": [("8.1", 1.0)]},
     {"patron": r"^PINTURA ASFALTICA \+ MEMBRANA ASFALTICA \+ GEOTEXTIL", "plantillas": [("8.2", 1.0), ("8.4", 1.0)],
      "nota": "Compuesto: pintura asfáltica (8.2) + membrana con geotextil (8.4)."},
-    {"patron": r"CIELORRASOS DE YESO SUSPENDIDO", "plantillas": [("6.5", 1.0)],
-     "nota": "Cielorraso suspendido de placa. En baños y cocinas, ¿placa verde (6.6)?"},
-    {"patron": r"CIELORRASOS APLICADOS EN YESO", "plantillas": [("6.1", 1.0)]},
+    # Revisión de Ginkgo (A3 y A4): el suspendido es yeso armado (6.1, corregida por m²) y el aplicado
+    # tiene fórmula propia (6.11). La corrección que crea la 6.11 es la misma que corrige la 6.1: mientras
+    # no exista la 6.11, las dos reglas siguen como antes
+    {"patron": r"CIELORRASOS DE YESO SUSPENDIDO", "plantillas": [("6.1", 1.0)],
+     "nota": "Cielorraso de yeso armado (metal desplegado sobre maestras y listones), como la hoja 5.1-1 del "
+             "Excel de la obra. Si es de placa (Durlock), elegir 6.5 (o 6.6 placa verde) a mano.",
+     "alternativa": {"si_falta": "6.11", "plantillas": [("6.5", 1.0)],
+                     "nota": "Cielorraso suspendido de placa. En baños y cocinas, ¿placa verde (6.6)?"}},
+    {"patron": r"CIELORRASOS APLICADOS EN YESO", "plantillas": [("6.11", 1.0)],
+     "alternativa": {"si_falta": "6.11", "plantillas": [("6.1", 1.0)]}},
     {"patron": r"^BUNA PERIMETRAL", "plantillas": [("6.2", 1.0)]},
     {"patron": r"^CAJONES", "plantillas": [("6.3", 1.0)]},
     {"patron": r"PINTURA EN CIELORRASOS", "plantillas": [("7.4.1", 1.0)]},
@@ -137,12 +180,66 @@ def task_key(descripcion: str, unidad: object) -> str:
     return f"{plain(descripcion)} | {unit_key(unidad)}"
 
 
-def match_recipe(descripcion: str) -> dict | None:
+def match_recipe(descripcion: str, templates: dict | None = None, obra: list[dict] | None = None) -> dict | None:
+    """The MAPEO rule of a task description (the first that matches), or None.
+
+    With the org's ``templates`` ({codigo: plantilla}):
+    - a rule with "variante" comes back as the variant when the org has its "requiere" recipe and
+      the description ("si_dice") or the obra's detail sheets (``obra`` = obra_usa(excel), "si_obra_usa")
+      ask for it; it carries "porque" (the reason, in words) and its own nota;
+    - a rule with "alternativa" whose "si_falta" recipe the org does not have yet comes back as the
+      alternative (its plantillas, and its nota instead of the rule's).
+    Without ``templates``, the rule as written.
+    """
     key = plain(descripcion)
     for rule in MAPEO:
         if re.search(rule["patron"], key):
-            return rule
+            return _con_variante(rule, key, templates, obra) or _con_alternativa(rule, templates)
     return None
+
+
+_CLAVES_VARIANTE = ("requiere", "si_dice", "si_obra_usa", "motivo_dice", "motivo_obra")
+
+
+def _con_variante(rule: dict, key: str, templates: dict | None, obra: list[dict] | None) -> dict | None:
+    variante = rule.get("variante")
+    if not variante or templates is None or variante["requiere"] not in templates:
+        return None
+    motivo = None
+    if variante.get("si_dice") and re.search(variante["si_dice"], key):
+        motivo = variante["motivo_dice"]
+    elif variante.get("si_obra_usa"):
+        uso = next((u for u in obra or [] if re.search(variante["si_obra_usa"], u["texto"])), None)
+        if uso:
+            motivo = variante["motivo_obra"].format(hoja=uso.get("hoja") or "de detalle")
+    if motivo is None:
+        return None
+    out = {k: v for k, v in rule.items() if k not in ("variante", "alternativa", "nota")}
+    out.update({k: v for k, v in variante.items() if k not in _CLAVES_VARIANTE})
+    out["porque"] = motivo
+    out["nota"] = f"{motivo}. {variante['nota']}" if variante.get("nota") else f"{motivo}."
+    return out
+
+
+def obra_usa(excel: dict[str, dict] | None) -> list[dict]:
+    """What the obra's detail sheets use (excel_prices, origen "detalle"): [{"texto", "hoja"}].
+
+    "texto" is the resource description without accents, in capitals ("BOMBEO HORMIGON CELULAR.
+    INCLUYE MANO DE OBRA Y BOMBA."). The price lists (00_*) do not count: they list everything,
+    used or not.
+    """
+    return [{"texto": plain(v.get("descripcion")), "hoja": v.get("hoja")}
+            for v in (excel or {}).values() if v.get("origen") == "detalle" and v.get("descripcion")]
+
+
+def _con_alternativa(rule: dict, templates: dict | None) -> dict:
+    alternativa = rule.get("alternativa")
+    if not alternativa or templates is None or alternativa["si_falta"] in templates:
+        return rule
+    out = {k: v for k, v in rule.items() if k not in ("alternativa", "variante", "nota", "porque")}
+    out.update({k: v for k, v in alternativa.items() if k != "si_falta"})
+    return out
+
 
 
 def candidate(descripcion: str) -> str:
@@ -559,12 +656,17 @@ def expand_item(fila: dict, rule: dict, templates: dict[str, dict]) -> tuple[lis
     notas: list[str] = []
     cliente = set(rule.get("cliente") or [])
 
+    # Thickness for recipes that take it as a parameter (5.2.4: espesor_m), like the 5.2.3 takes it as
+    # its factor: the one in the name, else the rule's default thickness
+    espesor = espesor_m_from(fila["descripcion"]) or (rule.get("factor_defecto") if rule.get("espesor") else None)
     for codigo, factor in rule["plantillas"]:
         tmpl = templates[codigo]
         tparams = param_defaults(tmpl.get("parametros"))
         altura = altura_from(fila["descripcion"])
         if "altura_m" in tparams and altura:
             tparams = merge_params(tparams, {"altura_m": altura})
+        if "espesor_m" in tparams and espesor:
+            tparams = merge_params(tparams, {"espesor_m": espesor})
         params.update(tparams)
         for res in tmpl.get("recursos") or []:
             scaled = dict(res)
@@ -585,7 +687,8 @@ def expand_item(fila: dict, rule: dict, templates: dict[str, dict]) -> tuple[lis
     return rows, params, notas
 
 
-def rule_for(fila: dict, templates: dict[str, dict], asignaciones: dict | None = None) -> dict | None:
+def rule_for(fila: dict, templates: dict[str, dict], asignaciones: dict | None = None,
+             obra: list[dict] | None = None) -> dict | None:
     """Recipe rule of an item: the one chosen by hand (asignaciones) or the automatic one.
 
     asignaciones = {task_key(descripcion, unidad): {"plantillas": [[codigo, factor], ...]}};
@@ -602,7 +705,7 @@ def rule_for(fila: dict, templates: dict[str, dict], asignaciones: dict | None =
     the description), "supuesto" (the rule's default thickness), "regla" (a fixed factor of
     the rule) or None (a hand-chosen pair, or a missing factor).
     """
-    auto = match_recipe(fila["descripcion"])
+    auto = match_recipe(fila["descripcion"], templates, obra)
     elegida = (asignaciones or {}).get(task_key(fila["descripcion"], fila.get("unidad")))
     obra = unit_key(fila.get("unidad"))
 
@@ -652,8 +755,11 @@ def rule_for(fila: dict, templates: dict[str, dict], asignaciones: dict | None =
     return rule
 
 
-def build_plan(parsed: dict, templates: dict[str, dict], asignaciones: dict | None = None) -> dict:
-    """Items to load, each with its recipe resources or with the Excel price."""
+def build_plan(parsed: dict, templates: dict[str, dict], asignaciones: dict | None = None,
+               obra: list[dict] | None = None) -> dict:
+    """Items to load, each with its recipe resources or with the Excel price.
+
+    ``obra`` = obra_usa(excel_prices(wb)): what the obra's detail sheets use (rule variants)."""
     items: list[dict] = []
     sin_receta: list[dict] = []
     sin_factor: list[dict] = []
@@ -662,7 +768,7 @@ def build_plan(parsed: dict, templates: dict[str, dict], asignaciones: dict | No
     for fila in parsed["filas"]:
         item = dict(fila, plantilla=None, parametros={}, recursos=[], revisar=[])
         if fila["nivel"] == "item":
-            rule = rule_for(fila, templates, asignaciones)
+            rule = rule_for(fila, templates, asignaciones, obra)
             missing = [c for c, _ in (rule or {}).get("plantillas", []) if c not in templates]
             faltan.update(missing)
             if rule and not missing and rule["falta_factor"]:

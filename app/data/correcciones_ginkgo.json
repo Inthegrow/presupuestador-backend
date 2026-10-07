@@ -1,0 +1,1414 @@
+{
+  "lote": "ginkgo-2026-10",
+  "titulo": "Revisión de Ginkgo",
+  "fecha": "2026-10-07",
+  "correcciones": [
+    {
+      "id": "A1",
+      "titulo": "Membrana: la colocación cuenta 1 rollo cada 10 m²",
+      "por_que": "La fórmula cobraba la colocación de un rollo de membrana por cada m², pero cada rollo cubre 10 m² (así cuenta el rollo mismo y así lo hace tu Excel). Ahora la colocación también va 1 cada 10 m².",
+      "supuesto": {
+        "respuesta": "Sí",
+        "por": "Claude",
+        "fecha": "2026-10-07",
+        "confirma": "Emilia",
+        "razon": "Es la misma cuenta que ya hace el rollo de membrana en la fórmula y la que usa el Excel de Sol."
+      },
+      "fuentes": [
+        "Excel de Sol, Ginkgo, hoja 4.9-3, fila 69 (c-mem =D8)",
+        "Excel de Sol, Ginkgo, hoja 4.9-3, celda D8 (=H3/10)",
+        "Maestro, solapa 8.4, celda D69 (=H3)"
+      ],
+      "efecto_ginkgo": -19732992,
+      "cambios": [
+        {
+          "tipo": "renglon",
+          "plantilla": "8.4",
+          "codigo": "C-MEM",
+          "antes": {
+            "formula": "Q",
+            "nota": ""
+          },
+          "despues": {
+            "formula": "Q/10",
+            "nota": "Un rollo colocado cada 10 m², igual que la membrana A-MEG (Excel de Sol 4.9-3: c-mem =D8). Antes: Q (un rollo por m²). Corregido 06/10/2026 (auditoría Ginkgo)."
+          }
+        }
+      ]
+    },
+    {
+      "id": "A2",
+      "titulo": "Yeso proyectado: fórmula propia y precio del subcontrato",
+      "por_que": "El yeso proyectado se calculaba como yeso aplicado (otra bolsa y otro subcontratista a $10.000 el m²). Se agrega la fórmula 5.5.6 copiada de tu hoja 4.2-4 y el precio del subcontrato de proyectado ($15.000). Para que Ginkgo la use hace falta además cambiar la regla que elige la fórmula (lo hace el programador).",
+      "supuesto": {
+        "respuesta": "Sí",
+        "por": "Claude",
+        "fecha": "2026-10-07",
+        "confirma": "Emilia",
+        "razon": "La 5.5.5 queda para yeso aplicado; el proyectado tiene otra bolsa y otro subcontratista en el Excel de Sol."
+      },
+      "fuentes": [
+        "Excel de Sol, Ginkgo, hoja 4.2-4, filas 7 y 69",
+        "Excel de Sol, Ginkgo, hoja 00_Sub, fila 65",
+        "app/obra_import.py, MAPEO (regla ^YESO PROYECTADO)"
+      ],
+      "efecto_ginkgo": 35667763,
+      "cambios": [
+        {
+          "tipo": "plantilla_nueva",
+          "plantilla": {
+            "codigo": "5.5.6",
+            "nombre": "YESO PROYECTADO",
+            "unidad": "m2",
+            "categoria": "Albañileria",
+            "descripcion": "Agregada el 06/10/2026 por la auditoría de Ginkgo: copia de la hoja 4.2-4 del Excel de Sol (yeso proyectado en paredes interiores). La 5.5.5 queda para yeso aplicado.",
+            "origen": "auditoria_ginkgo",
+            "editado": true,
+            "parametros": [],
+            "desperdicio_pct": null,
+            "recursos": [
+              {
+                "tipo": "material",
+                "codigo": "YES-P",
+                "descripcion": "Bolsa Yeso Proyectado Tuyango 30 k (u)",
+                "unidad": "u",
+                "formula": "Q/3",
+                "desperdicio_pct": 25,
+                "redondear": true,
+                "unidad_compra": 1,
+                "revisar": false,
+                "origen": "Ginkgo 4.2-4!fila 7",
+                "nota": "1 bolsa cada 3 m² (Excel de Sol: =H3/3, '1 bolsa c/ 3m'). Precio oficial $18.000."
+              },
+              {
+                "tipo": "subcontrato",
+                "codigo": "SUB-YES-PARED-PROY",
+                "descripcion": "YESO PROYECTADO EN PARED",
+                "unidad": "m2",
+                "formula": "Q",
+                "desperdicio_pct": 0,
+                "revisar": false,
+                "origen": "Ginkgo 4.2-4!fila 69",
+                "nota": "No está en la lista oficial: cargarlo (Excel de Sol: $15.000 el m², EVER 18/09/2026). Hasta entonces va en $0."
+              }
+            ]
+          }
+        },
+        {
+          "tipo": "precio",
+          "codigo": "SUB-YES-PARED-PROY",
+          "tipo_recurso": "subcontrato",
+          "descripcion": "YESO PROYECTADO EN PARED",
+          "unidad": "m2",
+          "antes": null,
+          "despues": {
+            "precio_sin_iva": 15000,
+            "proveedor": "EVER",
+            "fecha_precio": "2026-09-18"
+          },
+          "fuente": "Excel de Sol, Ginkgo, hoja 00_Sub, fila 65",
+          "url": null
+        }
+      ]
+    },
+    {
+      "id": "A3+A5",
+      "titulo": "Cielorraso suspendido: yeso armado; y la fórmula de Durlock por m²",
+      "por_que": "El cielorraso de yeso suspendido de baños, cocinas y pasos se calculaba como placa de Durlock (6.5); en tu hoja 5.1-1 es yeso armado, que es la fórmula 6.1. El cambio de fórmula lo hace la regla sola cuando existe la 6.11 (se crea con A4). Además la fórmula de Durlock ponía placas, montantes, tornillos y fijaciones fijos por trabajo y cobraba cada tornillo al precio de la caja de 100: ahora todo va por m² y los tornillos y fijaciones por caja.",
+      "supuesto": {
+        "respuesta": "A3: yeso armado, como el Excel. A5: sí, por m² y por caja de 100",
+        "por": "Claude",
+        "fecha": "2026-10-07",
+        "confirma": "Emilia",
+        "razon": "La hoja 5.1-1 del Excel de Sol no tiene nada de Durlock. Las cantidades de Durlock salen de las notas de la solapa 6.5 del Maestro (ejemplo de 20 m²); la lista dice 'x 100u' y las otras listas pagan $45 el tornillo suelto."
+      },
+      "fuentes": [
+        "Excel de Sol, Ginkgo, hoja 5.1-1, filas 7 a 10 y 69",
+        "app/obra_import.py, MAPEO (regla CIELORRASOS DE YESO SUSPENDIDO)",
+        "Maestro, solapa 6.5, notas de las filas 7 a 14 (ejemplo de 20 m²)",
+        "Lista oficial Maestro TERRAC - Materiales: D-T1, D-T2 y D-FIJ 'x 100u'"
+      ],
+      "efecto_ginkgo": -24761550,
+      "cambios": [
+        {
+          "tipo": "renglon",
+          "plantilla": "6.5",
+          "codigo": "D-PL12.5",
+          "antes": {
+            "formula": "10",
+            "revisar": true,
+            "nota": "Número fijo (10): no cambia con la cantidad del ítem."
+          },
+          "despues": {
+            "formula": "Q/2.8",
+            "revisar": false,
+            "nota": "1 placa cada 2,8 m² (Maestro 6.5 '1 placa son 2,8m2'; igual que 6.9 y 6.10). Antes: 10 fijas por ítem. Corregido 06/10/2026 (auditoría Ginkgo)."
+          }
+        },
+        {
+          "tipo": "renglon",
+          "plantilla": "6.5",
+          "codigo": "D-S35",
+          "antes": {
+            "formula": "28/2.6",
+            "revisar": true,
+            "nota": "Número fijo (10.769231): no cambia con la cantidad del ítem."
+          },
+          "despues": {
+            "formula": "Q*28/20/2.6",
+            "revisar": false,
+            "nota": "Solera perimetral de 2,6 m: el ejemplo del Maestro (28 m para 20 m²) pasado a por m². Antes: 28/2.6 = 10,8 fijas por ítem. Corregido 06/10/2026 (auditoría Ginkgo)."
+          }
+        },
+        {
+          "tipo": "renglon",
+          "plantilla": "6.5",
+          "codigo": "D-M34",
+          "antes": {
+            "formula": "30",
+            "revisar": true,
+            "nota": "Número fijo (30): no cambia con la cantidad del ítem."
+          },
+          "despues": {
+            "formula": "Q*30/20",
+            "revisar": false,
+            "nota": "Montantes: el ejemplo del Maestro (30 para 20 m²) pasado a por m² (1,5 por m²). Antes: 30 fijos por ítem. Corregido 06/10/2026 (auditoría Ginkgo)."
+          }
+        },
+        {
+          "tipo": "renglon",
+          "plantilla": "6.5",
+          "codigo": "D-T1",
+          "antes": {
+            "formula": "Q*20",
+            "nota": ""
+          },
+          "despues": {
+            "formula": "Q*20/100",
+            "nota": "20 tornillos por m² (Maestro 6.5 '5m 100 tornillos'), en cajas de 100: el precio de la lista es 'x 100u'. Antes: Q*20 cobraba cada tornillo como una caja. Corregido 06/10/2026 (auditoría Ginkgo)."
+          }
+        },
+        {
+          "tipo": "renglon",
+          "plantilla": "6.5",
+          "codigo": "D-T2",
+          "antes": {
+            "formula": "(10)*80",
+            "revisar": true,
+            "nota": "Número fijo (800): no cambia con la cantidad del ítem."
+          },
+          "despues": {
+            "formula": "(Q/2.8)*80/100",
+            "revisar": false,
+            "nota": "80 tornillos por placa (Maestro 6.5 '1 placa 80 tornillos'), en cajas de 100 (precio 'x 100u'). Antes: (10)*80 = 800 fijos por ítem, cobrados como cajas. Corregido 06/10/2026 (auditoría Ginkgo)."
+          }
+        },
+        {
+          "tipo": "renglon",
+          "plantilla": "6.5",
+          "codigo": "D-CIN",
+          "antes": {
+            "formula": "1",
+            "revisar": true,
+            "nota": "Número fijo (1): no cambia con la cantidad del ítem."
+          },
+          "despues": {
+            "formula": "Q/30",
+            "revisar": false,
+            "nota": "1 rollo por tacho de masilla (Maestro 6.5 '1 x tacho de macilla'; la masilla es Q/30). Antes: 1 fijo por ítem. Corregido 06/10/2026 (auditoría Ginkgo)."
+          }
+        },
+        {
+          "tipo": "renglon",
+          "plantilla": "6.5",
+          "codigo": "D-FIJ",
+          "antes": {
+            "formula": "200",
+            "revisar": true,
+            "nota": "El código D-FIJ está repetido en el catálogo: puede traer otro precio. Número fijo (200): no cambia con la cantidad del ítem."
+          },
+          "despues": {
+            "formula": "Q*10/100",
+            "revisar": false,
+            "nota": "10 fijaciones por m² (Maestro 6.5 '100 c/10m2'), en cajas de 100 (precio 'X 100u'; D-FIJ está dos veces en la lista oficial, vale la de $6.592). Antes: 200 fijas por ítem, cobradas como cajas. Corregido 06/10/2026 (auditoría Ginkgo)."
+          }
+        }
+      ]
+    },
+    {
+      "id": "A4",
+      "titulo": "Cielorraso aplicado: media bolsa por m² y fórmula propia",
+      "por_que": "La 6.1 (cielorraso armado) contaba una bolsa de yeso por m² y las maestras y listones fijos por trabajo; ahora cuenta media bolsa y todo por m². El cielorraso aplicado pasa a una fórmula nueva, 6.11, copiada de tu hoja 5.2-2 (sin maestras ni listones, con el subcontratista de aplicado). Cuando existe la 6.11, la regla manda el aplicado a la 6.11 y el suspendido a la 6.1 (A3): aplicá A3+A5 y A4 juntas.",
+      "supuesto": {
+        "respuesta": "Sí",
+        "por": "Claude",
+        "fecha": "2026-10-07",
+        "confirma": "Emilia",
+        "razon": "El Excel de Sol pone media bolsa (=H3/2) en las dos hojas de cielorraso y distingue el subcontrato de armado del de aplicado."
+      },
+      "fuentes": [
+        "Excel de Sol, Ginkgo, hoja 5.2-2, filas 7, 8 y 69",
+        "Excel de Sol, Ginkgo, hoja 5.1-1, celdas D7 a D9",
+        "Maestro, solapa 6.1, celdas D7, K8 y K9",
+        "app/obra_import.py, MAPEO (regla CIELORRASOS APLICADOS EN YESO)"
+      ],
+      "efecto_ginkgo": -23843246,
+      "cambios": [
+        {
+          "tipo": "renglon",
+          "plantilla": "6.1",
+          "codigo": "YES",
+          "antes": {
+            "formula": "Q",
+            "nota": ""
+          },
+          "despues": {
+            "formula": "Q/2",
+            "nota": "Media bolsa por m² (Excel de Sol 5.1-1 y 5.2-2: =H3/2). Antes: Q (una bolsa por m²). Corregido 06/10/2026 (auditoría Ginkgo)."
+          }
+        },
+        {
+          "tipo": "renglon",
+          "plantilla": "6.1",
+          "codigo": "Y-M4X1",
+          "antes": {
+            "formula": "4/0.4",
+            "revisar": true,
+            "nota": "Número fijo (10): no cambia con la cantidad del ítem."
+          },
+          "despues": {
+            "formula": "Q/(0.4*4)",
+            "revisar": false,
+            "nota": "Maestras de 4 m cada 40 cm: 0,625 por m² (Maestro 6.1 'c/40cm'; Excel de Sol 5.1-1: 60 cada 90 m²). Antes: 4/0.4 = 10 fijas por ítem. Corregido 06/10/2026 (auditoría Ginkgo)."
+          }
+        },
+        {
+          "tipo": "renglon",
+          "plantilla": "6.1",
+          "codigo": "Y-L1X1",
+          "antes": {
+            "formula": "20",
+            "revisar": true,
+            "nota": "Número fijo (20): no cambia con la cantidad del ítem."
+          },
+          "despues": {
+            "formula": "Q/(0.2*4)",
+            "revisar": false,
+            "nota": "Listones de 4 m cada 20 cm: 1,25 por m² (Maestro 6.1 'c/20cm'; Excel de Sol 5.1-1: el doble de las maestras). Antes: 20 fijos por ítem. Corregido 06/10/2026 (auditoría Ginkgo)."
+          }
+        },
+        {
+          "tipo": "plantilla_nueva",
+          "plantilla": {
+            "codigo": "6.11",
+            "nombre": "CIELORRASO APLICADO DE YESO",
+            "unidad": "m2",
+            "categoria": "Yeseria y durleria",
+            "descripcion": "Agregada el 06/10/2026 por la auditoría de Ginkgo: copia de la hoja 5.2-2 del Excel de Sol (cielorraso de yeso aplicado, sin maestras ni listones). La 6.1 queda para cielorraso armado o suspendido.",
+            "origen": "auditoria_ginkgo",
+            "editado": true,
+            "parametros": [],
+            "desperdicio_pct": null,
+            "recursos": [
+              {
+                "tipo": "material",
+                "codigo": "YES",
+                "descripcion": "Bolsa Yeso Tuyango 30 k (u)",
+                "unidad": "u",
+                "formula": "Q/2",
+                "desperdicio_pct": 25,
+                "redondear": true,
+                "unidad_compra": 1,
+                "revisar": false,
+                "origen": "Ginkgo 5.2-2!fila 7",
+                "nota": "Media bolsa por m² (Excel de Sol: =H3/2)."
+              },
+              {
+                "tipo": "material",
+                "codigo": "Y-MD200X70",
+                "descripcion": "Metal desplegado 200x70",
+                "unidad": "u",
+                "formula": "Q/(2*0.7)",
+                "desperdicio_pct": 25,
+                "redondear": true,
+                "unidad_compra": 1,
+                "revisar": false,
+                "origen": "Ginkgo 5.2-2!fila 8",
+                "nota": "Lleva metal desplegado, como la hoja 5.2-2 del Excel de Sol (=H3/(2*0.7)). Precio: $4.000 la hoja (internet, 7/10/2026). Corregido 07/10/2026 (revisión de Ginkgo)."
+              },
+              {
+                "tipo": "subcontrato",
+                "codigo": "SUB-YES-CIEL",
+                "descripcion": "YESO APLICADO EN CIELORRASO",
+                "unidad": "m2",
+                "formula": "Q",
+                "desperdicio_pct": 15,
+                "revisar": false,
+                "origen": "Ginkgo 5.2-2!fila 69",
+                "nota": "Subcontrato de cielorraso aplicado (el armado es SUB-YES-CIEL-ARM, en la 6.1)."
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "A6",
+      "titulo": "Cajones de yeso: subcontrato de cajón a $25.000 el metro",
+      "por_que": "El subcontratista de cajones iba en $0 porque el código que usaba la fórmula no tiene precio real en la lista ($1). Ahora usa el subcontrato de cajón de tu Excel ($25.000 el metro, hay que cargarlo) y las maestras y listones van por metro.",
+      "supuesto": {
+        "respuesta": "Sí",
+        "por": "Claude",
+        "fecha": "2026-10-07",
+        "confirma": "Emilia",
+        "razon": "Es el subcontrato que usa la hoja 5.2-4 del Excel de Sol, con precio de EVER del 18/09/2026."
+      },
+      "fuentes": [
+        "Excel de Sol, Ginkgo, hoja 5.2-4, filas 8, 9 y 69",
+        "Excel de Sol, Ginkgo, hoja 00_Sub, fila 70",
+        "Maestro, solapa 6.3, celdas K8 y K9"
+      ],
+      "efecto_ginkgo": 14272535,
+      "cambios": [
+        {
+          "tipo": "renglon",
+          "plantilla": "6.3",
+          "codigo": "SUB-YES-AGARGANTA",
+          "antes": {
+            "codigo": "SUB-YES-AGARGANTA",
+            "descripcion": "YESO APLICADO EN CIELORRASO ARMADO",
+            "nota": ""
+          },
+          "despues": {
+            "codigo": "SUB-YES-CAJON",
+            "descripcion": "YESO ARMADO- CAJON (x metro lineal)",
+            "nota": "Subcontrato del Excel de Sol (5.2-4): $25.000 el metro (EVER 18/09/2026); hay que cargarlo en la lista oficial. Antes: SUB-YES-AGARGANTA, sin precio real en la lista oficial ($1). Corregido 06/10/2026 (auditoría Ginkgo)."
+          }
+        },
+        {
+          "tipo": "renglon",
+          "plantilla": "6.3",
+          "codigo": "Y-M4X1",
+          "antes": {
+            "formula": "1",
+            "revisar": true,
+            "nota": "Número fijo (1): no cambia con la cantidad del ítem."
+          },
+          "despues": {
+            "formula": "Q/4",
+            "revisar": false,
+            "nota": "1 maestra cada 4 m (Maestro 6.3 '1 c/4m'; Excel de Sol 5.2-4: =H3/4). Antes: 1 fija por ítem. Corregido 06/10/2026 (auditoría Ginkgo)."
+          }
+        },
+        {
+          "tipo": "renglon",
+          "plantilla": "6.3",
+          "codigo": "Y-L1X1",
+          "antes": {
+            "formula": "2",
+            "revisar": true,
+            "nota": "Número fijo (2): no cambia con la cantidad del ítem."
+          },
+          "despues": {
+            "formula": "Q*2/4",
+            "revisar": false,
+            "nota": "2 listones cada 4 m (Maestro 6.3 '2 c/4m'; Excel de Sol 5.2-4: =H3/4*2). Antes: 2 fijos por ítem. Corregido 06/10/2026 (auditoría Ginkgo)."
+          }
+        },
+        {
+          "tipo": "precio",
+          "codigo": "SUB-YES-CAJON",
+          "tipo_recurso": "subcontrato",
+          "descripcion": "YESO ARMADO- CAJON (x metro lineal)",
+          "unidad": "m",
+          "antes": null,
+          "despues": {
+            "precio_sin_iva": 25000,
+            "proveedor": "EVER",
+            "fecha_precio": "2026-09-18"
+          },
+          "fuente": "Excel de Sol, Ginkgo, hoja 00_Sub, fila 70",
+          "url": null
+        }
+      ]
+    },
+    {
+      "id": "A7",
+      "titulo": "Tabiques de hormigón: el hierro según los m³",
+      "por_que": "La fórmula de tabiques ponía la misma cantidad de hierro en un tabique de 2,8 m³ que en uno de 40 m³. Ahora usa la mezcla de hierros del Maestro (unos 105 kg por m³) por cada m³. Si el cálculo de estructura de una obra pide otra armadura, se cambia en ese trabajo.",
+      "supuesto": {
+        "respuesta": "Depende de la obra: la del Maestro, por m³",
+        "por": "Claude",
+        "fecha": "2026-10-07",
+        "confirma": "Sol",
+        "razon": "El Maestro trae los hierros para su ejemplo de 23 m³; Ginkgo arma doble malla del 12 (unos 148 kg/m³), pero eso es de esta obra."
+      },
+      "fuentes": [
+        "Maestro, solapa 4.2.4, filas 8 a 13 (ejemplo de 23 m³)",
+        "Excel de Sol, Ginkgo, hojas 3.11-3 y 3.11-4, fila 8"
+      ],
+      "efecto_ginkgo": -608191,
+      "cambios": [
+        {
+          "tipo": "renglon",
+          "plantilla": "4.2.4",
+          "codigo": "HADN6",
+          "antes": {
+            "formula": "206",
+            "revisar": true,
+            "nota": "Número fijo (206): no cambia con la cantidad del ítem."
+          },
+          "despues": {
+            "formula": "Q*206/23",
+            "revisar": false,
+            "nota": "El Maestro 4.2.4 trae 206 barras para su ejemplo de 23 m³: pasado a por m³. Antes: 206 fijas por ítem. Corregido 06/10/2026 (auditoría Ginkgo)."
+          }
+        },
+        {
+          "tipo": "renglon",
+          "plantilla": "4.2.4",
+          "codigo": "HADN8",
+          "antes": {
+            "formula": "52",
+            "revisar": true,
+            "nota": "Número fijo (52): no cambia con la cantidad del ítem."
+          },
+          "despues": {
+            "formula": "Q*52/23",
+            "revisar": false,
+            "nota": "El Maestro 4.2.4 trae 52 barras para su ejemplo de 23 m³: pasado a por m³. Antes: 52 fijas por ítem. Corregido 06/10/2026 (auditoría Ginkgo)."
+          }
+        },
+        {
+          "tipo": "renglon",
+          "plantilla": "4.2.4",
+          "codigo": "HADN10",
+          "antes": {
+            "formula": "9",
+            "revisar": true,
+            "nota": "Número fijo (9): no cambia con la cantidad del ítem."
+          },
+          "despues": {
+            "formula": "Q*9/23",
+            "revisar": false,
+            "nota": "El Maestro 4.2.4 trae 9 barras para su ejemplo de 23 m³: pasado a por m³. Antes: 9 fijas por ítem. Corregido 06/10/2026 (auditoría Ginkgo)."
+          }
+        },
+        {
+          "tipo": "renglon",
+          "plantilla": "4.2.4",
+          "codigo": "HADN12",
+          "antes": {
+            "formula": "54",
+            "revisar": true,
+            "nota": "Número fijo (54): no cambia con la cantidad del ítem."
+          },
+          "despues": {
+            "formula": "Q*54/23",
+            "revisar": false,
+            "nota": "El Maestro 4.2.4 trae 54 barras para su ejemplo de 23 m³: pasado a por m³. Antes: 54 fijas por ítem. Corregido 06/10/2026 (auditoría Ginkgo)."
+          }
+        },
+        {
+          "tipo": "renglon",
+          "plantilla": "4.2.4",
+          "codigo": "HADN16",
+          "antes": {
+            "formula": "37",
+            "revisar": true,
+            "nota": "Número fijo (37): no cambia con la cantidad del ítem."
+          },
+          "despues": {
+            "formula": "Q*37/23",
+            "revisar": false,
+            "nota": "El Maestro 4.2.4 trae 37 barras para su ejemplo de 23 m³: pasado a por m³. Antes: 37 fijas por ítem. Corregido 06/10/2026 (auditoría Ginkgo)."
+          }
+        },
+        {
+          "tipo": "renglon",
+          "plantilla": "4.2.4",
+          "codigo": "HADN20",
+          "antes": {
+            "formula": "9",
+            "revisar": true,
+            "nota": "Número fijo (9): no cambia con la cantidad del ítem."
+          },
+          "despues": {
+            "formula": "Q*9/23",
+            "revisar": false,
+            "nota": "El Maestro 4.2.4 trae 9 barras para su ejemplo de 23 m³: pasado a por m³. Antes: 9 fijas por ítem. Corregido 06/10/2026 (auditoría Ginkgo)."
+          }
+        }
+      ]
+    },
+    {
+      "id": "A8",
+      "titulo": "Tabiques de hormigón: el fenólico según los m³",
+      "por_que": "El fenólico también era fijo por trabajo (46 placas). Ahora va 2 placas por m³: las del Maestro, que se usan dos veces.",
+      "supuesto": {
+        "respuesta": "Sí, se usa dos veces (Maestro)",
+        "por": "Claude",
+        "fecha": "2026-10-07",
+        "confirma": "Sol",
+        "razon": "El Maestro pone 92/2 placas para 23 m³ porque reutiliza el encofrado; la hoja de Ginkgo no lo reutiliza."
+      },
+      "fuentes": [
+        "Maestro, solapa 4.2.4, fila 15 (92/2)",
+        "Excel de Sol, Ginkgo, hojas 3.11-3 y 3.11-4, fila 59"
+      ],
+      "efecto_ginkgo": -318182,
+      "cambios": [
+        {
+          "tipo": "renglon",
+          "plantilla": "4.2.4",
+          "codigo": "F-GR2",
+          "antes": {
+            "formula": "92/2",
+            "revisar": true,
+            "nota": "Número fijo (46): no cambia con la cantidad del ítem."
+          },
+          "despues": {
+            "formula": "Q*92/2/23",
+            "revisar": false,
+            "nota": "El Maestro 4.2.4 trae 92/2 = 46 placas (usadas 2 veces) para su ejemplo de 23 m³: 2 por m³. Antes: 46 fijas por ítem. Ginkgo (3.11-3 y 3.11-4) pone 4,3 por m³ sin reutilizar: confirmar con Sol. Corregido 06/10/2026 (auditoría Ginkgo)."
+          }
+        }
+      ]
+    },
+    {
+      "id": "B1",
+      "titulo": "Revoque grueso: la cuadrilla del Excel (9 personas, 60 m² por día)",
+      "por_que": "Las fórmulas de revoque grueso ponían un capataz y un ayudante, cada uno un jornal cada 12 m². Tu Excel pone una cuadrilla de 9 (capataz, 2 punteros, 3 oficiales y 3 ayudantes) que hace 60 m² por día. Se pasa esa cuadrilla a la 5.5.3 (exterior) y a la 5.5.4 (interior).",
+      "supuesto": {
+        "respuesta": "La del Excel de Sol",
+        "por": "Claude",
+        "fecha": "2026-10-07",
+        "confirma": "Sol",
+        "razon": "Es la cuadrilla de las hojas 4.1-5 y 4.2-5 del Excel de Ginkgo, que se armó en septiembre de 2026."
+      },
+      "fuentes": [
+        "Excel de Sol, Ginkgo, hoja 4.1-5, filas 27 a 30",
+        "Excel de Sol, Ginkgo, hoja 4.2-5, filas 27 a 30",
+        "Maestro, solapas 5.5.3 y 5.5.4, filas 27 y 29 (=H3/12, 35%)"
+      ],
+      "efecto_ginkgo": -51968100,
+      "cambios": [
+        {
+          "tipo": "renglon",
+          "plantilla": "5.5.3",
+          "codigo": "MO-CA",
+          "antes": {
+            "rendimiento": "12",
+            "cargas_sociales_pct": 35.0,
+            "nota": ""
+          },
+          "despues": {
+            "rendimiento": "60",
+            "cargas_sociales_pct": 30,
+            "nota": "Cuadrilla del Excel de Sol (4.1-5): capataz 1, punteros 2, oficiales 3 y ayudantes 3; 60 m² por día (=H3/60), 30% de cargas. Antes: 1 capataz cada 12 m² y 35% de cargas. Corregido 07/10/2026 (revisión de Ginkgo)."
+          }
+        },
+        {
+          "tipo": "renglon",
+          "plantilla": "5.5.3",
+          "codigo": "MO-AY",
+          "antes": {
+            "trabajadores": 1.0,
+            "rendimiento": "12",
+            "cargas_sociales_pct": 35.0,
+            "nota": ""
+          },
+          "despues": {
+            "trabajadores": 3,
+            "rendimiento": "60",
+            "cargas_sociales_pct": 30,
+            "nota": "Cuadrilla del Excel de Sol (4.1-5): capataz 1, punteros 2, oficiales 3 y ayudantes 3; 60 m² por día (=H3/60), 30% de cargas. Antes: 1 ayudante cada 12 m² y 35% de cargas. Corregido 07/10/2026 (revisión de Ginkgo)."
+          }
+        },
+        {
+          "tipo": "renglon_nuevo",
+          "plantilla": "5.5.3",
+          "renglon": {
+            "tipo": "mano_obra",
+            "codigo": "MO-PU",
+            "descripcion": "Puntero",
+            "unidad": "u",
+            "trabajadores": 2,
+            "rendimiento": "60",
+            "cargas_sociales_pct": 30,
+            "revisar": false,
+            "origen": "Ginkgo 4.1-5!fila 28",
+            "nota": "Cuadrilla del Excel de Sol (4.1-5): capataz 1, punteros 2, oficiales 3 y ayudantes 3; 60 m² por día (=H3/60), 30% de cargas. Agregado: no estaba. Corregido 07/10/2026 (revisión de Ginkgo)."
+          }
+        },
+        {
+          "tipo": "renglon_nuevo",
+          "plantilla": "5.5.3",
+          "renglon": {
+            "tipo": "mano_obra",
+            "codigo": "MO-OF",
+            "descripcion": "Oficial",
+            "unidad": "u",
+            "trabajadores": 3,
+            "rendimiento": "60",
+            "cargas_sociales_pct": 30,
+            "revisar": false,
+            "origen": "Ginkgo 4.1-5!fila 29",
+            "nota": "Cuadrilla del Excel de Sol (4.1-5): capataz 1, punteros 2, oficiales 3 y ayudantes 3; 60 m² por día (=H3/60), 30% de cargas. Agregado: no estaba. Corregido 07/10/2026 (revisión de Ginkgo)."
+          }
+        },
+        {
+          "tipo": "renglon",
+          "plantilla": "5.5.4",
+          "codigo": "MO-CA",
+          "antes": {
+            "rendimiento": "12",
+            "cargas_sociales_pct": 35.0,
+            "nota": ""
+          },
+          "despues": {
+            "rendimiento": "60",
+            "cargas_sociales_pct": 30,
+            "nota": "Cuadrilla del Excel de Sol (4.2-5): capataz 1, punteros 2, oficiales 3 y ayudantes 3; 60 m² por día (=H3/60), 30% de cargas. Antes: 1 capataz cada 12 m² y 35% de cargas. Corregido 07/10/2026 (revisión de Ginkgo)."
+          }
+        },
+        {
+          "tipo": "renglon",
+          "plantilla": "5.5.4",
+          "codigo": "MO-AY",
+          "antes": {
+            "trabajadores": 1.0,
+            "rendimiento": "12",
+            "cargas_sociales_pct": 35.0,
+            "nota": ""
+          },
+          "despues": {
+            "trabajadores": 3,
+            "rendimiento": "60",
+            "cargas_sociales_pct": 30,
+            "nota": "Cuadrilla del Excel de Sol (4.2-5): capataz 1, punteros 2, oficiales 3 y ayudantes 3; 60 m² por día (=H3/60), 30% de cargas. Antes: 1 ayudante cada 12 m² y 35% de cargas. Corregido 07/10/2026 (revisión de Ginkgo)."
+          }
+        },
+        {
+          "tipo": "renglon_nuevo",
+          "plantilla": "5.5.4",
+          "renglon": {
+            "tipo": "mano_obra",
+            "codigo": "MO-PU",
+            "descripcion": "Puntero",
+            "unidad": "u",
+            "trabajadores": 2,
+            "rendimiento": "60",
+            "cargas_sociales_pct": 30,
+            "revisar": false,
+            "origen": "Ginkgo 4.2-5!fila 28",
+            "nota": "Cuadrilla del Excel de Sol (4.2-5): capataz 1, punteros 2, oficiales 3 y ayudantes 3; 60 m² por día (=H3/60), 30% de cargas. Agregado: no estaba. Corregido 07/10/2026 (revisión de Ginkgo)."
+          }
+        },
+        {
+          "tipo": "renglon_nuevo",
+          "plantilla": "5.5.4",
+          "renglon": {
+            "tipo": "mano_obra",
+            "codigo": "MO-OF",
+            "descripcion": "Oficial",
+            "unidad": "u",
+            "trabajadores": 3,
+            "rendimiento": "60",
+            "cargas_sociales_pct": 30,
+            "revisar": false,
+            "origen": "Ginkgo 4.2-5!fila 29",
+            "nota": "Cuadrilla del Excel de Sol (4.2-5): capataz 1, punteros 2, oficiales 3 y ayudantes 3; 60 m² por día (=H3/60), 30% de cargas. Agregado: no estaba. Corregido 07/10/2026 (revisión de Ginkgo)."
+          }
+        }
+      ]
+    },
+    {
+      "id": "B2",
+      "titulo": "Carpeta: la cuadrilla del Excel (7 personas, 80 m² por día)",
+      "por_que": "La fórmula de carpeta ponía capataz, oficial y ayudante, cada uno un jornal cada 18 m², con 20% de cargas. Tu Excel pone 7 personas (capataz, 2 punteros, 2 oficiales y 2 ayudantes) que hacen 80 m² por día, con 25%.",
+      "supuesto": {
+        "respuesta": "La del Excel de Sol",
+        "por": "Claude",
+        "fecha": "2026-10-07",
+        "confirma": "Sol",
+        "razon": "Es la cuadrilla de la hoja 4.1-7 del Excel de Ginkgo."
+      },
+      "fuentes": [
+        "Excel de Sol, Ginkgo, hoja 4.1-7, filas 27 a 30",
+        "Maestro, solapa 5.4.1, filas 27 a 29 (=H3/18, 20%)"
+      ],
+      "efecto_ginkgo": -33459767,
+      "cambios": [
+        {
+          "tipo": "renglon",
+          "plantilla": "5.4.1",
+          "codigo": "MO-CA",
+          "antes": {
+            "rendimiento": "18",
+            "cargas_sociales_pct": 20.0,
+            "nota": ""
+          },
+          "despues": {
+            "rendimiento": "80",
+            "cargas_sociales_pct": 25,
+            "nota": "Cuadrilla del Excel de Sol (4.1-7): capataz 1, punteros 2, oficiales 2 y ayudantes 2; 80 m² por día (=H3/80), 25% de cargas. Antes: 1 capataz cada 18 m² y 20% de cargas. Corregido 07/10/2026 (revisión de Ginkgo)."
+          }
+        },
+        {
+          "tipo": "renglon",
+          "plantilla": "5.4.1",
+          "codigo": "MO-OF",
+          "antes": {
+            "trabajadores": 1.0,
+            "rendimiento": "18",
+            "cargas_sociales_pct": 20.0,
+            "nota": ""
+          },
+          "despues": {
+            "trabajadores": 2,
+            "rendimiento": "80",
+            "cargas_sociales_pct": 25,
+            "nota": "Cuadrilla del Excel de Sol (4.1-7): capataz 1, punteros 2, oficiales 2 y ayudantes 2; 80 m² por día (=H3/80), 25% de cargas. Antes: 1 oficial cada 18 m² y 20% de cargas. Corregido 07/10/2026 (revisión de Ginkgo)."
+          }
+        },
+        {
+          "tipo": "renglon",
+          "plantilla": "5.4.1",
+          "codigo": "MO-AY",
+          "antes": {
+            "trabajadores": 1.0,
+            "rendimiento": "18",
+            "cargas_sociales_pct": 20.0,
+            "nota": ""
+          },
+          "despues": {
+            "trabajadores": 2,
+            "rendimiento": "80",
+            "cargas_sociales_pct": 25,
+            "nota": "Cuadrilla del Excel de Sol (4.1-7): capataz 1, punteros 2, oficiales 2 y ayudantes 2; 80 m² por día (=H3/80), 25% de cargas. Antes: 1 ayudante cada 18 m² y 20% de cargas. Corregido 07/10/2026 (revisión de Ginkgo)."
+          }
+        },
+        {
+          "tipo": "renglon_nuevo",
+          "plantilla": "5.4.1",
+          "renglon": {
+            "tipo": "mano_obra",
+            "codigo": "MO-PU",
+            "descripcion": "Puntero",
+            "unidad": "u",
+            "trabajadores": 2,
+            "rendimiento": "80",
+            "cargas_sociales_pct": 25,
+            "revisar": false,
+            "origen": "Ginkgo 4.1-7!fila 28",
+            "nota": "Cuadrilla del Excel de Sol (4.1-7): capataz 1, punteros 2, oficiales 2 y ayudantes 2; 80 m² por día (=H3/80), 25% de cargas. Agregado: no estaba. Corregido 07/10/2026 (revisión de Ginkgo)."
+          }
+        }
+      ]
+    },
+    {
+      "id": "B4",
+      "titulo": "Contrapiso de hormigón celular bombeado: fórmula nueva",
+      "por_que": "En Ginkgo los contrapisos no son de cascote: son de hormigón celular bombeado por un subcontratista ($13.000 el m²) y llevan 15 bolsas de cemento por m³. Se agrega la fórmula 5.2.4 copiada de tu hoja 4.1-6; la de cascote (5.2.3) queda para las obras que la usen. En Ginkgo hay que elegir la 5.2.4 en la pantalla de carga (el texto de los trabajos no dice 'celular').",
+      "supuesto": {
+        "respuesta": "Depende de la obra: fórmula nueva, la de cascote queda",
+        "por": "Claude",
+        "fecha": "2026-10-07",
+        "confirma": "Sol",
+        "razon": "Las tres hojas de contrapiso del Excel de Ginkgo (4.1-6, 4.9-2 y 4.9-8) cobran bombeo de hormigón celular y ninguna cascote."
+      },
+      "fuentes": [
+        "Excel de Sol, Ginkgo, hoja 4.1-6, filas 7 a 9, 29, 30 y 69",
+        "Excel de Sol, Ginkgo, hoja 4.1-6, celdas K5 (0,1) y L8 (=H3*K5)",
+        "Excel de Sol, Ginkgo, hoja 00_Sub, fila 32"
+      ],
+      "efecto_ginkgo": 17922137,
+      "cambios": [
+        {
+          "tipo": "plantilla_nueva",
+          "plantilla": {
+            "codigo": "5.2.4",
+            "nombre": "CONTRAPISO DE HORMIGÓN CELULAR BOMBEADO",
+            "unidad": "m2",
+            "categoria": "Albañileria",
+            "descripcion": "Agregada el 07/10/2026 por la revisión de Ginkgo: copia de la hoja 4.1-6 del Excel de Sol (contrapiso de hormigón celular bombeado, por m² y con espesor). La 5.2.3 queda para contrapiso de cascote.",
+            "origen": "auditoria_ginkgo",
+            "editado": true,
+            "desperdicio_pct": null,
+            "parametros": [
+              {
+                "clave": "espesor_m",
+                "valor": 0.1,
+                "unidad": "m",
+                "descripcion": "Espesor del contrapiso en metros (Excel de Sol 4.1-6, celda K5)"
+              }
+            ],
+            "recursos": [
+              {
+                "tipo": "material",
+                "codigo": "AR",
+                "descripcion": "Bolson de Arena (1m3)",
+                "unidad": "m3",
+                "formula": "Q*espesor_m",
+                "desperdicio_pct": 10,
+                "redondear": true,
+                "unidad_compra": 1,
+                "revisar": false,
+                "origen": "Ginkgo 4.1-6!fila 7",
+                "nota": "1 m³ de arena por m³ de contrapiso (Excel de Sol: =L8, y L8 = H3*K5)."
+              },
+              {
+                "tipo": "material",
+                "codigo": "CEM",
+                "descripcion": "Bolsa Cemento \"Loma Negra\" 25 k (u)",
+                "unidad": "u",
+                "formula": "Q*espesor_m*15",
+                "desperdicio_pct": 10,
+                "redondear": true,
+                "unidad_compra": 1,
+                "revisar": false,
+                "origen": "Ginkgo 4.1-6!fila 8",
+                "nota": "15 bolsas por m³ de contrapiso (Excel de Sol: =15*L8)."
+              },
+              {
+                "tipo": "material",
+                "codigo": "LCOM",
+                "descripcion": "Ladrillo Comun",
+                "unidad": "u",
+                "formula": "Q*80/103",
+                "desperdicio_pct": 25,
+                "redondear": true,
+                "unidad_compra": 1,
+                "revisar": true,
+                "origen": "Ginkgo 4.1-6!fila 9",
+                "nota": "En la hoja son 80 ladrillos fijos para los 103 m² del ejemplo; acá se pasó a por m². Confirmar con Sol."
+              },
+              {
+                "tipo": "mano_obra",
+                "codigo": "MO-OF",
+                "descripcion": "Oficial",
+                "unidad": "u",
+                "trabajadores": 1,
+                "rendimiento": "103",
+                "cargas_sociales_pct": 0,
+                "revisar": true,
+                "origen": "Ginkgo 4.1-6!fila 29",
+                "nota": "En la hoja: 1 oficial, 1 día para los 103 m² del ejemplo, sin cargas (el bombeo incluye la mano de obra). Se cargó como rendimiento de 103 m² por día."
+              },
+              {
+                "tipo": "mano_obra",
+                "codigo": "MO-AY",
+                "descripcion": "Ayudante",
+                "unidad": "u",
+                "trabajadores": 1,
+                "rendimiento": "103",
+                "cargas_sociales_pct": 0,
+                "revisar": true,
+                "origen": "Ginkgo 4.1-6!fila 30",
+                "nota": "En la hoja: 1 ayudante, 1 día para los 103 m² del ejemplo, sin cargas. Se cargó como rendimiento de 103 m² por día."
+              },
+              {
+                "tipo": "subcontrato",
+                "codigo": "SUB-CONT",
+                "descripcion": "BOMBEO HORMIGON CELULAR. Incluye mano de obra y bomba.",
+                "unidad": "m2",
+                "formula": "Q",
+                "desperdicio_pct": 5,
+                "revisar": false,
+                "origen": "Ginkgo 4.1-6!fila 69",
+                "nota": "$13.000 el m² en la hoja 4.1-6 (en la hoja 00_Sub y en las hojas 4.9-2 y 4.9-8 figura a $12.000, ISMAEL 26/02/2026)."
+              }
+            ]
+          }
+        },
+        {
+          "tipo": "precio",
+          "codigo": "SUB-CONT",
+          "tipo_recurso": "subcontrato",
+          "descripcion": "BOMBEO HORMIGON CELULAR. Incluye mano de obra y bomba.",
+          "unidad": "m2",
+          "antes": null,
+          "despues": {
+            "precio_sin_iva": 13000,
+            "proveedor": null,
+            "fecha_precio": "2026-10-07"
+          },
+          "fuente": "Excel de Sol, Ginkgo, hoja 4.1-6, celda H69 ($13.000 escrito en la hoja, sin fecha; en 00_Sub, fila 32: $12.000, ISMAEL 26/02/2026; internet sugiere $13.000, confianza baja)",
+          "url": null
+        }
+      ]
+    },
+    {
+      "id": "B5",
+      "titulo": "Revoque exterior con silleta: fórmula nueva",
+      "por_que": "El revoque exterior con silleta se calculaba con la fórmula común, con cuadrilla propia. Tu Excel lo cobra con el subcontrato de revoque con silleta (SILL-RE, $25.000 el m² con 50% de desperdicio), que incluye la mano de obra. Se agrega la fórmula 5.5.7 = materiales del revoque exterior + ese subcontrato; la 5.5.3 queda para el revoque sin silleta.",
+      "supuesto": {
+        "respuesta": "Depende de la obra: fórmula nueva, la actual queda",
+        "por": "Claude",
+        "fecha": "2026-10-07",
+        "confirma": "Sol",
+        "razon": "La hoja 4.2-6 del Excel de Sol no tiene cuadrilla propia: todo el trabajo va en SILL-RE."
+      },
+      "fuentes": [
+        "Excel de Sol, Ginkgo, hoja 4.2-6, fila 69 (SILL-RE, 50%, 'en negro')",
+        "Maestro, solapa 5.5.3, filas 7 a 9",
+        "Lista oficial Maestro TERRAC - Subcontratos: SILL-RE $25.000 (06/10/2025)"
+      ],
+      "efecto_ginkgo": 18280855,
+      "cambios": [
+        {
+          "tipo": "plantilla_nueva",
+          "plantilla": {
+            "codigo": "5.5.7",
+            "nombre": "GRUESO EXTERIOR HIDRÓFUGO CON SILLETA",
+            "unidad": "m2",
+            "categoria": "Albañileria",
+            "descripcion": "Agregada el 07/10/2026 por la revisión de Ginkgo: los materiales de la 5.5.3 más el subcontrato de revoque con silleta, como la hoja 4.2-6 del Excel de Sol. Sin cuadrilla propia: SILL-RE incluye la mano de obra.",
+            "origen": "auditoria_ginkgo",
+            "editado": true,
+            "parametros": [],
+            "desperdicio_pct": null,
+            "recursos": [
+              {
+                "tipo": "material",
+                "codigo": "AR",
+                "descripcion": "Bolson de Arena (1m3)",
+                "unidad": "m3",
+                "formula": "Q*0.025",
+                "desperdicio_pct": 23.0,
+                "redondear": true,
+                "unidad_compra": 1,
+                "revisar": false,
+                "origen": "5.5.3!fila 7",
+                "nota": "Igual que la 5.5.3 (revoque grueso exterior hidrófugo)."
+              },
+              {
+                "tipo": "material",
+                "codigo": "CEM",
+                "descripcion": "Bolsa Cemento \"Loma Negra\" 25 k (u)",
+                "unidad": "u",
+                "formula": "Q*8.5/25",
+                "desperdicio_pct": 23.0,
+                "redondear": true,
+                "unidad_compra": 1,
+                "revisar": false,
+                "origen": "5.5.3!fila 8",
+                "nota": "Igual que la 5.5.3 (revoque grueso exterior hidrófugo)."
+              },
+              {
+                "tipo": "material",
+                "codigo": "CER",
+                "descripcion": "Ceresita 20 k (u)",
+                "unidad": "u",
+                "formula": "Q*0.25/20",
+                "desperdicio_pct": 23.0,
+                "redondear": true,
+                "unidad_compra": 1,
+                "revisar": false,
+                "origen": "5.5.3!fila 9",
+                "nota": "Igual que la 5.5.3 (revoque grueso exterior hidrófugo)."
+              },
+              {
+                "tipo": "subcontrato",
+                "codigo": "SILL-RE",
+                "descripcion": "REVOQUE EXTERIOR CON SILLETA. (con ceresita)",
+                "unidad": "m2",
+                "formula": "Q",
+                "desperdicio_pct": 50,
+                "revisar": true,
+                "origen": "Ginkgo 4.2-6!fila 69",
+                "nota": "Subcontrato con silleta, incluye la mano de obra. 50% de desperdicio como en el Excel de Sol ('50 de desperdicio por que es en negro'): confirmar con Sol si va así."
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "B6",
+      "titulo": "Disco de corte en muros, pisos y revestimientos",
+      "por_que": "Tu Excel cobra discos de amoladora en los muros y en la colocación de pisos y revestimientos; las fórmulas no los tenían. Se agregan con el consumo de tus hojas: 1 disco cada 29 m² de muro, 4 cada 103 m² de piso y 6 cada 150 m² de revestimiento.",
+      "supuesto": {
+        "respuesta": "Sí",
+        "por": "Claude",
+        "fecha": "2026-10-07",
+        "confirma": "Sol",
+        "razon": "Es un gasto real que el Excel de Sol cobra en todos los muros y pisos de Ginkgo."
+      },
+      "fuentes": [
+        "Excel de Sol, Ginkgo, hoja 4.1-1, fila 55 (1 disco para 29,04 m²; todos los muros toman esta hoja)",
+        "Excel de Sol, Ginkgo, hoja 4.1-8, fila 55 (4 discos para 103 m²)",
+        "Excel de Sol, Ginkgo, hoja 4.2-11, fila 55 (6 discos para 150,24 m²)"
+      ],
+      "efecto_ginkgo": 16317564,
+      "cambios": [
+        {
+          "tipo": "renglon_nuevo",
+          "plantilla": "5.1.4",
+          "renglon": {
+            "tipo": "mo_material",
+            "codigo": "DIS",
+            "descripcion": "Disco corte (amoladora)",
+            "unidad": "u",
+            "desperdicio_pct": 0,
+            "redondear": true,
+            "unidad_compra": 1,
+            "revisar": false,
+            "formula": "Q/29.04",
+            "origen": "Ginkgo 4.1-1!fila 55",
+            "nota": "1 disco cada 29,04 m² (Excel de Sol 4.1-1, la hoja que usan todos los muros). Corregido 07/10/2026 (revisión de Ginkgo)."
+          }
+        },
+        {
+          "tipo": "renglon_nuevo",
+          "plantilla": "5.1.5",
+          "renglon": {
+            "tipo": "mo_material",
+            "codigo": "DIS",
+            "descripcion": "Disco corte (amoladora)",
+            "unidad": "u",
+            "desperdicio_pct": 0,
+            "redondear": true,
+            "unidad_compra": 1,
+            "revisar": false,
+            "formula": "Q/29.04",
+            "origen": "Ginkgo 4.1-1!fila 55",
+            "nota": "1 disco cada 29,04 m² (Excel de Sol 4.1-1, la hoja que usan todos los muros; la hoja 4.1-2 del muro del 12 pone 2 para 192 m²). Corregido 07/10/2026 (revisión de Ginkgo)."
+          }
+        },
+        {
+          "tipo": "renglon_nuevo",
+          "plantilla": "5.1.6",
+          "renglon": {
+            "tipo": "mo_material",
+            "codigo": "DIS",
+            "descripcion": "Disco corte (amoladora)",
+            "unidad": "u",
+            "desperdicio_pct": 0,
+            "redondear": true,
+            "unidad_compra": 1,
+            "revisar": false,
+            "formula": "Q/29.04",
+            "origen": "Ginkgo 4.1-1!fila 55",
+            "nota": "1 disco cada 29,04 m² (Excel de Sol 4.1-1, la hoja que usan todos los muros; la hoja 4.1-3 pone 1 para 153,78 m²). Corregido 07/10/2026 (revisión de Ginkgo)."
+          }
+        },
+        {
+          "tipo": "renglon_nuevo",
+          "plantilla": "7.1.1",
+          "renglon": {
+            "tipo": "mo_material",
+            "codigo": "DIS",
+            "descripcion": "Disco corte (amoladora)",
+            "unidad": "u",
+            "desperdicio_pct": 0,
+            "redondear": true,
+            "unidad_compra": 1,
+            "revisar": false,
+            "formula": "Q*4/103",
+            "origen": "Ginkgo 4.1-8!fila 55",
+            "nota": "4 discos cada 103 m² (Excel de Sol 4.1-8). Corregido 07/10/2026 (revisión de Ginkgo)."
+          }
+        },
+        {
+          "tipo": "renglon_nuevo",
+          "plantilla": "7.1.5",
+          "renglon": {
+            "tipo": "mo_material",
+            "codigo": "DIS",
+            "descripcion": "Disco corte (amoladora)",
+            "unidad": "u",
+            "desperdicio_pct": 0,
+            "redondear": true,
+            "unidad_compra": 1,
+            "revisar": false,
+            "formula": "Q*6/150.24",
+            "origen": "Ginkgo 4.2-11!fila 55",
+            "nota": "6 discos cada 150,24 m² (Excel de Sol 4.2-11). Corregido 07/10/2026 (revisión de Ginkgo)."
+          }
+        }
+      ]
+    },
+    {
+      "id": "B7",
+      "titulo": "Precios nuevos: subcontratos y jornales del Excel de Sol, materiales de internet",
+      "por_que": "Varios precios de la lista estaban viejos. Los subcontratos se toman de tu Excel (cotizaciones de septiembre: yeso aplicado en pared, buña, colocación de membrana) y los materiales de corralones de internet consultados hoy (ladrillos huecos, cemento, yeso proyectado). La arena va al precio de tu Excel, que internet confirma. Los jornales pasan a los de tu Excel (14/09/2026): los de la lista son de febrero y abril y desde entonces hubo aumentos de convenio.",
+      "supuesto": {
+        "respuesta": "Subcontratos y jornales del Excel de Sol; materiales de internet (confianza alta); arena del Excel",
+        "por": "Claude",
+        "fecha": "2026-10-07",
+        "confirma": "Sol",
+        "razon": "Los subcontratos del Excel son cotizaciones reales de proveedor (EVER 18/09/2026, silvio 16/09/2026). Para los materiales hay precios de corralón de hoy con confianza alta; el Excel de Sol en ladrillos parece tener precios con IVA (1.000 × 1,21 = 1.210). Los jornales de la lista son del 10/02/2026 (capataz y puntero) y del 08/04/2026 (oficial y ayudante). Solo de junio a octubre la mano de obra subió un 13,1% compuesto (INDEC ICC, mano de obra asalariada: junio +3,0%, julio +2,6%; agosto +3,2%, capítulo mano de obra, según la prensa; UOCRA: septiembre +1,9%, octubre +1,8%); los aumentos de febrero a mayo no los encontré. Con ese piso la lista ya da capataz $203.600, puntero $118.800, oficial $101.800 y ayudante $84.800, cerca de los $214.000, $115.000, $100.000 y $80.000 del Excel."
+      },
+      "fuentes": [
+        "Excel de Sol, Ginkgo, hoja 00_Sub, filas 64, 68 y 80",
+        "Excel de Sol, Ginkgo, hoja 00_Mat, filas 4 y 5 (arena)",
+        "Internet (7/10/2026): Sodimac, Easy y Proyectar Materiales; ver precios_web.md",
+        "Excel de Sol, Ginkgo, hoja 00_MO, filas 4 a 7 (jornales, 14/09/2026)",
+        "INDEC, ICC Gran Buenos Aires, junio y julio de 2026 (mano de obra asalariada); acuerdo UOCRA del 21/09/2026"
+      ],
+      "efecto_ginkgo": 40551334,
+      "cambios": [
+        {
+          "tipo": "precio",
+          "codigo": "SUB-YES-PARED",
+          "tipo_recurso": "subcontrato",
+          "descripcion": "YESO APLICADO EN PARED",
+          "unidad": "m2",
+          "antes": {
+            "precio_sin_iva": 10000.0
+          },
+          "despues": {
+            "precio_sin_iva": 15000,
+            "proveedor": "EVER",
+            "fecha_precio": "2026-09-18"
+          },
+          "fuente": "Excel de Sol, Ginkgo, hoja 00_Sub, fila 64",
+          "url": null
+        },
+        {
+          "tipo": "precio",
+          "codigo": "SUB-YES-BUNA",
+          "tipo_recurso": "subcontrato",
+          "descripcion": "YESO APLICADO - BUNA (x metro lineal)",
+          "unidad": "m",
+          "antes": {
+            "precio_sin_iva": 8000.0
+          },
+          "despues": {
+            "precio_sin_iva": 15000,
+            "proveedor": "EVER",
+            "fecha_precio": "2026-09-18"
+          },
+          "fuente": "Excel de Sol, Ginkgo, hoja 00_Sub, fila 68",
+          "url": null
+        },
+        {
+          "tipo": "precio",
+          "codigo": "C-MEM",
+          "tipo_recurso": "subcontrato",
+          "descripcion": "COLOCACION DE ROLLO DE MEMBRANA",
+          "unidad": "u",
+          "antes": {
+            "precio_sin_iva": 50000.0
+          },
+          "despues": {
+            "precio_sin_iva": 100000,
+            "proveedor": "silvio",
+            "fecha_precio": "2026-09-16"
+          },
+          "fuente": "Excel de Sol, Ginkgo, hoja 00_Sub, fila 80 (internet: $99.000–$126.000 por rollo, servidos.ar oct-2026)",
+          "url": null
+        },
+        {
+          "tipo": "precio",
+          "codigo": "LH18",
+          "tipo_recurso": "material",
+          "descripcion": "Ladrillo Hueco 18 (u)",
+          "unidad": "u",
+          "antes": {
+            "precio_sin_iva": 837.0
+          },
+          "despues": {
+            "precio_sin_iva": 1000,
+            "proveedor": "Sodimac",
+            "fecha_precio": "2026-10-07"
+          },
+          "fuente": "Internet: Sodimac · Ladrillo hueco 18×18×33 cm 11A Later-Cer, consultado el 7/10/2026",
+          "url": "https://www.sodimac.com.ar/sodimac-ar/product/1063715/"
+        },
+        {
+          "tipo": "precio",
+          "codigo": "LH12",
+          "tipo_recurso": "material",
+          "descripcion": "Ladrillo Hueco 12 (u)",
+          "unidad": "u",
+          "antes": {
+            "precio_sin_iva": 726.0
+          },
+          "despues": {
+            "precio_sin_iva": 640,
+            "proveedor": "Sodimac",
+            "fecha_precio": "2026-10-07"
+          },
+          "fuente": "Internet: Sodimac · Ladrillo hueco 9 agujeros 12×18×33 cm Later-Cer, consultado el 7/10/2026",
+          "url": "https://www.sodimac.com.ar/sodimac-ar/product/1063707/"
+        },
+        {
+          "tipo": "precio",
+          "codigo": "LH8",
+          "tipo_recurso": "material",
+          "descripcion": "Ladrillo Hueco 8 (u)",
+          "unidad": "u",
+          "antes": {
+            "precio_sin_iva": 568.7
+          },
+          "despues": {
+            "precio_sin_iva": 520,
+            "proveedor": "Sodimac",
+            "fecha_precio": "2026-10-07"
+          },
+          "fuente": "Internet: Sodimac · Ladrillo hueco 6 agujeros 8×18×33 cm Later-Cer, consultado el 7/10/2026",
+          "url": "https://www.sodimac.com.ar/sodimac-ar/product/1063685/"
+        },
+        {
+          "tipo": "precio",
+          "codigo": "CEM",
+          "tipo_recurso": "material",
+          "descripcion": "Bolsa Cemento \"Loma Negra\" 25 k (u)",
+          "unidad": "u",
+          "antes": {
+            "precio_sin_iva": 6669.42
+          },
+          "despues": {
+            "precio_sin_iva": 6800,
+            "proveedor": "Easy",
+            "fecha_precio": "2026-10-07"
+          },
+          "fuente": "Internet: Easy · Cemento 25 Kg Loma Negra, consultado el 7/10/2026 (bolsa de 25 kg, igual que el código de la lista)",
+          "url": "https://www.easy.com.ar/cemento-loma-negra-25kg-1306950/p"
+        },
+        {
+          "tipo": "precio",
+          "codigo": "YES-P",
+          "tipo_recurso": "material",
+          "descripcion": "Bolsa Yeso Proyectado Tuyango 30 k (u)",
+          "unidad": "u",
+          "antes": {
+            "precio_sin_iva": 18000.0
+          },
+          "despues": {
+            "precio_sin_iva": 16149,
+            "proveedor": "Proyectar Materiales",
+            "fecha_precio": "2026-10-07"
+          },
+          "fuente": "Internet: Proyectar Materiales · YESO PROYECTABLE TUYANGO x 30 KGS, consultado el 7/10/2026",
+          "url": "https://www.proyectarmateriales.com.ar/construccion/obra-pesada/bolsas/yeso/"
+        },
+        {
+          "tipo": "precio",
+          "codigo": "MO-CA",
+          "tipo_recurso": "mano_obra",
+          "descripcion": "Capataz",
+          "unidad": "u",
+          "antes": {
+            "precio_sin_iva": 180000.0
+          },
+          "despues": {
+            "precio_sin_iva": 214000,
+            "proveedor": null,
+            "fecha_precio": "2026-09-14"
+          },
+          "fuente": "Excel de Sol, Ginkgo, hoja 00_MO, fila 4 (D4, fecha E4)",
+          "url": null
+        },
+        {
+          "tipo": "precio",
+          "codigo": "MO-PU",
+          "tipo_recurso": "mano_obra",
+          "descripcion": "Puntero",
+          "unidad": "u",
+          "antes": {
+            "precio_sin_iva": 105000.0
+          },
+          "despues": {
+            "precio_sin_iva": 115000,
+            "proveedor": null,
+            "fecha_precio": "2026-09-14"
+          },
+          "fuente": "Excel de Sol, Ginkgo, hoja 00_MO, fila 5 (D5, fecha E5)",
+          "url": null
+        },
+        {
+          "tipo": "precio",
+          "codigo": "MO-OF",
+          "tipo_recurso": "mano_obra",
+          "descripcion": "Oficial",
+          "unidad": "u",
+          "antes": {
+            "precio_sin_iva": 90000.0
+          },
+          "despues": {
+            "precio_sin_iva": 100000,
+            "proveedor": null,
+            "fecha_precio": "2026-09-14"
+          },
+          "fuente": "Excel de Sol, Ginkgo, hoja 00_MO, fila 6 (D6, fecha E6)",
+          "url": null
+        },
+        {
+          "tipo": "precio",
+          "codigo": "MO-AY",
+          "tipo_recurso": "mano_obra",
+          "descripcion": "Ayudante",
+          "unidad": "u",
+          "antes": {
+            "precio_sin_iva": 75000.0
+          },
+          "despues": {
+            "precio_sin_iva": 80000,
+            "proveedor": null,
+            "fecha_precio": "2026-09-14"
+          },
+          "fuente": "Excel de Sol, Ginkgo, hoja 00_MO, fila 7 (D7, fecha E7)",
+          "url": null
+        },
+        {
+          "tipo": "precio",
+          "codigo": "AR",
+          "tipo_recurso": "material",
+          "descripcion": "Bolson de Arena (1m3)",
+          "unidad": "m3",
+          "antes": {
+            "precio_sin_iva": 55682.0
+          },
+          "despues": {
+            "precio_sin_iva": 37975.21,
+            "proveedor": "Su Corralon",
+            "fecha_precio": "2026-09-17"
+          },
+          "fuente": "Excel de Sol, Ginkgo, hoja 00_Mat, fila 5 (la fecha es la de la fila 4, arena a granel, mismo precio; internet: $32.107–$37.436 sin IVA, Proyectar y Materiales Moreno)",
+          "url": null
+        }
+      ]
+    },
+    {
+      "id": "B10",
+      "titulo": "Cielorraso aplicado: lleva metal desplegado, a $4.000 la hoja",
+      "por_que": "Se confirma que el cielorraso aplicado lleva metal desplegado, como tu hoja 5.2-2. En la lista estaba a $1 (en tu Excel no tiene precio): se carga $4.000 la hoja, precio de corralón de hoy.",
+      "supuesto": {
+        "respuesta": "Sí",
+        "por": "Claude",
+        "fecha": "2026-10-07",
+        "confirma": "Sol",
+        "razon": "La hoja 5.2-2 del Excel de Sol lo tiene (=H3/(2*0.7)). El precio de internet es de confianza media (Proyectar $3.900 sin IVA; Red Materiales $3.950–$7.000)."
+      },
+      "fuentes": [
+        "Excel de Sol, Ginkgo, hoja 5.2-2, fila 8",
+        "Excel de Sol, Ginkgo, hoja 00_Mat, fila 196 (sin precio)",
+        "Internet: Proyectar Materiales · METAL DESPLEGADO 70 x 200 CM MARFIL, consultado el 7/10/2026"
+      ],
+      "efecto_ginkgo": 7750060,
+      "cambios": [
+        {
+          "tipo": "precio",
+          "codigo": "Y-MD200X70",
+          "tipo_recurso": "material",
+          "descripcion": "Metal desplegado 200x70",
+          "unidad": "u",
+          "antes": {
+            "precio_sin_iva": 1
+          },
+          "despues": {
+            "precio_sin_iva": 4000,
+            "proveedor": "Proyectar Materiales",
+            "fecha_precio": "2026-10-07"
+          },
+          "fuente": "Internet: Proyectar Materiales · METAL DESPLEGADO 70 x 200 CM MARFIL, consultado el 7/10/2026 (confianza media)",
+          "url": "https://www.proyectarmateriales.com.ar/productos/metal-desplegado-70-x-200-cm-marfil/"
+        }
+      ]
+    }
+  ]
+}

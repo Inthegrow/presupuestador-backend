@@ -178,3 +178,38 @@ class TestCatalogoOficialMigration:
         for column in ("excel_directo", "excel_neto"):
             assert re.search(rf"ALTER TABLE budget_items\s+ADD COLUMN IF NOT EXISTS {column}\s+numeric", sql), column
         assert re.search(r"ON price_catalogs\(org_id, oficial\)", sql)
+
+
+MIGRATION_012 = MIGRATION_004.parent / "012_correcciones_y_fuentes.sql"
+
+
+class TestCorreccionesMigration:
+    """012: origin of each price + correcciones_aplicadas (backend only), safe to run twice."""
+
+    def _sql(self) -> str:
+        text = MIGRATION_012.read_text(encoding="utf-8")
+        return "\n".join(line.split("--", 1)[0] for line in text.splitlines())
+
+    def test_only_idempotent_adds(self):
+        sql = self._sql()
+        for line in re.findall(r"ADD COLUMN[^\n]*", sql):
+            assert "IF NOT EXISTS" in line
+        assert "CREATE TABLE IF NOT EXISTS correcciones_aplicadas" in sql
+        assert not re.search(r"DROP\s+(TABLE|COLUMN)|DELETE\s+FROM|TRUNCATE|UPDATE\s+\w+\s+SET", sql, re.IGNORECASE)
+
+    def test_columns_used_by_the_code(self):
+        sql = self._sql()
+        for table in ("catalog_entries", "catalog_price_history"):
+            for column in ("fuente", "fuente_url"):
+                assert re.search(rf"ALTER TABLE {table}\s+ADD COLUMN IF NOT EXISTS {column}\b", sql), (table, column)
+        assert re.search(r"ALTER TABLE catalog_price_history\s+ADD COLUMN IF NOT EXISTS proveedor\b", sql)
+        assert "AS historial_proveedor" in MIGRATION_012.read_text(encoding="utf-8")  # verification SELECT
+        for column in ("org_id", "lote", "correccion_id", "estado", "aplicada_por", "aplicada_at", "deshecha_at",
+                       "antes", "despues"):
+            assert re.search(rf"^\s+{column}\s", sql, re.MULTILINE), column
+
+    def test_rls_without_policies(self):
+        sql = self._sql()
+        assert "ALTER TABLE correcciones_aplicadas ENABLE ROW LEVEL SECURITY" in sql
+        assert "REVOKE ALL ON correcciones_aplicadas FROM anon, authenticated" in sql
+        assert not re.search(r"CREATE POLICY|USING\s*\(\s*true\s*\)", sql, re.IGNORECASE)

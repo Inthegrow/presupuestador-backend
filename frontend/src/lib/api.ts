@@ -5,6 +5,7 @@ import type {
   ItemAudit,
   PriceCatalog,
   CatalogEntry,
+  CatalogPriceHistory,
   AnalysisResponse,
   IndirectConfig,
   BudgetVersion,
@@ -742,6 +743,9 @@ export const catalogApi = {
     patch<any>(`/catalogs/${catalogId}/entries/${entryId}`, data),
   deleteEntry: (catalogId: string, entryId: string) =>
     del<any>(`/catalogs/${catalogId}/entries/${entryId}`),
+  // Historial de precios de una entrada, el más nuevo primero (cada valor con su origen)
+  history: (catalogId: string, entryId: string) =>
+    get<CatalogPriceHistory[]>(`/catalogs/${catalogId}/entries/${entryId}/history`),
   uploadCsv: (name: string, tipo: string, file: File) => {
     const formData = new FormData()
     formData.append('name', name)
@@ -754,4 +758,116 @@ export const catalogApi = {
     formData.append('file', file)
     return postFile<{ catalogs_created: number; entries: Record<string, number>; warnings: string[]; source_file: string }>('/catalogs/upload-excel', formData)
   },
+}
+
+// ─── Buscador de precios en internet ───────────────────────────────────────────
+
+export interface BusquedaPrecio {
+  descripcion: string
+  unidad?: string | null
+  tipo?: string | null
+  codigo?: string | null
+}
+
+/** Una opción que encontró el buscador. Siempre trae el link de donde salió (sin link, no se muestra). */
+export interface OpcionPrecio {
+  comercio: string
+  producto: string
+  presentacion?: string | null
+  // Precio publicado en el sitio, tal cual (con o sin IVA según `con_iva`)
+  precio: number
+  con_iva: boolean
+  moneda?: string | null
+  unidad_publicada?: string | null
+  // El precio llevado a la unidad de la app, sin IVA, y la cuenta que lo explica
+  precio_unidad_app_sin_iva: number | null
+  // Cuántas unidades de la app trae la presentación, y si es la misma unidad (false: revisar el número)
+  cantidad_unidades_app?: number | null
+  coincide_unidad?: boolean | null
+  cuenta?: string | null
+  fecha?: string | null
+  url: string
+}
+
+export interface ResultadoBusquedaPrecio {
+  consulta: string
+  opciones: OpcionPrecio[]
+  aviso?: string | null
+}
+
+export const preciosApi = {
+  // Busca precios en corralones y ferreterías (puede tardar hasta un minuto). No guarda nada.
+  buscar: (data: BusquedaPrecio) => post<ResultadoBusquedaPrecio>('/precios/buscar', data),
+}
+
+// ─── Correcciones de la revisión de Ginkgo ─────────────────────────────────────
+
+export interface CorreccionSupuesto {
+  respuesta: string
+  por: string
+  fecha: string
+  confirma: string
+  razon?: string | null
+}
+
+export type CorreccionCambioTipo = 'renglon' | 'renglon_nuevo' | 'renglon_quitar' | 'plantilla_nueva' | 'precio'
+
+export interface CorreccionCambio {
+  tipo: CorreccionCambioTipo | string
+  // Número de la fórmula ("8.4"); en plantilla_nueva, la fórmula entera
+  plantilla?: string | {
+    codigo?: string
+    nombre?: string
+    unidad?: string | null
+    categoria?: string | null
+    recursos?: TemplateResource[]
+  } | null
+  codigo?: string | null
+  antes?: Record<string, unknown> | null
+  despues?: Record<string, unknown> | null
+  renglon?: TemplateResource | null
+  // Precio
+  tipo_recurso?: string | null
+  descripcion?: string | null
+  unidad?: string | null
+  fuente?: string | null
+  url?: string | null
+  // Lo agrega el servidor, en palabras
+  nombre_plantilla?: string | null
+  nombre_recurso?: string | null
+  estado_cambio?: string | null
+  detalle?: string | null
+  // Precio: lo que hay hoy en la lista oficial. Renglón que no coincide: lo que se encontró
+  actual?: { precio_sin_iva?: number | null; fecha_precio?: string | null; proveedor?: string | null; fuente?: string | null } | null
+  encontrado?: Record<string, unknown> | null
+}
+
+export type CorreccionEstado = 'para_aplicar' | 'aplicada' | 'no_coincide' | 'en_parte'
+
+export interface Correccion {
+  id: string
+  titulo: string
+  por_que: string
+  supuesto: CorreccionSupuesto
+  fuentes: string[]
+  efecto_ginkgo: number | null
+  cambios: CorreccionCambio[]
+  estado: CorreccionEstado | string
+  aplicada: { por?: string | null; fecha?: string | null } | null
+  detalle?: string | null
+}
+
+export interface LoteCorrecciones {
+  lote: string | null
+  titulo: string | null
+  fecha: string | null
+  correcciones: Correccion[]
+  // El archivo de correcciones no se pudo leer (la pantalla lo dice)
+  aviso?: string | null
+}
+
+export const correccionesApi = {
+  listar: () => get<LoteCorrecciones>('/correcciones'),
+  aplicar: (id: string) => post<unknown>(`/correcciones/${encodeURIComponent(id)}/aplicar`),
+  deshacer: (id: string) => post<unknown>(`/correcciones/${encodeURIComponent(id)}/deshacer`),
 }

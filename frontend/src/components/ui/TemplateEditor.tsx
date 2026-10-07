@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { X, Plus, Trash2, FlaskConical, AlertTriangle } from 'lucide-react'
 import { templateApi } from '../../lib/api'
+import NotaCorreccion from '../NotaCorreccion'
 import type { Template, TemplateParam, TemplatePreviewRow, TemplateResource } from '../../types'
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
@@ -296,8 +297,10 @@ export default function TemplateEditor({
                   {recursos.map((r, i) => {
                     const mo = r.tipo === 'mano_obra'
                     const legacyMo = mo && !str(r.rendimiento) && r.trabajadores_por_unidad !== undefined
+                    const nota = r.correccion?.texto
                     return (
-                      <tr key={i} className="border-b last:border-0 align-top">
+                      <Fragment key={i}>
+                      <tr className={`align-top ${nota ? '' : 'border-b last:border-0'}`}>
                         <td className="px-1 py-1 w-36">
                           <select className={inputCls} value={r.tipo}
                             onChange={(e) => setRecurso(i, { tipo: e.target.value as TemplateResource['tipo'] })}>
@@ -369,6 +372,15 @@ export default function TemplateEditor({
                           </button>
                         </td>
                       </tr>
+                      {nota && (
+                        <tr className="border-b last:border-0">
+                          <td />
+                          <td colSpan={8} className="px-1 pb-1.5">
+                            <NotaCorreccion texto={nota} />
+                          </td>
+                        </tr>
+                      )}
+                      </Fragment>
                     )
                   })}
                 </tbody>

@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     # OpenAI (optional — AI endpoints return 503 if missing)
     OPENAI_API_KEY: str | None = None
     OPENAI_MODEL_VISION: str = "gpt-4o"
+    # Buscador de precios en internet (app/price_search.py): Responses API + búsqueda web
+    OPENAI_MODEL_PRECIOS: str = "gpt-4.1"
 
     # Server
     PORT: int = 8000

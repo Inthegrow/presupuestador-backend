@@ -99,6 +99,22 @@ export interface CatalogEntry {
   precio_sin_iva?: number
   fecha_precio?: string | null
   proveedor?: string | null
+  // De dónde salió el precio ("Internet: Easy · Cemento 50 kg", "Cargado a mano", "Importado de …") y su link.
+  // Los precios viejos no lo tienen (la pantalla muestra proveedor y fecha)
+  fuente?: string | null
+  fuente_url?: string | null
+}
+
+// Un valor del historial de precios de una entrada
+export interface CatalogPriceHistory {
+  id?: string
+  entry_id: string
+  precio_sin_iva: number | null
+  fecha_precio?: string | null
+  created_at?: string | null
+  proveedor?: string | null
+  fuente?: string | null
+  fuente_url?: string | null
 }
 
 export interface AnalysisResponse {
@@ -271,6 +287,8 @@ export interface TemplateResource {
   trabajadores?: number | string
   rendimiento?: number | string
   cargas_sociales_pct?: number | string
+  // Renglón tocado por una corrección (revisión de Ginkgo): la nota que se muestra en la fórmula
+  correccion?: { lote?: string; id?: string; texto?: string } | null
   // Formato anterior
   cantidad_por_unidad?: number
   trabajadores_por_unidad?: number

@@ -100,7 +100,10 @@ def factor_propuesto(descripcion: str, unidad_trabajo: object, template: dict) -
     codigo = str(template.get("codigo") or "")
     if not rule or not codigo:
         return None
-    for code, factor in rule["plantillas"]:
+    # The recipes of the rule, of its alternative (the rule before a correction) and of its variant (MAPEO)
+    pares = (list(rule["plantillas"]) + list((rule.get("alternativa") or {}).get("plantillas") or [])
+             + list((rule.get("variante") or {}).get("plantillas") or []))
+    for code, factor in pares:
         if str(code) != codigo:
             continue
         # A fixed factor converts from the unit the rule was written for ("obra")

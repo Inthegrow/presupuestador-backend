@@ -1,0 +1,47 @@
+{
+  "_nota": "DATOS DE PRUEBA para scripts/serve_fake.py con FAKE_BUSCADOR=1 (sin red). Los precios son inventados y los links llevan ?ejemplo=prueba: no son precios reales ni páginas reales. Formato: app/price_search.py (FAKE_BUSCADOR_ARCHIVO).",
+  "opciones": [
+    {"comercio": "Corralón San Martín", "producto": "Producto de ejemplo para la búsqueda", "presentacion": "Unidad",
+     "precio": 12100, "con_iva": true, "moneda": "ARS", "unidad_publicada": "u", "cantidad_unidades_app": 1,
+     "cuenta": "Se vende por unidad.",
+     "url": "https://www.corralonsanmartin.com.ar/producto-de-ejemplo?ejemplo=prueba"},
+    {"comercio": "Ferretería Industrial Norte", "producto": "Producto de ejemplo, otra marca", "presentacion": "Unidad",
+     "precio": 10500, "con_iva": false, "moneda": "ARS", "unidad_publicada": "u", "cantidad_unidades_app": 1,
+     "cuenta": "El sitio dice + IVA.",
+     "url": "https://www.ferreterianorte.com.ar/p/producto-ejemplo?ejemplo=prueba"}
+  ],
+  "por_descripcion": {
+    "cemento": {
+      "opciones": [
+        {"comercio": "Easy", "producto": "Cemento Portland Loma Negra x 25 kg", "presentacion": "Bolsa de 25 kg",
+         "precio": 8990, "con_iva": true, "moneda": "ARS", "unidad_publicada": "bolsa", "cantidad_unidades_app": 1,
+         "cuenta": "La bolsa de 25 kg es la unidad de la app.",
+         "url": "https://www.easy.com.ar/cemento-portland-loma-negra-25-kg?ejemplo=prueba"},
+        {"comercio": "Sodimac", "producto": "Cemento Loma Negra 25 kg", "presentacion": "Bolsa de 25 kg",
+         "precio": 8590, "con_iva": true, "moneda": "ARS", "unidad_publicada": "bolsa", "cantidad_unidades_app": 1,
+         "cuenta": "La bolsa de 25 kg es la unidad de la app.",
+         "url": "https://www.sodimac.com.ar/sodimac-ar/product/cemento-loma-negra-25kg?ejemplo=prueba"},
+        {"comercio": "Corralón Los Andes (Mercado Libre)", "producto": "Cemento Loma Negra 50 kg pallet x 10",
+         "presentacion": "Bolsa de 50 kg", "precio": 15800, "con_iva": true, "moneda": "ARS",
+         "unidad_publicada": "bolsa 50 kg", "cantidad_unidades_app": 2,
+         "cuenta": "La bolsa de 50 kg equivale a 2 bolsas de 25 kg.",
+         "url": "https://articulo.mercadolibre.com.ar/MLA-0000000-cemento-loma-negra-50kg?ejemplo=prueba"}
+      ]
+    },
+    "malla": {
+      "opciones": [
+        {"comercio": "Hierros Avellaneda", "producto": "Malla sima Q188 15x15 4,2 mm 2,40 x 6 m",
+         "presentacion": "Panel de 2,40 x 6 m", "precio": 52900, "con_iva": true, "moneda": "ARS",
+         "unidad_publicada": "panel", "cantidad_unidades_app": 1, "cuenta": "Un panel es la unidad de la app.",
+         "url": "https://www.hierrosavellaneda.com.ar/malla-sima-q188?ejemplo=prueba"},
+        {"comercio": "Corralón El Puente", "producto": "Malla electrosoldada Q188 2,4 x 6 m",
+         "presentacion": "Panel de 2,40 x 6 m", "precio": 49500, "con_iva": true, "moneda": "ARS",
+         "unidad_publicada": "panel", "cantidad_unidades_app": 1, "cuenta": "Un panel es la unidad de la app.",
+         "url": "https://www.corralonelpuente.com.ar/malla-q188?ejemplo=prueba"}
+      ]
+    },
+    "zzz": {"opciones": [], "aviso": "No encontramos precios con un link para mostrar. Probá con otras palabras (la marca, la presentación) o buscá de nuevo en un rato."},
+    "falla": {"error": "La búsqueda tardó más de un minuto y se cortó. Probá de nuevo."},
+    "sin configurar": {"no_configurado": true}
+  }
+}

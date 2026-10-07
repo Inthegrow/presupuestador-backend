@@ -55,13 +55,103 @@ def price_from_payload(data: dict) -> float | None:
 
 
 def history_row(entry: dict) -> dict:
-    """Build a catalog_price_history row from a saved catalog entry."""
-    return {
+    """Build a catalog_price_history row from a saved catalog entry.
+
+    The origin of the price (``fuente``, ``fuente_url``) and its ``proveedor`` go along when the
+    entry has them. Before migration 012 the history has no such columns: see sin_extras_historial.
+    """
+    row = {
         "entry_id": entry["id"],
         "org_id": entry["org_id"],
         "precio_sin_iva": entry.get("precio_sin_iva"),
         "fecha_precio": entry.get("fecha_precio"),
     }
+    for key in HISTORIAL_EXTRAS:
+        if key in entry:
+            row[key] = entry.get(key)
+    return row
+
+
+def con_iva_proporcional(old: dict, nuevo_sin_iva: object) -> dict:
+    """The new ``precio_con_iva`` when ``precio_sin_iva`` changes: same VAT ratio as before.
+
+    new con IVA = new sin IVA × old con IVA / old sin IVA. Without an old con IVA (or an old
+    sin IVA of 0) there is nothing to keep: an old con IVA becomes null (it no longer matches),
+    and an entry that had none stays without it. Returns {} when nothing has to be written.
+    """
+    def num(value: object) -> float | None:
+        try:
+            return float(value) if value not in (None, "") else None  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return None
+
+    viejo_con, viejo_sin, nuevo = num(old.get("precio_con_iva")), num(old.get("precio_sin_iva")), num(nuevo_sin_iva)
+    if viejo_con is None:
+        return {}
+    if nuevo is None or not viejo_sin or viejo_sin <= 0:
+        return {"precio_con_iva": None}
+    return {"precio_con_iva": round(nuevo * viejo_con / viejo_sin, 2)}
+
+
+# ── Origin of a price (migration 012) ─────────────────────────────────────────
+
+FUENTE_KEYS = ("fuente", "fuente_url")
+# Columns of catalog_price_history added by migration 012
+HISTORIAL_EXTRAS = (*FUENTE_KEYS, "proveedor")
+MAX_FUENTE = 500
+FUENTE_A_MANO = "Cargado a mano"
+
+
+def fuente_importada(archivo: object) -> str:
+    """Origin of the prices of an imported list: "Importado de lista.xlsx"."""
+    nombre = str(archivo or "").strip()
+    return f"Importado de {nombre}" if nombre else "Importado de un archivo"
+
+
+def fuente_from_payload(data: dict) -> dict:
+    """``fuente`` / ``fuente_url`` sent by the client (only the keys that came).
+
+    Text up to 500 characters; the link only http(s)://. Empty = None.
+    Raises ValueError with a message for the user.
+    """
+    out: dict = {}
+    for key in FUENTE_KEYS:
+        if key not in data:
+            continue
+        value = data[key]
+        if value is None or (isinstance(value, str) and not value.strip()):
+            out[key] = None
+            continue
+        if not isinstance(value, str):
+            raise ValueError("El origen del precio tiene que ser un texto")
+        value = value.strip()
+        if len(value) > MAX_FUENTE:
+            raise ValueError(f"El origen del precio puede tener hasta {MAX_FUENTE} caracteres")
+        if key == "fuente_url" and not re.match(r"^https?://\S+$", value, re.IGNORECASE):
+            raise ValueError("El link del precio tiene que empezar con http:// o https://")
+        out[key] = value
+    return out
+
+
+def falta_columna_fuente(exc: Exception) -> bool:
+    """The write failed because the database has no fuente/fuente_url column (migration 012 not run)."""
+    text = str(exc)
+    return "fuente" in text and ("column" in text or "PGRST204" in text or "42703" in text)
+
+
+def sin_fuente(row: dict) -> dict:
+    return {k: v for k, v in row.items() if k not in FUENTE_KEYS}
+
+
+def falta_columna_historial(exc: Exception) -> bool:
+    """Writing the history failed because it has no fuente/fuente_url/proveedor column (no migration 012)."""
+    text = str(exc)
+    return (("fuente" in text or "proveedor" in text)
+            and ("column" in text or "PGRST204" in text or "42703" in text))
+
+
+def sin_extras_historial(row: dict) -> dict:
+    return {k: v for k, v in row.items() if k not in HISTORIAL_EXTRAS}
 
 
 def price_changed(old: dict, new: dict) -> bool:
