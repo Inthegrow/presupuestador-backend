@@ -128,6 +128,12 @@ ROUTE_ROLES: dict[tuple[str, str], str] = {
     ("POST", "/architect/{budget_id}/analyze-structure"): EDITOR,
     ("POST", "/architect/{budget_id}/analyze-sections"): EDITOR,
     ("POST", "/architect/{budget_id}/synthesize"): EDITOR,
+    # Correcciones de la revisión de Ginkgo (entrega 8)
+    ("GET", "/correcciones"): MEMBER,
+    ("POST", "/correcciones/{correccion_id}/aplicar"): EDITOR,
+    ("POST", "/correcciones/{correccion_id}/deshacer"): EDITOR,
+    # Buscador de precios en internet (no guarda nada; consume la clave de OpenAI)
+    ("POST", "/precios/buscar"): EDITOR,
 }
 
 # Rutas sin empresa elegida: la portada, /health y /me (que muestra el selector).

@@ -55,13 +55,69 @@ def price_from_payload(data: dict) -> float | None:
 
 
 def history_row(entry: dict) -> dict:
-    """Build a catalog_price_history row from a saved catalog entry."""
-    return {
+    """Build a catalog_price_history row from a saved catalog entry.
+
+    The origin of the price (``fuente``, ``fuente_url``, migration 012) goes along only when
+    the entry has those columns: before the migration the history has no such columns.
+    """
+    row = {
         "entry_id": entry["id"],
         "org_id": entry["org_id"],
         "precio_sin_iva": entry.get("precio_sin_iva"),
         "fecha_precio": entry.get("fecha_precio"),
     }
+    for key in FUENTE_KEYS:
+        if key in entry:
+            row[key] = entry.get(key)
+    return row
+
+
+# ── Origin of a price (migration 012) ─────────────────────────────────────────
+
+FUENTE_KEYS = ("fuente", "fuente_url")
+MAX_FUENTE = 500
+FUENTE_A_MANO = "Cargado a mano"
+
+
+def fuente_importada(archivo: object) -> str:
+    """Origin of the prices of an imported list: "Importado de lista.xlsx"."""
+    nombre = str(archivo or "").strip()
+    return f"Importado de {nombre}" if nombre else "Importado de un archivo"
+
+
+def fuente_from_payload(data: dict) -> dict:
+    """``fuente`` / ``fuente_url`` sent by the client (only the keys that came).
+
+    Text up to 500 characters; the link only http(s)://. Empty = None.
+    Raises ValueError with a message for the user.
+    """
+    out: dict = {}
+    for key in FUENTE_KEYS:
+        if key not in data:
+            continue
+        value = data[key]
+        if value is None or (isinstance(value, str) and not value.strip()):
+            out[key] = None
+            continue
+        if not isinstance(value, str):
+            raise ValueError("El origen del precio tiene que ser un texto")
+        value = value.strip()
+        if len(value) > MAX_FUENTE:
+            raise ValueError(f"El origen del precio puede tener hasta {MAX_FUENTE} caracteres")
+        if key == "fuente_url" and not re.match(r"^https?://\S+$", value, re.IGNORECASE):
+            raise ValueError("El link del precio tiene que empezar con http:// o https://")
+        out[key] = value
+    return out
+
+
+def falta_columna_fuente(exc: Exception) -> bool:
+    """The write failed because the database has no fuente/fuente_url column (migration 012 not run)."""
+    text = str(exc)
+    return "fuente" in text and ("column" in text or "PGRST204" in text or "42703" in text)
+
+
+def sin_fuente(row: dict) -> dict:
+    return {k: v for k, v in row.items() if k not in FUENTE_KEYS}
 
 
 def price_changed(old: dict, new: dict) -> bool:

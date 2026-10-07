@@ -130,6 +130,42 @@ def test_match_recipe_and_height() -> None:
     assert altura_from("MURO DE CARGA h 0.2m/1.8m") is None
 
 
+# Revisión de Ginkgo: las reglas que cambian con las correcciones usan la fórmula de antes mientras la
+# corrección no se aplicó (la fórmula nueva no existe en la empresa)
+_HOY = {c: {"codigo": c, "unidad": "m2"} for c in ("5.5.5", "6.1", "6.5")}
+_CORREGIDO = {**_HOY, "5.5.6": {"codigo": "5.5.6", "unidad": "m2"}, "6.11": {"codigo": "6.11", "unidad": "m2"}}
+
+
+@pytest.mark.parametrize("descripcion, hoy, corregido", [
+    ("YESO PROYECTADO EN PAREDES INTERIORES", "5.5.5", "5.5.6"),
+    ("Cielorrasos de yeso suspendido en baños y cocinas", "6.5", "6.1"),
+    ("CIELORRASOS APLICADOS EN YESO EN ESTAR Y DORMITORIOS", "6.1", "6.11"),
+])
+def test_mapeo_con_alternativa(descripcion: str, hoy: str, corregido: str) -> None:
+    assert match_recipe(descripcion, _HOY)["plantillas"] == [(hoy, 1.0)]
+    assert match_recipe(descripcion, _CORREGIDO)["plantillas"] == [(corregido, 1.0)]
+    # Without the org's recipes: the rule as written
+    assert match_recipe(descripcion)["plantillas"] == [(corregido, 1.0)]
+    fila = {"descripcion": descripcion, "unidad": "m²"}
+    assert rule_for(fila, _HOY)["plantillas"] == [(hoy, 1.0)]
+    assert rule_for(fila, _CORREGIDO)["plantillas"] == [(corregido, 1.0)]
+    assert rule_for(fila, _HOY)["falta_factor"] == [] and "alternativa" not in rule_for(fila, _HOY)
+
+
+def test_mapeo_alternativa_trae_su_nota() -> None:
+    texto = "CIELORRASOS DE YESO SUSPENDIDO"
+    assert "placa verde" in match_recipe(texto, _HOY)["nota"]
+    assert "yeso armado" in match_recipe(texto, _CORREGIDO)["nota"]
+    assert "nota" not in match_recipe("YESO PROYECTADO", _HOY)
+
+
+def test_mapeo_alternativa_build_plan_sin_formulas_faltantes() -> None:
+    parsed = {"filas": [{"nivel": "item", "codigo": "5.1", "descripcion": "YESO PROYECTADO", "unidad": "m2",
+                         "cantidad": 10, "excel": {}}]}
+    plan = build_plan(parsed, _HOY)
+    assert plan["plantillas_faltantes"] == [] and plan["items"][0]["plantillas"] == ["5.5.5"]
+
+
 @pytest.mark.parametrize("descripcion, espesor", [
     ("TELGOPOR 50 mm + CONTRAPISO EN AZOTEA ACCESIBLE e: 8cm", 0.08),
     ("CONTRAPISO EN HALL + RAMPAS. ESP.=10cm.", 0.10),

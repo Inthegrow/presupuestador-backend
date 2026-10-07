@@ -24,7 +24,7 @@ from fastapi.responses import StreamingResponse
 
 from app.auth import get_current_user, require_editor
 from app.budget_prices import budget_config, fetch_all, initial_indirects, today
-from app.catalog_prices import normalize_codigo, price_changed
+from app.catalog_prices import fuente_importada, normalize_codigo, price_changed
 from app.calculations import (
     calc_budget_summary,
     fraction_to_pct,
@@ -33,7 +33,7 @@ from app.calculations import (
     sale_totals,
 )
 from app.db import get_data_db
-from app.routers.catalogs import record_history, start_history, update_entries
+from app.routers.catalogs import insert_entries, start_history, update_entries
 from app.terrac_export import FMT_PESOS as TERRAC_FMT_PESOS
 from app.terrac_export import terrac_bytes
 from app.tree import get_parent_candidates, normalize_item_code, safe_float
@@ -330,12 +330,13 @@ def _parse_detail_sheets(
     return resources_by_code
 
 
-def _insert_entries(db, catalog_id: str, entries: list[dict]) -> None:  # type: ignore[no-untyped-def]
-    """Insert catalog entries in batches, each one starting its price history."""
+def _insert_entries(db, catalog_id: str, entries: list[dict], filename: str) -> None:  # type: ignore[no-untyped-def]
+    """Insert catalog entries in batches, each one starting its price history ("Importado de …")."""
+    fuente = fuente_importada(filename)
     for batch_start in range(0, len(entries), 100):
-        batch = [{**e, "catalog_id": catalog_id} for e in entries[batch_start:batch_start + 100]]
-        inserted = db.table("catalog_entries").insert(batch).execute()
-        record_history(db, inserted.data or [])
+        batch = [{**e, "catalog_id": catalog_id, "fuente": fuente}
+                 for e in entries[batch_start:batch_start + 100]]
+        insert_entries(db, batch)
 
 
 def _save_catalog(db, org_id: str, filename: str, entries: list[dict]) -> dict:  # type: ignore[no-untyped-def]
@@ -369,7 +370,7 @@ def _save_catalog(db, org_id: str, filename: str, entries: list[dict]) -> dict: 
             "source_file": filename,
         }).execute()
         catalog_id = created.data[0]["id"]
-        _insert_entries(db, catalog_id, entries)
+        _insert_entries(db, catalog_id, entries, filename)
         return {**out, "catalog_id": catalog_id, "catalog_name": name, "precios_nuevos": len(entries)}
 
     catalog_id = str(previous[0]["id"])
@@ -397,7 +398,7 @@ def _save_catalog(db, org_id: str, filename: str, entries: list[dict]) -> dict: 
         # never replaces the price the list already has
         if not precio or not price_changed(match, {"precio_sin_iva": precio}):
             continue
-        update = {"precio_sin_iva": precio}
+        update = {"precio_sin_iva": precio, "fuente": fuente_importada(filename), "fuente_url": None}
         if entry.get("precio_con_iva") is not None:
             update["precio_con_iva"] = entry["precio_con_iva"]
         changes.append((match, update))
@@ -406,7 +407,7 @@ def _save_catalog(db, org_id: str, filename: str, entries: list[dict]) -> dict: 
         # Lists saved before every price went to the history: keep their current price there
         start_history(db, org_id, [old for old, _ in changes])
         update_entries(db, org_id, changes)
-    _insert_entries(db, catalog_id, nuevas)
+    _insert_entries(db, catalog_id, nuevas, filename)
     return {**out, "catalog_id": catalog_id, "catalog_name": previous[0].get("name"), "catalog_reused": True,
             "precios_actualizados": len(changes), "precios_nuevos": len(nuevas)}
 

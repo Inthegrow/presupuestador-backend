@@ -1,0 +1,85 @@
+{
+  "lote": "ginkgo-2026-10",
+  "titulo": "Revisión de Ginkgo",
+  "fecha": "2026-10-07",
+  "correcciones": [
+    {
+      "id": "A1",
+      "titulo": "Membrana: la colocación cuenta 1 rollo cada 10 m²",
+      "por_que": "La fórmula de la membrana asfáltica cobra la colocación de 1 rollo por cada m², pero cada rollo cubre 10 m² (así ya cuenta el rollo de membrana). El error viene del Maestro.",
+      "supuesto": {
+        "respuesta": "Sí",
+        "por": "Claude",
+        "fecha": "2026-10-07",
+        "confirma": "Emilia",
+        "razon": "El Excel de Sol cuenta la colocación igual que la membrana (c-mem =D8 y D8 =H3/10): un rollo colocado cada 10 m². Cobrar un rollo por m² multiplica la colocación por 10."
+      },
+      "fuentes": [
+        "Excel de Sol, Ginkgo, hoja 4.9-3, fila 69 (c-mem =D8) y fila 8 (A-MEG =H3/10)",
+        "Maestro, solapa 8.4, D69 (=H3, debería ser =D7)"
+      ],
+      "efecto_ginkgo": -19732275,
+      "cambios": [
+        {
+          "tipo": "renglon",
+          "plantilla": "8.4",
+          "codigo": "C-MEM",
+          "antes": {"formula": "Q"},
+          "despues": {"formula": "Q/10"}
+        }
+      ]
+    },
+    {
+      "id": "A6",
+      "titulo": "Cajones de yeso: el subcontrato de cajón, a $25.000 el metro",
+      "por_que": "El subcontratista de los cajones va en $0 porque el código que usa la fórmula (SUB-YES-AGARGANTA) está cargado a $1. Además, las maestras y los listones se cuentan fijos por trabajo (1 y 2) en vez de por metro.",
+      "supuesto": {
+        "respuesta": "Sí",
+        "por": "Claude",
+        "fecha": "2026-10-07",
+        "confirma": "Emilia",
+        "razon": "El Excel de Sol (hoja 5.2-4) usa el subcontrato SUB-YES-CAJON a $25.000 el metro (EVER, 18/09/2026) y cuenta 1 maestra y 2 listones cada 4 m, igual que las notas del Maestro (6.3: \"1 c/4m\" y \"2 c/4m\")."
+      },
+      "fuentes": [
+        "Excel de Sol, Ginkgo, hoja 5.2-4, fila 69 (SUB-YES-CAJON =H3, $25.000) y filas 8 y 9 (=H3/4 y =H3/4*2)",
+        "Excel de Sol, Ginkgo, hoja 00_Sub (SUB-YES-CAJON, EVER, 18/09/2026)",
+        "Maestro, solapa 6.3, K8 (\"1 c/4m\") y K9 (\"2 c/4m\")"
+      ],
+      "efecto_ginkgo": 14275457,
+      "cambios": [
+        {
+          "tipo": "renglon",
+          "plantilla": "6.3",
+          "codigo": "SUB-YES-AGARGANTA",
+          "antes": {"codigo": "SUB-YES-AGARGANTA", "formula": "Q"},
+          "despues": {"codigo": "SUB-YES-CAJON", "descripcion": "YESO ARMADO- CAJON (x metro lineal)"}
+        },
+        {
+          "tipo": "renglon",
+          "plantilla": "6.3",
+          "codigo": "Y-M4X1",
+          "antes": {"formula": "1"},
+          "despues": {"formula": "Q/4", "revisar": false, "nota": "1 maestra cada 4 m (Maestro 6.3 \"1 c/4m\"; Excel de Sol 5.2-4: =H3/4)."}
+        },
+        {
+          "tipo": "renglon",
+          "plantilla": "6.3",
+          "codigo": "Y-L1X1",
+          "antes": {"formula": "2"},
+          "despues": {"formula": "Q*2/4", "revisar": false, "nota": "2 listones cada 4 m (Maestro 6.3 \"2 c/4m\"; Excel de Sol 5.2-4: =H3/4*2)."}
+        },
+        {
+          "tipo": "precio",
+          "codigo": "SUB-YES-CAJON",
+          "tipo_recurso": "subcontrato",
+          "descripcion": "YESO ARMADO- CAJON (x metro lineal)",
+          "unidad": "m",
+          "antes": null,
+          "despues": {"precio_sin_iva": 25000, "proveedor": "EVER", "fecha_precio": "2026-09-18"},
+          "fuente": "Excel de Sol, Ginkgo, hoja 00_Sub",
+          "url": null
+        }
+      ]
+    }
+  ]
+}

@@ -43,6 +43,11 @@ COL_NETO_TOTAL = 26  # Z: total neto
 #   espesor:    True = el factor de la plantilla que viene con factor None es el espesor
 #               en metros que dice el nombre ("e=8cm" → 0,08 m³ por m², espesor_m_from);
 #               si el nombre no lo dice, "factor_defecto".
+#   alternativa: la regla de antes de una corrección de la revisión de Ginkgo (Fórmulas →
+#               Correcciones). Si la empresa todavía no tiene la fórmula "si_falta" (la crea la
+#               corrección al aplicarse), se usan las plantillas (y la nota) de la alternativa.
+#               Así el deploy no cambia nada hasta que se aplica la corrección, y aplicarla no
+#               exige otro deploy. Ver match_recipe.
 MAPEO: list[dict] = [
     {"patron": r"^BASES AISLADAS", "plantillas": [("4.1.3", 1.0)], "obra": "u",
      "nota": "1 m³ por base: en la solapa 3.1-1 de la obra son 35 m³ para 35 bases, llenadas junto con los troncos."},
@@ -59,7 +64,9 @@ MAPEO: list[dict] = [
     {"patron": r"LADRILLO HUECO DEL 18", "plantillas": [("5.1.4", 1.0)]},
     {"patron": r"LADRILLO HUECO DEL 12", "plantillas": [("5.1.5", 1.0)]},
     {"patron": r"LADRILLO HUECO DEL 8\b", "plantillas": [("5.1.6", 1.0)]},
-    {"patron": r"^YESO PROYECTADO", "plantillas": [("5.5.5", 1.0)]},
+    # Revisión de Ginkgo (A2): el yeso proyectado tiene fórmula propia (5.5.6); la 5.5.5 es yeso aplicado
+    {"patron": r"^YESO PROYECTADO", "plantillas": [("5.5.6", 1.0)],
+     "alternativa": {"si_falta": "5.5.6", "plantillas": [("5.5.5", 1.0)]}},
     {"patron": r"^REVOQUE EXTERIOR CON HIDROFUGO CON SILLETA", "plantillas": [("5.5.3", 1.0)],
      "nota": "La silleta no está en la fórmula: el Excel de la obra cobra este trabajo bastante más caro."},
     {"patron": r"^REVOQUE EXTERIOR CON HIDROFUGO", "plantillas": [("5.5.3", 1.0)]},
@@ -83,9 +90,16 @@ MAPEO: list[dict] = [
     {"patron": r"^AZOTADO HIDROFUGO \+ PINTURA ASFALTICA", "plantillas": [("8.1", 1.0)]},
     {"patron": r"^PINTURA ASFALTICA \+ MEMBRANA ASFALTICA \+ GEOTEXTIL", "plantillas": [("8.2", 1.0), ("8.4", 1.0)],
      "nota": "Compuesto: pintura asfáltica (8.2) + membrana con geotextil (8.4)."},
-    {"patron": r"CIELORRASOS DE YESO SUSPENDIDO", "plantillas": [("6.5", 1.0)],
-     "nota": "Cielorraso suspendido de placa. En baños y cocinas, ¿placa verde (6.6)?"},
-    {"patron": r"CIELORRASOS APLICADOS EN YESO", "plantillas": [("6.1", 1.0)]},
+    # Revisión de Ginkgo (A3 y A4): el suspendido es yeso armado (6.1, corregida por m²) y el aplicado
+    # tiene fórmula propia (6.11). La corrección que crea la 6.11 es la misma que corrige la 6.1: mientras
+    # no exista la 6.11, las dos reglas siguen como antes
+    {"patron": r"CIELORRASOS DE YESO SUSPENDIDO", "plantillas": [("6.1", 1.0)],
+     "nota": "Cielorraso de yeso armado (metal desplegado sobre maestras y listones), como la hoja 5.1-1 del "
+             "Excel de la obra. Si es de placa (Durlock), elegir 6.5 (o 6.6 placa verde) a mano.",
+     "alternativa": {"si_falta": "6.11", "plantillas": [("6.5", 1.0)],
+                     "nota": "Cielorraso suspendido de placa. En baños y cocinas, ¿placa verde (6.6)?"}},
+    {"patron": r"CIELORRASOS APLICADOS EN YESO", "plantillas": [("6.11", 1.0)],
+     "alternativa": {"si_falta": "6.11", "plantillas": [("6.1", 1.0)]}},
     {"patron": r"^BUNA PERIMETRAL", "plantillas": [("6.2", 1.0)]},
     {"patron": r"^CAJONES", "plantillas": [("6.3", 1.0)]},
     {"patron": r"PINTURA EN CIELORRASOS", "plantillas": [("7.4.1", 1.0)]},
@@ -137,12 +151,29 @@ def task_key(descripcion: str, unidad: object) -> str:
     return f"{plain(descripcion)} | {unit_key(unidad)}"
 
 
-def match_recipe(descripcion: str) -> dict | None:
+def match_recipe(descripcion: str, templates: dict | None = None) -> dict | None:
+    """The MAPEO rule of a task description (the first that matches), or None.
+
+    With the org's ``templates`` ({codigo: plantilla}), a rule with "alternativa" whose
+    "si_falta" recipe the org does not have yet comes back as the alternative (its
+    plantillas, and its nota instead of the rule's). Without ``templates``, the rule as
+    written (the preferred recipe).
+    """
     key = plain(descripcion)
     for rule in MAPEO:
         if re.search(rule["patron"], key):
-            return rule
+            return _con_alternativa(rule, templates)
     return None
+
+
+def _con_alternativa(rule: dict, templates: dict | None) -> dict:
+    alternativa = rule.get("alternativa")
+    if not alternativa or templates is None or alternativa["si_falta"] in templates:
+        return rule
+    out = {k: v for k, v in rule.items() if k not in ("alternativa", "nota")}
+    out.update({k: v for k, v in alternativa.items() if k != "si_falta"})
+    return out
+
 
 
 def candidate(descripcion: str) -> str:
@@ -602,7 +633,7 @@ def rule_for(fila: dict, templates: dict[str, dict], asignaciones: dict | None =
     the description), "supuesto" (the rule's default thickness), "regla" (a fixed factor of
     the rule) or None (a hand-chosen pair, or a missing factor).
     """
-    auto = match_recipe(fila["descripcion"])
+    auto = match_recipe(fila["descripcion"], templates)
     elegida = (asignaciones or {}).get(task_key(fila["descripcion"], fila.get("unidad")))
     obra = unit_key(fila.get("unidad"))
 

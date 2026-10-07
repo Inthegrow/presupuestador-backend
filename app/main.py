@@ -8,11 +8,13 @@ from app.routers import (
     architect,
     budgets,
     catalogs,
+    correcciones,
     excel,
     health,
     indirects,
     me,
     obras,
+    precios,
     standard_trees,
     templates,
 )
@@ -43,6 +45,8 @@ def create_app() -> FastAPI:
     app.include_router(obras.router, prefix="/obras", tags=["Cargar obra"])
     app.include_router(standard_trees.router, prefix="/standard-trees", tags=["Arbol estandar"])
     app.include_router(architect.router, prefix="/architect", tags=["ArquitectoAI"])
+    app.include_router(correcciones.router, prefix="/correcciones", tags=["Correcciones"])
+    app.include_router(precios.router, prefix="/precios", tags=["Buscador de precios"])
 
     return app
 

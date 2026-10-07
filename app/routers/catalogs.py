@@ -11,7 +11,18 @@ from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, Upload
 
 from app.auth import get_current_user, require_admin, require_editor
 from app.budget_prices import HISTORY_CHUNK, fetch_all, today
-from app.catalog_prices import fecha_iso, history_row, price_changed, price_from_payload
+from app.catalog_prices import (
+    FUENTE_A_MANO,
+    FUENTE_KEYS,
+    falta_columna_fuente,
+    fecha_iso,
+    fuente_from_payload,
+    fuente_importada,
+    history_row,
+    price_changed,
+    price_from_payload,
+    sin_fuente,
+)
 from app.db import get_data_db
 from app.routers.analysis import _get_budget, apply_catalog
 from app.schemas import CatalogTipo
@@ -45,7 +56,47 @@ def record_history(db, entries: list[dict]) -> None:  # type: ignore[no-untyped-
     """Insert one catalog_price_history row per saved entry that has a price."""
     rows = [history_row(e) for e in entries if e.get("id") and e.get("precio_sin_iva") is not None]
     if rows:
-        db.table("catalog_price_history").insert(rows).execute()
+        try:
+            db.table("catalog_price_history").insert(rows).execute()
+        except Exception as exc:
+            if not falta_columna_fuente(exc):
+                raise
+            # Without migration 012 the history has no origin columns
+            db.table("catalog_price_history").insert([sin_fuente(r) for r in rows]).execute()
+
+
+def insert_entries(db, rows: list[dict]) -> list[dict]:  # type: ignore[no-untyped-def]
+    """Insert catalog entries (with their origin) and start their price history.
+
+    Without migration 012 there are no fuente/fuente_url columns: they are dropped, no error.
+    """
+    if not rows:
+        return []
+    try:
+        inserted = db.table("catalog_entries").insert(rows).execute()
+    except Exception as exc:
+        if not falta_columna_fuente(exc):
+            raise
+        inserted = db.table("catalog_entries").insert([sin_fuente(r) for r in rows]).execute()
+    record_history(db, inserted.data or [])
+    return inserted.data or []
+
+
+def _update_entry(db, org_id: str, entry_id: str, data: dict):  # type: ignore[no-untyped-def]
+    def run(values: dict):  # type: ignore[no-untyped-def]
+        return db.table("catalog_entries").update(values).eq("id", entry_id).eq("org_id", org_id).execute()
+
+    try:
+        return run(data)
+    except Exception as exc:
+        if not falta_columna_fuente(exc) or not any(k in data for k in FUENTE_KEYS):
+            raise
+        return run(sin_fuente(data))
+
+
+def with_fuente(row: dict) -> dict:
+    """An entry or history row with ``fuente`` and ``fuente_url`` (None before migration 012)."""
+    return {"fuente": None, "fuente_url": None, **row}
 
 
 def update_entries(db, org_id: str, changes: list[tuple[dict, dict]]) -> list[dict]:  # type: ignore[no-untyped-def]
@@ -66,13 +117,7 @@ def update_entries(db, org_id: str, changes: list[tuple[dict, dict]]) -> list[di
             # a dated 0 is "va en $0": budget_prices.is_price)
             update_data["fecha_precio"] = today().isoformat()
 
-        result = (
-            db.table("catalog_entries")
-            .update(update_data)
-            .eq("id", str(old["id"]))
-            .eq("org_id", org_id)
-            .execute()
-        )
+        result = _update_entry(db, org_id, str(old["id"]), update_data)
         saved.extend(result.data or [])
         if price_changed(old, update_data):
             history.append({**old, **update_data, "id": str(old["id"]), "org_id": org_id})
@@ -179,6 +224,7 @@ async def upload_csv_catalog(
             "tipo": tipo,
             "fecha_precio": _fecha_or_warning(fecha_raw, f"Fila {line_no}", warnings_list),
             "proveedor": proveedor or None,
+            "fuente": fuente_importada(file.filename),
         })
 
     if not rows:
@@ -204,8 +250,7 @@ async def upload_csv_catalog(
         }
         for row in rows
     ]
-    inserted = db.table("catalog_entries").insert(entries).execute()
-    record_history(db, inserted.data or [])
+    insert_entries(db, entries)
 
     return {
         "catalog_id": catalog_id,
@@ -384,11 +429,11 @@ async def upload_excel_catalog(
                 "org_id": org_id,
                 "tipo": tipo,
                 **row,
+                "fuente": fuente_importada(file.filename),
             }
             for row in rows
         ]
-        inserted = db.table("catalog_entries").insert(entries).execute()
-        record_history(db, inserted.data or [])
+        insert_entries(db, entries)
 
         catalogs_created += 1
         entries_summary[tipo] = entries_summary.get(tipo, 0) + len(entries)
@@ -505,7 +550,7 @@ async def list_catalog_entries(
         q = q.eq("tipo", tipo)
 
     result = q.order("codigo").execute()
-    return result.data or []
+    return [with_fuente(e) for e in result.data or []]
 
 
 # ── Search catalog entries ──────────────────────────────────────────────────
@@ -606,6 +651,7 @@ async def create_catalog_entry(
     try:
         precio = price_from_payload(data)
         fecha = fecha_iso(data.get("fecha_precio"))
+        fuente = fuente_from_payload(data)
     except ValueError as exc:
         raise HTTPException(400, str(exc))
 
@@ -621,13 +667,14 @@ async def create_catalog_entry(
         # price it stays undated: a dated 0 means "va en $0" (budget_prices.is_price)
         "fecha_precio": fecha or (today().isoformat() if precio is not None else None),
         "proveedor": data.get("proveedor") or None,
+        # Where the price came from: what the screen says (ej. the price search), else "Cargado a mano"
+        "fuente": fuente.get("fuente") or FUENTE_A_MANO,
+        "fuente_url": fuente.get("fuente_url"),
     }
-    result = db.table("catalog_entries").insert(entry).execute()
-    if not result.data:
-        raise HTTPException(500, "Error al crear entrada")
-
-    record_history(db, result.data)
-    return result.data[0]
+    created = insert_entries(db, [entry])
+    if not created:
+        raise HTTPException(500, "No se pudo crear el precio. Probá de nuevo.")
+    return with_fuente(created[0])
 
 
 # ── Update catalog entry ─────────────────────────────────────────────────────
@@ -647,9 +694,11 @@ async def update_catalog_entry(
     eid = str(entry_id)
 
     # Verify entry belongs to catalog and org
+    # select("*"): the history row is built from the whole entry. Without migration 012 the
+    # origin is dropped when saving (_update_entry), with no error
     entry = (
         db.table("catalog_entries")
-        .select("id, org_id, precio_sin_iva, fecha_precio")
+        .select("*")
         .eq("id", eid)
         .eq("catalog_id", cid)
         .eq("org_id", org_id)
@@ -668,13 +717,18 @@ async def update_catalog_entry(
             update_data["precio_sin_iva"] = precio
         if "fecha_precio" in data:
             update_data["fecha_precio"] = fecha_iso(data["fecha_precio"])
+        update_data.update(fuente_from_payload(data))
     except ValueError as exc:
         raise HTTPException(400, str(exc))
     if not update_data:
         raise HTTPException(400, "No hay datos válidos para actualizar")
+    if "fuente" not in update_data and price_changed(entry.data, update_data):
+        # A new price typed by hand: the old origin (ej. "Internet: Easy") no longer applies
+        update_data["fuente"] = FUENTE_A_MANO
+        update_data["fuente_url"] = None
 
     saved = update_entries(db, org_id, [({**entry.data, "id": eid}, update_data)])
-    return saved[0] if saved else {"updated": True}
+    return with_fuente(saved[0]) if saved else {"updated": True}
 
 
 # ── Price history of an entry ────────────────────────────────────────────────
@@ -711,7 +765,7 @@ async def get_entry_price_history(
         .order("created_at", desc=True)
         .execute()
     )
-    return result.data or []
+    return [with_fuente(h) for h in result.data or []]
 
 
 # ── Delete catalog entry ─────────────────────────────────────────────────────
