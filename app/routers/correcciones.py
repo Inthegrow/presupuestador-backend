@@ -223,9 +223,22 @@ class _Escritura:
         return {**creada, "historial_id": self._historial(creada)}
 
     def borrar_precio(self, entry_id: str) -> None:
-        # The history goes with the entry (ON DELETE CASCADE); deleted by hand too, for safety
+        """Delete an entry and its history, registering the way back of each write before the next one.
+
+        The history goes with the entry (ON DELETE CASCADE); it is deleted by hand too, for safety. If deleting
+        the entry fails, the history already deleted is put back with the other writes.
+        """
+        entrada = (self.db.table("catalog_entries").select("*").eq("id", entry_id).eq("org_id", self.org_id)
+                   .execute().data or [])
+        hist = (self.db.table("catalog_price_history").select("*").eq("entry_id", entry_id)
+                .eq("org_id", self.org_id).execute().data or [])
         self.db.table("catalog_price_history").delete().eq("entry_id", entry_id).eq("org_id", self.org_id).execute()
+        if hist:
+            # Runs after the entry is back (the ways back run last first)
+            self.inversas.append(lambda: self.db.table("catalog_price_history").insert(hist).execute())
         self.db.table("catalog_entries").delete().eq("id", entry_id).eq("org_id", self.org_id).execute()
+        if entrada:
+            self.inversas.append(lambda: self.db.table("catalog_entries").insert(entrada[0]).execute())
 
     def registro(self, datos: dict) -> dict:
         creado = self._check(self.db.table(TABLA).insert({**datos, "org_id": self.org_id}).execute(),
@@ -465,13 +478,7 @@ async def deshacer_correccion(correccion_id: str, user: dict = Depends(require_e
             actual = entradas.get(p["id"])
             if actual is None:
                 continue
-            hist = db.table("catalog_price_history").select("*").eq("entry_id", p["id"]).eq(
-                "org_id", org_id).execute().data or []
             escritura.borrar_precio(p["id"])
-            escritura.inversas.append(lambda actual=actual, hist=hist: (
-                db.table("catalog_entries").insert(actual).execute(),
-                hist and db.table("catalog_price_history").insert(hist).execute(),
-            ))
         escritura.marcar(registro, {"estado": "deshecha", "deshecha_at": _ahora()})
     except HTTPException:
         raise

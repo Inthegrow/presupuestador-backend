@@ -440,6 +440,22 @@ class TestDeshacer:
             assert sorted(db.tables[tabla], key=key) == sorted(filas, key=key), tabla
 
 
+    def test_falla_al_borrar_la_entrada_conserva_el_historial(self, client, db):
+        # Codex PR #45: the history was deleted before the entry and not put back if deleting the entry failed
+        assert client.post("/correcciones/C3/aplicar").status_code == 200
+        antes = copy.deepcopy(db.tables)
+        assert antes["catalog_price_history"], "la corrección guardó historial"
+        db.falla = lambda tabla, accion, payload: tabla == "catalog_entries" and accion == "delete"
+        r = client.post("/correcciones/C3/deshacer")
+        assert r.status_code == 500 and r.json()["detail"]["codigo"] == "NO_SE_APLICO"
+        for tabla, filas in antes.items():
+            key = lambda r: str(r.get("id"))  # noqa: E731
+            assert sorted(db.tables[tabla], key=key) == sorted(filas, key=key), tabla
+        # and undoing again works
+        db.falla = lambda *a: False
+        assert client.post("/correcciones/C3/deshacer").status_code == 200
+
+
 # ── Archivo ──────────────────────────────────────────────────────────────────
 
 

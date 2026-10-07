@@ -178,7 +178,13 @@ const arriba = (page) => page.evaluate(() => { document.querySelector('main')?.s
   const panel = page.getByTestId('buscar-precio')
   await panel.waitFor()
   check(/Bolsa Cemento "Loma Negra" 25 k/.test(await panel.getByLabel('Qué buscar').inputValue()) && await panel.getByLabel('Unidad').inputValue() === 'u',
-    'el panel arma la búsqueda con la descripción y la unidad (editables)')
+    'el panel arma la búsqueda con la descripción y la unidad')
+  // Codex PR #45 (P1): en un renglón de la lista, la unidad es la de la lista y no se cambia (si no, una bolsa
+  // podía quedar valuada como un kg)
+  const unidadCampo = panel.getByLabel('Unidad')
+  check(await unidadCampo.getAttribute('readonly') !== null, 'en un renglón de la lista, la unidad no se puede cambiar')
+  await unidadCampo.fill('kg').catch(() => {})
+  check(await unidadCampo.inputValue() === 'u', `y sigue siendo la de la lista (${await unidadCampo.inputValue()})`)
   await panel.getByRole('button', { name: 'Buscar', exact: true }).click()
   await panel.getByTestId('resultados-precio').waitFor({ timeout: 15000 })
   const opciones = panel.getByTestId('opcion-precio')
@@ -232,6 +238,13 @@ const arriba = (page) => page.evaluate(() => { document.querySelector('main')?.s
   check(await panel.getByLabel('Va en la lista').locator('option:checked').innerText() === 'Maestro TERRAC - Materiales', 'para un material propone la lista oficial de materiales')
   await panel.getByRole('button', { name: /Buscar/ }).first().click()
   await panel.getByTestId('resultados-precio').waitFor({ timeout: 10000 })
+  // Codex PR #45 (P1): si cambia la unidad después de buscar, las opciones (y sus cuentas) ya no valen
+  await panel.getByLabel('Unidad').fill('kg')
+  check(await panel.getByTestId('unidad-cambiada').count() === 1 && await panel.getByTestId('opcion-precio').count() === 0,
+    'cambiar la unidad después de buscar esconde las opciones y pide buscar de nuevo')
+  await panel.getByLabel('Unidad').fill('u')
+  check(await panel.getByTestId('unidad-cambiada').count() === 0 && await panel.getByTestId('opcion-precio').count() > 0,
+    'volviendo a la unidad con la que se buscó, las opciones vuelven')
   await panel.getByTestId('opcion-precio').nth(1).getByRole('button', { name: /Usar este precio/ }).click()
   await page.getByTestId('precio-guardado').waitFor({ timeout: 10000 })
   const guardado = (await page.getByTestId('precio-guardado').innerText()).replace(/\s+/g, ' ')

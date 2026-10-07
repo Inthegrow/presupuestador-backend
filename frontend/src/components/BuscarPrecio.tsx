@@ -100,7 +100,8 @@ const enPesos = (n: number) => Math.round(n).toLocaleString('es-AR')
 type Busqueda =
   | { tipo: 'nada' }
   | { tipo: 'buscando' }
-  | { tipo: 'resultados'; res: ResultadoBusquedaPrecio; opciones: OpcionPrecio[] }
+  // unidad: la unidad con la que se buscó; las cuentas de las opciones son por esa unidad
+  | { tipo: 'resultados'; res: ResultadoBusquedaPrecio; opciones: OpcionPrecio[]; unidad: string }
   | { tipo: 'error'; mensaje: string }
   | { tipo: 'no_configurado'; mensaje: string }
 
@@ -136,6 +137,18 @@ export default function BuscarPrecio({
   const [listaId, setListaId] = useState('')
   // 'recurso': dónde está ese código (null = no está, se crea; undefined = todavía no se sabe)
   const [existente, setExistente] = useState<{ catalogo: PriceCatalog; entrada: CatalogEntry } | null | undefined>(undefined)
+
+  // La unidad de lo que se actualiza (un renglón de la lista o el recurso) no se cambia: el precio tiene que ser por
+  // esa unidad. Solo un precio nuevo deja elegir la unidad.
+  const unidadFija: string | null =
+    destino.modo === 'entrada'
+      ? destino.entrada.unidad ?? ''
+      : destino.modo === 'recurso'
+        ? existente?.entrada.unidad || destino.unidad || ''
+        : null
+  useEffect(() => {
+    if (unidadFija !== null) setUnidad(unidadFija)
+  }, [unidadFija])
 
   // Opción elegida y guardado
   const [guardando, setGuardando] = useState<number | null>(null)
@@ -173,12 +186,13 @@ export default function BuscarPrecio({
     e?.preventDefault()
     if (!descripcion.trim()) return
     const req = ++pedido.current
+    const unidadBuscada = unidad.trim()
     setBusqueda({ tipo: 'buscando' })
     setGuardarError(null)
     try {
       const res = await preciosApi.buscar({
         descripcion: descripcion.trim(),
-        unidad: unidad.trim() || null,
+        unidad: unidadBuscada || null,
         tipo: tipo || null,
         codigo: codigo.trim() || null,
       })
@@ -187,7 +201,7 @@ export default function BuscarPrecio({
       const opciones = (Array.isArray(res?.opciones) ? res.opciones : []).filter(
         (o) => urlSegura(o.url) && Number(o.precio) > 0,
       )
-      setBusqueda({ tipo: 'resultados', res, opciones })
+      setBusqueda({ tipo: 'resultados', res, opciones, unidad: unidadBuscada })
     } catch (err) {
       if (req !== pedido.current) return
       if (err instanceof ApiError && err.status === 503) {
@@ -219,7 +233,17 @@ export default function BuscarPrecio({
     return { ok: !!lista && !!descripcion.trim(), texto: <>Se agrega a la lista que elijas.</> }
   })()
 
+  // Las opciones valen solo para la unidad con la que se buscó (y, si la unidad es fija, solo si es esa)
+  const resultadosVigentes =
+    busqueda.tipo === 'resultados' &&
+    unidadNormal(busqueda.unidad) === unidadNormal(unidad) &&
+    (unidadFija === null || unidadNormal(busqueda.unidad) === unidadNormal(unidadFija))
+
   async function usar(i: number, op: OpcionPrecio, precio: number) {
+    if (busqueda.tipo !== 'resultados' || !resultadosVigentes) {
+      setGuardarError({ i, mensaje: 'La unidad cambió después de buscar: buscá de nuevo para que la cuenta sea por esa unidad.' })
+      return
+    }
     if (!(precio > 0)) {
       setGuardarError({ i, mensaje: 'Poné un precio mayor que cero.' })
       return
@@ -254,7 +278,7 @@ export default function BuscarPrecio({
         entrada = await catalogApi.createEntry(catalogId, {
           codigo: destino.modo === 'recurso' ? destino.codigo : codigo.trim(),
           descripcion: destino.modo === 'recurso' ? destino.descripcion : descripcion.trim(),
-          unidad: (destino.modo === 'recurso' ? destino.unidad : unidad.trim()) || undefined,
+          unidad: (destino.modo === 'recurso' ? destino.unidad : busqueda.unidad) || undefined,
           tipo: destino.modo === 'recurso' ? (destino.tipo === 'mo_material' ? 'material' : destino.tipo || 'material') : tipo,
           ...datos,
         })
@@ -274,7 +298,7 @@ export default function BuscarPrecio({
     }
   }
 
-  const unidadApp = unidad.trim() || inicial.unidad
+  const unidadApp = (busqueda.tipo === 'resultados' ? busqueda.unidad : unidad.trim()) || inicial.unidad
   const porUnidad = unidadEnPalabras(unidadApp)
 
   return (
@@ -327,8 +351,11 @@ export default function BuscarPrecio({
                 <input
                   value={unidad}
                   onChange={(e) => setUnidad(e.target.value)}
+                  readOnly={unidadFija !== null}
+                  aria-readonly={unidadFija !== null}
+                  title={unidadFija !== null ? 'Es la unidad de la lista: el precio se guarda por esa unidad.' : undefined}
                   placeholder="bolsa"
-                  className="mt-0.5 w-full text-sm border border-gray-200 rounded-lg px-2.5 py-2 focus:outline-none focus:border-[#2D8D68] focus:ring-2 focus:ring-[#2D8D68]/20"
+                  className="mt-0.5 w-full text-sm border border-gray-200 rounded-lg px-2.5 py-2 focus:outline-none focus:border-[#2D8D68] focus:ring-2 focus:ring-[#2D8D68]/20 read-only:bg-gray-50 read-only:text-gray-500"
                 />
               </label>
             </div>
@@ -437,8 +464,22 @@ export default function BuscarPrecio({
             </div>
           )}
 
+          {/* La unidad cambió después de buscar: las cuentas ya no valen */}
+          {busqueda.tipo === 'resultados' && !resultadosVigentes && (
+            <div role="status" data-testid="unidad-cambiada" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+              <p className="font-semibold">Cambiaste la unidad: los precios encontrados eran por {unidadEnPalabras(busqueda.unidad || inicial.unidad)}.</p>
+              <p className="mt-1">Buscá de nuevo para ver las cuentas por {unidadEnPalabras(unidad.trim() || inicial.unidad)}.</p>
+              <button
+                onClick={() => void buscar()}
+                className="mt-2 inline-flex items-center gap-1 font-semibold bg-white border border-amber-300 rounded-lg px-3 py-1.5 hover:bg-amber-100"
+              >
+                <RefreshCw size={12} /> Buscar de nuevo
+              </button>
+            </div>
+          )}
+
           {/* Resultados */}
-          {busqueda.tipo === 'resultados' && (
+          {busqueda.tipo === 'resultados' && resultadosVigentes && (
             <section aria-label="Precios encontrados" data-testid="resultados-precio" className="space-y-3">
               {busqueda.opciones.length === 0 ? (
                 <div role="status" data-testid="sin-opciones" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
