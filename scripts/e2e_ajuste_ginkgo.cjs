@@ -64,10 +64,10 @@ const arriba = (page) => page.evaluate(() => { document.querySelector('main')?.s
   for (let i = 0; i < total; i++) {
     const t = tarjetas.nth(i)
     const sup = (await t.getByTestId('supuesto').innerText().catch(() => '')).replace(/\s+/g, ' ')
-    if (/Supuesto por Claude · a confirmar por Emilia/i.test(sup) && /Supuesto por Claude el \d+\/\d+\/\d{4} · a confirmar por Emilia:/.test(sup) && /Razón:/.test(sup)) conSupuesto++
+    if (/Supuesto por Claude · a confirmar por (Emilia|Sol)/i.test(sup) && /Supuesto por Claude el \d+\/\d+\/\d{4} · a confirmar por (Emilia|Sol):/.test(sup) && /Razón:/.test(sup)) conSupuesto++
     if (await t.getByTestId('fuentes').locator('li').count() > 0) conFuentes++
   }
-  check(conSupuesto === total, `todas dicen "Supuesto por Claude · a confirmar por Emilia" con fecha y razón (${conSupuesto} de ${total})`)
+  check(conSupuesto === total, `todas dicen "Supuesto por Claude · a confirmar por" Emilia o Sol, con fecha y razón (${conSupuesto} de ${total})`)
   check(conFuentes === total, `todas muestran "De dónde sale" (${conFuentes} de ${total})`)
   const colorSupuesto = await tarjetas.first().getByTestId('supuesto').evaluate((e) => getComputedStyle(e).backgroundColor + ' ' + getComputedStyle(e).borderStyle)
   check(/dashed/.test(colorSupuesto) && !/rgb\(232, 245, 238\)/.test(colorSupuesto), `lo supuesto va en su color, con borde punteado, no en el verde de lo confirmado (${colorSupuesto})`)
@@ -167,9 +167,13 @@ const arriba = (page) => page.evaluate(() => { document.querySelector('main')?.s
   const listaMat = page.locator('[data-testid="lista-precios"]', { hasText: 'Maestro TERRAC - Materiales' })
   await listaMat.getByText('Maestro TERRAC - Materiales').first().click()
   await listaMat.getByPlaceholder('Buscar por código o descripción...').fill('Cemento'); await page.waitForTimeout(800)
-  const cem = listaMat.getByTestId('precio-renglon').filter({ hasText: 'Loma Negra' }).first()
-  const origenViejo = (await cem.getByTestId('origen-precio').innerText()).replace(/\s+/g, ' ')
+  // un precio que ninguna corrección toca (la piedra) muestra lo que se sabe de antes
+  await listaMat.getByPlaceholder('Buscar por código o descripción...').fill('Piedra a granel'); await page.waitForTimeout(800)
+  const piedra = listaMat.getByTestId('precio-renglon').filter({ hasText: 'Piedra a granel' }).first()
+  const origenViejo = (await piedra.getByTestId('origen-precio').innerText()).replace(/\s+/g, ' ')
   check(/Proveedor: Su Corralon · 3\/06\/2026/.test(origenViejo), `un precio viejo sin origen muestra lo que se sabe: "${origenViejo}"`)
+  await listaMat.getByPlaceholder('Buscar por código o descripción...').fill('Cemento'); await page.waitForTimeout(800)
+  const cem = listaMat.getByTestId('precio-renglon').filter({ hasText: 'Loma Negra' }).first()
   await cem.getByTestId('buscar-en-internet').click()
   const panel = page.getByTestId('buscar-precio')
   await panel.waitFor()
