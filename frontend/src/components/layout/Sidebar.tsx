@@ -121,6 +121,7 @@ export default function Sidebar() {
           <div className="px-3 pt-3 pb-1">
             <button
               onClick={() => navigate('/app/dashboard')}
+              title="Volver a Mis presupuestos"
               className="flex items-center gap-1 text-[10px] text-gray-400 hover:text-[#2D8D68] transition-colors mb-1.5"
             >
               <ArrowLeft size={10} />

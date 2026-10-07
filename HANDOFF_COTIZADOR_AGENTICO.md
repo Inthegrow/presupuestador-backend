@@ -75,8 +75,9 @@ recetas que no se entienden solos ("DE CASCOTE"). Código `eps` en el Excel cont
 los materiales, faltantes en $0 sin marca) y "Vista Cliente" bajaba el PDF interno con el margen. Ocho entregas:
 1 ✅ precio seguro (`PLAN_PRECIO_SEGURO.md`, PR #37) · 2 ✅ buscador y semáforo en el detalle (`PLAN_BUSCADOR_EN_DETALLE.md`, PR #38) · 3 ✅ asistente (`PLAN_ASISTENTE.md`, PR #39) · ✅ comparar al mismo nivel del Excel + "Coeficiente de pase" (`PLAN_COMPARAR_MISMO_NIVEL.md`, PR #40) · 4 ✅ agregar trabajo en un renglón (`PLAN_AGREGAR_TRABAJO.md`, PR #41) · 5 ✅ un solo total + Fórmulas con el botón arriba y buscador (`PLAN_UN_SOLO_TOTAL.md`, PR #42: el precio de cada
 trabajo es su directo pasado por el Coeficiente de pase, calculado en un solo lugar; cada presupuesto guarda sus
-porcentajes) · 6 exportar sin sorpresas (`PLAN_EXPORTAR.md`, en curso: Planilla Terrac real que se puede volver a subir; incluye
-la vista Piso por el piso del rubro y el reparto del redondeo de compra siempre en el mismo orden) · 7 coherencia con Cargar obra y tildes · 8 celular. La guía de Ayuda de este camino,
+porcentajes) · 6 ✅ exportar sin sorpresas (`PLAN_EXPORTAR.md`, PR #43: Planilla Terrac real que se puede volver a subir con
+los porcentajes de la obra; vista Piso por el piso del rubro; redondeo de compra siempre en el mismo orden) · 7 palabras y tildes en toda la app (`PLAN_PALABRAS.md`, en curso: trabajos/rubros, menú NUEVO con las tres formas,
+asistente con pastillas y borrador, `scripts/check_textos.cjs` que falla si vuelve una palabra sin tilde) · 8 celular. La guía de Ayuda de este camino,
 después de la 5.
 
 *Ginkgo, diferencias (06/10):* página de seguimiento para Sol https://claude.ai/artifact/2aCjCgazrgST4HfvSbfeT5 (grupos A:
