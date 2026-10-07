@@ -181,6 +181,28 @@ async function cargarGinkgo() {
   await page.reload(); await page.waitForTimeout(1500)
   check(await page.getByTestId('borrador-nuevo').count() === 0, 'Descartar: al volver ya no está')
 
+  // Codex PR #44: el último cambio antes de irse no se pierde (sin esperar el medio segundo del guardado)
+  await page.getByLabel(/Nombre del presupuesto/).fill('Trabajo anterior'); await page.waitForTimeout(900)
+  await page.getByLabel(/Nombre del presupuesto/).fill('Trabajo corregido')
+  await page.getByRole('link', { name: 'Mis presupuestos' }).first().click() // enseguida, sin esperar
+  await page.waitForTimeout(800)
+  await page.getByRole('link', { name: 'Nuevo presupuesto' }).first().click()
+  await page.getByTestId('borrador-nuevo').waitFor({ timeout: 10000 }).catch(() => {})
+  const ultimo = (await page.getByTestId('borrador-nuevo').innerText().catch(() => '')).replace(/\s+/g, ' ')
+  check(/Trabajo corregido/.test(ultimo) && !/Trabajo anterior/.test(ultimo), `irse enseguida guarda el último cambio: "${ultimo}"`)
+  // y al cerrar la pestaña enseguida, también
+  await page.getByTestId('borrador-nuevo').getByRole('button', { name: 'Seguir' }).click(); await page.waitForTimeout(300)
+  await page.getByLabel(/Nombre del presupuesto/).fill('Trabajo al cerrar')
+  await page.close()
+  page = await ctx.newPage()
+  page.on('dialog', (d) => d.accept())
+  await page.goto(`${B}/app/new-project`)
+  await page.getByTestId('borrador-nuevo').waitFor({ timeout: 10000 }).catch(() => {})
+  check(/Trabajo al cerrar/.test(await page.getByTestId('borrador-nuevo').innerText().catch(() => '')), 'cerrar la pestaña enseguida guarda el último cambio')
+  await page.getByTestId('borrador-nuevo').getByRole('button', { name: 'Descartar' }).click(); await page.waitForTimeout(300)
+  await page.reload(); await page.waitForTimeout(1500)
+  check(await page.getByTestId('borrador-nuevo').count() === 0, 'Descartar después de irse: no vuelve a aparecer')
+
   // 5. Editor del hecho a mano: sin "Diferencias con el Excel", versión real, sin nombre inventado mientras carga
   let soltar
   const espera = new Promise((r) => { soltar = r })

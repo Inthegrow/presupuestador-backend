@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Building2,
@@ -386,11 +386,19 @@ export default function NewProject() {
     if (dueno) leerBorradorDe('nuevo-presupuesto', dueno, leerBorradorNuevo).then(setBorrador)
   }, [dueno])
 
-  // Keep the work in progress (debounced 500 ms) until the budget exists
+  // Keep the work in progress (debounced 500 ms) until the budget exists. The last change not yet
+  // saved stays in a ref and is written right away when Sol leaves the wizard (or the page), so
+  // nothing typed just before going away is lost
+  const pendienteBorrador = useRef<{ dueno: string; datos: BorradorNuevo } | null>(null)
+
   useEffect(() => {
-    if (!dueno || !hayAlgo || result || pendiente || step >= PASO_RESULTADO) return
-    const t = setTimeout(() => {
-      void guardarBorradorDe<BorradorNuevo>('nuevo-presupuesto', dueno, {
+    if (!dueno || !hayAlgo || result || pendiente || step >= PASO_RESULTADO) {
+      pendienteBorrador.current = null
+      return
+    }
+    pendienteBorrador.current = {
+      dueno,
+      datos: {
         paso: step,
         project,
         structureOption,
@@ -403,14 +411,31 @@ export default function NewProject() {
         planNombre: planFile?.name ?? '',
         indirectos,
         guardadoEn: new Date().toISOString(),
-      })
-    }, 500)
+      },
+    }
+    const t = setTimeout(guardarPendiente, 500)
     return () => clearTimeout(t)
   }, [dueno, hayAlgo, result, pendiente, step, project, structureOption, seleccion, sections, jsonSections, jsonFile, planFile, indirectos])
+
+  function guardarPendiente() {
+    const p = pendienteBorrador.current
+    pendienteBorrador.current = null
+    if (p) void guardarBorradorDe<BorradorNuevo>('nuevo-presupuesto', p.dueno, p.datos)
+  }
+
+  // Leaving the wizard (another screen) or the page (closing the tab, reloading): save what's pending
+  useEffect(() => {
+    window.addEventListener('pagehide', guardarPendiente)
+    return () => {
+      window.removeEventListener('pagehide', guardarPendiente)
+      guardarPendiente()
+    }
+  }, [])
 
   // Once the budget is created there is nothing left half-done
   useEffect(() => {
     if (dueno && (result || pendiente)) {
+      pendienteBorrador.current = null
       setBorrador(null)
       void borrarBorradorDe('nuevo-presupuesto', dueno)
     }
@@ -432,6 +457,7 @@ export default function NewProject() {
   }
 
   function descartarBorrador() {
+    pendienteBorrador.current = null
     setBorrador(null)
     if (dueno) void borrarBorradorDe('nuevo-presupuesto', dueno)
   }
