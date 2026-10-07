@@ -1,12 +1,15 @@
-import { useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import {
-  BookOpen, Check, ChevronDown, ChevronRight, FileSpreadsheet, Pencil, Plus,
+  BookOpen, Check, CheckCircle, ChevronDown, ChevronRight, FileSpreadsheet, History, Pencil, Plus,
   Search, Trash2, Upload, X, Zap,
 } from 'lucide-react'
 import { budgetApi, catalogApi, textoDeError } from '../lib/api'
 import { useAuth } from '../contexts/AuthContext'
-import { fmtCurrency, fmtDate, todayIso } from '../lib/format'
-import type { Budget, CatalogEntry, PriceCatalog } from '../types'
+import { fmtCurrency, fmtDate, fmtPesos, todayIso } from '../lib/format'
+import BuscarPrecio, { IconoBuscarInternet } from '../components/BuscarPrecio'
+import type { PrecioGuardado } from '../components/BuscarPrecio'
+import OrigenPrecio from '../components/OrigenPrecio'
+import type { Budget, CatalogEntry, CatalogPriceHistory, PriceCatalog } from '../types'
 
 // ─── Inline CSV upload form ────────────────────────────────────────────────────
 
@@ -199,159 +202,62 @@ function ExcelUploadForm({ onSuccess, onCancel }: { onSuccess: (count: number) =
   )
 }
 
-// ─── Add-entry inline row ──────────────────────────────────────────────────────
+// ─── Formulario de un renglón (agregar o editar) ───────────────────────────────
 
-function AddEntryRow({
-  catalogId,
-  onSaved,
-  onCancel,
-}: {
-  catalogId: string
-  onSaved: (entry: CatalogEntry) => void
-  onCancel: () => void
-}) {
-  const [codigo, setCodigo] = useState('')
-  const [descripcion, setDescripcion] = useState('')
-  const [unidad, setUnidad] = useState('')
-  const [precio, setPrecio] = useState('')
-  const [fecha, setFecha] = useState(todayIso())
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+// Ancho: una tabla de 7 columnas. Angosto (celular o la lista en poco lugar): descripción y precio, y abajo los botones
+const COLUMNAS = 'grid grid-cols-1 @3xs:grid-cols-[minmax(0,1fr)_auto] @xl:grid-cols-[5.5rem_minmax(0,1fr)_3.5rem_5.5rem_5.5rem_5.75rem_7rem]'
 
-  async function handleSave() {
-    if (!descripcion.trim()) return
-    setSaving(true)
-    setError(null)
-    try {
-      const entry = await catalogApi.createEntry(catalogId, {
-        codigo: codigo.trim(),
-        descripcion: descripcion.trim(),
-        unidad: unidad.trim() || undefined,
-        precio_sin_iva: parseFloat(precio) || 0,
-        fecha_precio: fecha || undefined,
-      })
-      onSaved(entry)
-    } catch (err) {
-      setError(textoDeError(err, 'No se pudo guardar.'))
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  return (
-    <>
-      <tr className="bg-[#E8F5EE]/30 border-b">
-        <td className="px-3 py-1.5">
-          <input
-            type="text"
-            value={codigo}
-            onChange={(e) => setCodigo(e.target.value)}
-            placeholder="COD"
-            className="w-full text-[11px] border rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-[#2D8D68] font-mono"
-          />
-        </td>
-        <td className="px-3 py-1.5">
-          <input
-            type="text"
-            value={descripcion}
-            onChange={(e) => setDescripcion(e.target.value)}
-            placeholder="Descripción *"
-            autoFocus
-            className="w-full text-[11px] border rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-[#2D8D68]"
-          />
-        </td>
-        <td className="px-3 py-1.5">
-          <input
-            type="text"
-            value={unidad}
-            onChange={(e) => setUnidad(e.target.value)}
-            placeholder="m2"
-            className="w-full text-[11px] border rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-[#2D8D68]"
-          />
-        </td>
-        <td className="px-3 py-1.5" colSpan={2}>
-          <input
-            type="number"
-            value={precio}
-            onChange={(e) => setPrecio(e.target.value)}
-            placeholder="Precio"
-            className="w-full text-[11px] border rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-[#2D8D68] text-right"
-          />
-        </td>
-        <td className="px-3 py-1.5">
-          <input
-            type="date"
-            value={fecha}
-            onChange={(e) => setFecha(e.target.value)}
-            title="Fecha del precio"
-            className="w-full text-[11px] border rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-[#2D8D68]"
-          />
-        </td>
-        <td className="px-3 py-1.5">
-          <div className="flex items-center gap-1">
-            <button
-              onClick={handleSave}
-              disabled={!descripcion.trim() || saving}
-              className="text-[#2D8D68] hover:text-[#1B5E4B] disabled:opacity-40"
-              title="Guardar"
-            >
-              {saving
-                ? <div className="w-3 h-3 border-2 border-[#2D8D68] border-t-transparent rounded-full animate-spin" />
-                : <Check size={13} />}
-            </button>
-            <button onClick={onCancel} className="text-gray-400 hover:text-gray-600" title="Cancelar">
-              <X size={13} />
-            </button>
-          </div>
-        </td>
-      </tr>
-      {error && (
-        <tr>
-          <td colSpan={7} className="px-3 pb-1 text-[10px] text-red-600">{error}</td>
-        </tr>
-      )}
-    </>
-  )
-}
-
-// ─── Edit-entry inline row ─────────────────────────────────────────────────────
-
-function EditEntryRow({
+function EntryForm({
   entry,
   catalogId,
   onSaved,
   onCancel,
 }: {
-  entry: CatalogEntry
+  // null = renglón nuevo
+  entry: CatalogEntry | null
   catalogId: string
-  onSaved: (updated: CatalogEntry) => void
+  onSaved: (saved: CatalogEntry) => void
   onCancel: () => void
 }) {
-  const [codigo, setCodigo] = useState(entry.codigo ?? '')
-  const [descripcion, setDescripcion] = useState(entry.descripcion ?? '')
-  const [unidad, setUnidad] = useState(entry.unidad ?? '')
-  const [precio, setPrecio] = useState(String(entry.precio_sin_iva ?? ''))
-  const [fecha, setFecha] = useState(entry.fecha_precio?.slice(0, 10) ?? '')
+  const [codigo, setCodigo] = useState(entry?.codigo ?? '')
+  const [descripcion, setDescripcion] = useState(entry?.descripcion ?? '')
+  const [unidad, setUnidad] = useState(entry?.unidad ?? '')
+  const [precio, setPrecio] = useState(entry ? String(entry.precio_sin_iva ?? '') : '')
+  const fechaOriginal = entry?.fecha_precio?.slice(0, 10) ?? ''
+  const [fecha, setFecha] = useState(entry ? fechaOriginal : todayIso())
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   async function handleSave() {
+    if (!entry && !descripcion.trim()) return
     setSaving(true)
     setError(null)
     try {
-      const nuevoPrecio = parseFloat(precio) || 0
-      const cambioPrecio = nuevoPrecio !== (entry.precio_sin_iva ?? 0)
-      const updated = await catalogApi.updateEntry(catalogId, entry.id, {
-        codigo: codigo.trim(),
-        descripcion: descripcion.trim(),
-        unidad: unidad.trim() || null,
-        precio_sin_iva: nuevoPrecio,
-        // If the price changed and the date was left as is, the backend dates it today
-        ...(cambioPrecio && fecha === (entry.fecha_precio?.slice(0, 10) ?? '')
-          ? {}
-          : { fecha_precio: fecha || null }),
-      })
-      onSaved(updated)
+      if (!entry) {
+        const nuevo = await catalogApi.createEntry(catalogId, {
+          codigo: codigo.trim(),
+          descripcion: descripcion.trim(),
+          unidad: unidad.trim() || undefined,
+          precio_sin_iva: parseFloat(precio) || 0,
+          fecha_precio: fecha || undefined,
+          fuente: 'Cargado a mano',
+        })
+        onSaved(nuevo)
+      } else {
+        const nuevoPrecio = parseFloat(precio) || 0
+        const cambioPrecio = nuevoPrecio !== (entry.precio_sin_iva ?? 0)
+        const updated = await catalogApi.updateEntry(catalogId, entry.id, {
+          codigo: codigo.trim(),
+          descripcion: descripcion.trim(),
+          unidad: unidad.trim() || null,
+          precio_sin_iva: nuevoPrecio,
+          // If the price changed and the date was left as is, the backend dates it today
+          ...(cambioPrecio && fecha === fechaOriginal ? {} : { fecha_precio: fecha || null }),
+          // Un precio cambiado a mano ya no sale de donde salía el anterior
+          ...(cambioPrecio ? { fuente: 'Cargado a mano', fuente_url: null } : {}),
+        })
+        onSaved(updated)
+      }
     } catch (err) {
       setError(textoDeError(err, 'No se pudo guardar.'))
     } finally {
@@ -359,123 +265,200 @@ function EditEntryRow({
     }
   }
 
+  const input = 'w-full text-xs border rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-[#2D8D68]/40 focus:border-[#2D8D68] bg-white'
+  const etiqueta = 'block text-[10px] font-medium text-gray-500 mb-0.5'
+
   return (
-    <>
-      <tr className="bg-amber-50 border-b">
-        <td className="px-3 py-1.5">
-          <input
-            type="text"
-            value={codigo}
-            onChange={(e) => setCodigo(e.target.value)}
-            className="w-full text-[11px] border rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-[#2D8D68] font-mono"
-          />
-        </td>
-        <td className="px-3 py-1.5">
-          <input
-            type="text"
-            value={descripcion}
-            onChange={(e) => setDescripcion(e.target.value)}
-            autoFocus
-            className="w-full text-[11px] border rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-[#2D8D68]"
-          />
-        </td>
-        <td className="px-3 py-1.5">
-          <input
-            type="text"
-            value={unidad}
-            onChange={(e) => setUnidad(e.target.value)}
-            className="w-full text-[11px] border rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-[#2D8D68]"
-          />
-        </td>
-        <td className="px-3 py-1.5 text-right text-[11px] text-gray-400">—</td>
-        <td className="px-3 py-1.5">
-          <input
-            type="number"
-            value={precio}
-            onChange={(e) => setPrecio(e.target.value)}
-            className="w-full text-[11px] border rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-[#2D8D68] text-right"
-          />
-        </td>
-        <td className="px-3 py-1.5">
-          <input
-            type="date"
-            value={fecha}
-            onChange={(e) => setFecha(e.target.value)}
-            title="Fecha del precio"
-            className="w-full text-[11px] border rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-[#2D8D68]"
-          />
-        </td>
-        <td className="px-3 py-1.5">
-          <div className="flex items-center gap-1">
-            <button
-              onClick={handleSave}
-              disabled={saving}
-              className="text-[#2D8D68] hover:text-[#1B5E4B] disabled:opacity-40"
-              title="Guardar"
-            >
-              {saving
-                ? <div className="w-3 h-3 border-2 border-[#2D8D68] border-t-transparent rounded-full animate-spin" />
-                : <Check size={13} />}
-            </button>
-            <button onClick={onCancel} className="text-gray-400 hover:text-gray-600" title="Cancelar">
-              <X size={13} />
-            </button>
-          </div>
-        </td>
-      </tr>
-      {error && (
-        <tr>
-          <td colSpan={7} className="px-3 pb-1 text-[10px] text-red-600">{error}</td>
-        </tr>
-      )}
-    </>
+    <div className={`border-b px-3 py-2.5 ${entry ? 'bg-amber-50' : 'bg-[#E8F5EE]/40'}`} data-testid="precio-formulario">
+      <div>
+        <div className="grid grid-cols-2 @xl:grid-cols-[6rem_minmax(0,1fr)_4.5rem_7rem_9rem] gap-2 items-end">
+          <label className="min-w-0">
+            <span className={etiqueta}>Código</span>
+            <input type="text" value={codigo} onChange={(e) => setCodigo(e.target.value)} placeholder="COD" className={`${input} font-mono`} />
+          </label>
+          <label className="min-w-0 col-span-2 @xl:col-span-1 row-start-1 @xl:row-start-auto">
+            <span className={etiqueta}>Descripción{entry ? '' : ' *'}</span>
+            <input type="text" value={descripcion} onChange={(e) => setDescripcion(e.target.value)} placeholder="Descripción" autoFocus className={input} />
+          </label>
+          <label className="min-w-0">
+            <span className={etiqueta}>Unidad</span>
+            <input type="text" value={unidad} onChange={(e) => setUnidad(e.target.value)} placeholder="m2" className={input} />
+          </label>
+          <label className="min-w-0">
+            <span className={etiqueta}>Precio sin IVA</span>
+            <input type="number" value={precio} onChange={(e) => setPrecio(e.target.value)} placeholder="Precio" className={`${input} text-right`} />
+          </label>
+          <label className="min-w-0">
+            <span className={etiqueta}>Fecha del precio</span>
+            <input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} className={input} />
+          </label>
+        </div>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <button
+            onClick={handleSave}
+            disabled={(!entry && !descripcion.trim()) || saving}
+            className="inline-flex items-center gap-1 bg-[#2D8D68] hover:bg-[#1B5E4B] disabled:opacity-50 text-white text-xs font-semibold px-3 py-1.5 rounded-lg"
+          >
+            {saving
+              ? <span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" aria-hidden />
+              : <Check size={13} />}
+            Guardar
+          </button>
+          <button onClick={onCancel} className="text-xs px-3 py-1.5 rounded-lg border text-gray-600 hover:bg-gray-50 bg-white">
+            Cancelar
+          </button>
+          {error && <span role="alert" className="text-[11px] text-red-600 [overflow-wrap:anywhere]">{error}</span>}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Historial de un precio, con el origen de cada valor ───────────────────────
+
+function HistorialPrecio({ catalogId, entry }: { catalogId: string; entry: CatalogEntry }) {
+  const [filas, setFilas] = useState<CatalogPriceHistory[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [intento, setIntento] = useState(0)
+
+  useEffect(() => {
+    let vivo = true
+    setError(null)
+    catalogApi
+      .history(catalogId, entry.id)
+      .then((h) => { if (vivo) setFilas(Array.isArray(h) ? h : []) })
+      .catch((err) => { if (vivo) setError(textoDeError(err, 'No pude traer el historial.')) })
+    return () => { vivo = false }
+    // Se vuelve a pedir cuando cambia el precio (un precio nuevo suma un renglón)
+  }, [catalogId, entry.id, entry.precio_sin_iva, entry.fecha_precio, intento])
+
+  return (
+    <div className="bg-gray-50/80 border-b px-3 py-2" data-testid="historial-precio">
+      <div>
+        <div className="text-[10px] font-bold uppercase tracking-wide text-gray-400 mb-1">Historial del precio</div>
+        {error ? (
+          <p role="alert" className="text-[11px] text-red-600">
+            {error}{' '}
+            <button onClick={() => setIntento((n) => n + 1)} className="font-semibold underline">Probar de nuevo</button>
+          </p>
+        ) : filas === null ? (
+          <p className="text-[11px] text-gray-400">Cargando el historial…</p>
+        ) : filas.length === 0 ? (
+          <p className="text-[11px] text-gray-400">Todavía no hay cambios de precio guardados.</p>
+        ) : (
+          <ol className="space-y-1">
+            {filas.map((h, i) => (
+              <li key={h.id ?? i} className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[11px]">
+                <span className={`tabular-nums font-semibold ${i === 0 ? 'text-gray-900' : 'text-gray-600'}`}>
+                  {h.precio_sin_iva === null || h.precio_sin_iva === undefined ? '—' : fmtPesos(h.precio_sin_iva)}
+                </span>
+                <span className="text-gray-400">{fmtDate(h.fecha_precio)}</span>
+                {i === 0 && <span className="text-[9px] font-bold uppercase text-[#1B5E4B] bg-[#E8F5EE] rounded px-1">actual</span>}
+                <OrigenPrecio entrada={h} className="basis-full @xl:basis-auto" />
+              </li>
+            ))}
+          </ol>
+        )}
+      </div>
+    </div>
   )
 }
 
 // ─── CatalogRow ────────────────────────────────────────────────────────────────
+
+/** Un precio recién guardado desde el buscador de arriba: la lista lo muestra y lo marca. */
+interface GuardadoEnLista {
+  catalogId: string
+  entrada: CatalogEntry
+  n: number
+}
 
 function CatalogRow({
   catalog,
   budgets,
   onDeleted,
   onChanged,
+  guardado,
 }: {
   catalog: PriceCatalog
   budgets: Budget[]
   onDeleted: (id: string) => void
   onChanged: (catalog: PriceCatalog) => void
+  guardado: GuardadoEnLista | null
 }) {
   const { puedeEditar, esAdmin } = useAuth()
   const [open, setOpen] = useState(false)
   const [entries, setEntries] = useState<CatalogEntry[]>([])
   const [filtered, setFiltered] = useState<CatalogEntry[]>([])
   const [loading, setLoading] = useState(false)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [applying, setApplying] = useState(false)
   const [applyResult, setApplyResult] = useState<{ success: boolean; message: string } | null>(null)
   const [selectedBudgetId, setSelectedBudgetId] = useState<string>('')
   const [searchQ, setSearchQ] = useState('')
+  const [confirmarBorrarLista, setConfirmarBorrarLista] = useState(false)
   const [deletingCatalog, setDeletingCatalog] = useState(false)
+  const [catalogError, setCatalogError] = useState<string | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
+  const [confirmarBorrar, setConfirmarBorrar] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [entryError, setEntryError] = useState<{ id: string; mensaje: string } | null>(null)
   const [addingEntry, setAddingEntry] = useState(false)
   const [changingOficial, setChangingOficial] = useState(false)
   const [oficialError, setOficialError] = useState<string | null>(null)
+  const [historial, setHistorial] = useState<string | null>(null)
+  const [buscando, setBuscando] = useState<CatalogEntry | null>(null)
+  // Renglón recién guardado: se marca un momento
+  const [resaltado, setResaltado] = useState<{ id: string; texto: string } | null>(null)
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pedido = useRef<Promise<CatalogEntry[]> | null>(null)
 
-  function toggle() {
-    setOpen((prev) => !prev)
-    if (!open && entries.length === 0) {
+  function cargarEntradas(): Promise<CatalogEntry[]> {
+    if (!pedido.current) {
       setLoading(true)
-      catalogApi
+      setLoadError(null)
+      pedido.current = catalogApi
         .getEntries(catalog.id)
         .then((data) => {
           setEntries(data)
           setFiltered(data)
+          return data
         })
-        .catch(() => {/* ignore */})
+        .catch((err) => {
+          pedido.current = null
+          setLoadError(textoDeError(err, 'No pude traer los precios de esta lista.'))
+          return [] as CatalogEntry[]
+        })
         .finally(() => setLoading(false))
     }
+    return pedido.current
   }
+
+  function toggle() {
+    setOpen((prev) => !prev)
+    if (!open && entries.length === 0) void cargarEntradas()
+  }
+
+  // Lo que se guardó desde "Buscar un precio": abrir esta lista, mostrarlo y marcarlo
+  useEffect(() => {
+    if (!guardado || guardado.catalogId !== catalog.id) return
+    setOpen(true)
+    void cargarEntradas().then(() => {
+      upsert(guardado.entrada)
+      setSearchQ('')
+      setResaltado({ id: guardado.entrada.id, texto: 'Precio guardado' })
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [guardado?.n])
+
+  useEffect(() => {
+    if (!resaltado) return
+    const raf = requestAnimationFrame(() => {
+      document.querySelector(`[data-entry-id="${resaltado.id}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    })
+    const t = setTimeout(() => setResaltado(null), 4500)
+    return () => { cancelAnimationFrame(raf); clearTimeout(t) }
+  }, [resaltado])
 
   async function handleToggleOficial() {
     setChangingOficial(true)
@@ -490,6 +473,11 @@ function CatalogRow({
     }
   }
 
+  const coincide = (e: CatalogEntry, q: string) => {
+    const lower = q.toLowerCase()
+    return !!(e.descripcion?.toLowerCase().includes(lower) || e.codigo?.toLowerCase().includes(lower))
+  }
+
   function handleSearch(q: string) {
     setSearchQ(q)
     if (searchTimer.current) clearTimeout(searchTimer.current)
@@ -501,53 +489,61 @@ function CatalogRow({
       catalogApi
         .search(catalog.id, q)
         .then(setFiltered)
-        .catch(() => {
-          const lower = q.toLowerCase()
-          setFiltered(entries.filter((e) => e.descripcion?.toLowerCase().includes(lower) || e.codigo?.toLowerCase().includes(lower)))
-        })
+        .catch(() => setFiltered(entries.filter((e) => coincide(e, q))))
     }, 300)
   }
 
   async function handleDeleteCatalog() {
-    if (!confirm(`¿Eliminar la lista "${catalog.name}"? Esta acción no se puede deshacer.`)) return
     setDeletingCatalog(true)
+    setCatalogError(null)
     try {
       await catalogApi.deleteCatalog(catalog.id)
       onDeleted(catalog.id)
     } catch (err) {
-      alert(textoDeError(err, 'No se pudo eliminar la lista.'))
+      setCatalogError(textoDeError(err, 'No se pudo eliminar la lista.'))
+      setConfirmarBorrarLista(false)
     } finally {
       setDeletingCatalog(false)
     }
   }
 
   async function handleDeleteEntry(entryId: string) {
-    if (!confirm('¿Eliminar esta entrada?')) return
     setDeletingId(entryId)
+    setEntryError(null)
     try {
       await catalogApi.deleteEntry(catalog.id, entryId)
       const next = entries.filter((e) => e.id !== entryId)
       setEntries(next)
-      setFiltered(next.filter((e) => !searchQ.trim() || e.descripcion?.toLowerCase().includes(searchQ.toLowerCase())))
+      setFiltered((prev) => prev.filter((e) => e.id !== entryId))
     } catch (err) {
-      alert(textoDeError(err, 'No se pudo eliminar la entrada.'))
+      setEntryError({ id: entryId, mensaje: textoDeError(err, 'No se pudo eliminar el precio.') })
     } finally {
       setDeletingId(null)
+      setConfirmarBorrar(null)
     }
   }
 
+  function upsert(saved: CatalogEntry) {
+    setEntries((prev) => (prev.some((e) => e.id === saved.id) ? prev.map((e) => (e.id === saved.id ? saved : e)) : [...prev, saved]))
+    setFiltered((prev) => (prev.some((e) => e.id === saved.id) ? prev.map((e) => (e.id === saved.id ? saved : e)) : [...prev, saved]))
+  }
+
   function handleEntrySaved(updated: CatalogEntry) {
-    const next = entries.map((e) => (e.id === updated.id ? updated : e))
-    setEntries(next)
-    setFiltered(searchQ.trim() ? next.filter((e) => e.descripcion?.toLowerCase().includes(searchQ.toLowerCase())) : next)
+    upsert(updated)
     setEditingId(null)
+    setResaltado({ id: updated.id, texto: 'Cambios guardados' })
   }
 
   function handleEntryAdded(entry: CatalogEntry) {
-    const next = [...entries, entry]
-    setEntries(next)
-    setFiltered(searchQ.trim() ? next.filter((e) => e.descripcion?.toLowerCase().includes(searchQ.toLowerCase())) : next)
+    upsert(entry)
     setAddingEntry(false)
+    setResaltado({ id: entry.id, texto: 'Precio agregado' })
+  }
+
+  function handleBuscado(g: PrecioGuardado) {
+    upsert(g.entrada)
+    setBuscando(null)
+    setResaltado({ id: g.entrada.id, texto: g.sinOrigen ? 'Precio guardado (sin el origen: falta actualizar el servidor)' : 'Precio guardado' })
   }
 
   async function handleApply() {
@@ -563,44 +559,32 @@ function CatalogRow({
       setTimeout(() => setApplyResult(null), 5000)
     } catch (err) {
       setApplyResult({ success: false, message: textoDeError(err, 'No se pudo aplicar la lista.') })
-      setTimeout(() => setApplyResult(null), 5000)
     } finally {
       setApplying(false)
     }
   }
 
-  const TIPO_LABEL: Record<string, string> = {
-    material: 'Material',
-    mano_obra: 'Mano de obra',
-    equipo: 'Equipo',
-    subcontrato: 'Subcontrato',
-  }
-  const catalogTipo = catalog.tipo
+  const accion = 'p-1.5 rounded-md text-gray-400 transition-colors disabled:opacity-40'
 
   return (
-    <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+    <div className="@container bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden" data-testid="lista-precios" data-catalog-id={catalog.id}>
       {/* Header row */}
-      <div className="p-4 flex justify-between items-center cursor-pointer hover:bg-gray-50 transition-colors" onClick={toggle}>
-        <div>
-          <div className="font-semibold text-sm text-gray-900 flex items-center gap-2">
+      <div className="p-3 sm:p-4 flex flex-wrap justify-between items-center gap-x-3 gap-y-2 cursor-pointer hover:bg-gray-50 transition-colors" onClick={toggle}>
+        <div className="min-w-0 flex-1 basis-56">
+          <div className="font-semibold text-sm text-gray-900 flex flex-wrap items-center gap-x-2 gap-y-1 [overflow-wrap:anywhere]">
             {catalog.name}
-            {catalogTipo && (
-              <span className="bg-[#E8F5EE] text-[#1B5E4B] text-[10px] px-1.5 py-0.5 rounded-full border border-green-200 font-normal">
-                {TIPO_LABEL[catalogTipo] ?? catalogTipo}
-              </span>
-            )}
             {catalog.source_file && (
-              <span className="bg-orange-50 text-orange-700 text-[10px] px-1.5 py-0.5 rounded border border-orange-200 font-normal">
+              <span className="bg-orange-50 text-orange-700 text-[10px] px-1.5 py-0.5 rounded border border-orange-200 font-normal [overflow-wrap:anywhere]">
                 {catalog.source_file}
               </span>
             )}
           </div>
           <div className="text-[10px] text-gray-400 mt-0.5">
-            Creado: {new Date(catalog.created_at).toLocaleDateString('es-AR')}
-            {entries.length > 0 && <> · {entries.length} entradas</>}
+            Creada: {new Date(catalog.created_at).toLocaleDateString('es-AR')}
+            {entries.length > 0 && <> · {entries.length} precios</>}
           </div>
         </div>
-        <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+        <div className="flex flex-wrap items-center gap-2 ml-auto" onClick={(e) => e.stopPropagation()}>
           {oficialError && <span className="text-[10px] text-red-600">{oficialError}</span>}
           <span
             className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
@@ -618,22 +602,43 @@ function CatalogRow({
               {catalog.oficial ? 'Dejar solo para consulta' : 'Marcar como oficial'}
             </button>
           )}
-          {esAdmin && (
+          {esAdmin && !confirmarBorrarLista && (
             <button
-              onClick={handleDeleteCatalog}
-              disabled={deletingCatalog}
-              className="p-1.5 rounded-lg text-red-400 hover:text-red-600 hover:bg-red-50 transition-colors disabled:opacity-40"
-              title="Eliminar lista"
+              onClick={() => setConfirmarBorrarLista(true)}
+              className="p-1.5 rounded-lg text-red-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+              title="Eliminar la lista"
+              aria-label="Eliminar la lista"
             >
-              {deletingCatalog
-                ? <div className="w-3 h-3 border-2 border-red-400 border-t-transparent rounded-full animate-spin" />
-                : <Trash2 size={14} />}
+              <Trash2 size={14} />
             </button>
           )}
-          <div onClick={toggle}>
+          <button onClick={toggle} aria-label={open ? 'Cerrar la lista' : 'Abrir la lista'} className="p-0.5">
             {open ? <ChevronDown size={16} className="text-gray-400" /> : <ChevronRight size={16} className="text-gray-400" />}
-          </div>
+          </button>
         </div>
+        {confirmarBorrarLista && (
+          <div role="alertdialog" className="basis-full rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800" onClick={(e) => e.stopPropagation()}>
+            <p className="font-semibold">¿Eliminar la lista «{catalog.name}» con todos sus precios? No se puede deshacer.</p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <button
+                onClick={handleDeleteCatalog}
+                disabled={deletingCatalog}
+                className="inline-flex items-center gap-1 bg-red-600 hover:bg-red-700 text-white font-semibold px-3 py-1.5 rounded-lg disabled:opacity-50"
+              >
+                {deletingCatalog && <span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" aria-hidden />}
+                Sí, eliminarla
+              </button>
+              <button onClick={() => setConfirmarBorrarLista(false)} className="bg-white border border-red-200 px-3 py-1.5 rounded-lg hover:bg-red-100">
+                Cancelar
+              </button>
+            </div>
+          </div>
+        )}
+        {catalogError && (
+          <p role="alert" className="basis-full text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2" onClick={(e) => e.stopPropagation()}>
+            {catalogError}
+          </p>
+        )}
       </div>
 
       {open && (
@@ -641,7 +646,12 @@ function CatalogRow({
           {loading ? (
             <div className="p-4 text-xs text-gray-400 flex items-center gap-2">
               <div className="w-4 h-4 border-2 border-[#2D8D68] border-t-transparent rounded-full animate-spin" />
-              Cargando entradas...
+              Cargando los precios…
+            </div>
+          ) : loadError ? (
+            <div role="alert" className="m-3 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+              {loadError}{' '}
+              <button onClick={() => void cargarEntradas()} className="font-semibold underline">Probar de nuevo</button>
             </div>
           ) : (
             <>
@@ -659,6 +669,7 @@ function CatalogRow({
                   {searchQ && (
                     <button
                       onClick={() => handleSearch('')}
+                      aria-label="Borrar la búsqueda"
                       className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
                     >
                       <X size={11} />
@@ -670,105 +681,158 @@ function CatalogRow({
               {/* Entries table */}
               {filtered.length > 0 || addingEntry ? (
                 <>
-                  <table className="w-full text-[11px]">
-                    <thead className="bg-[#E8F5EE] text-[#143D34]">
-                      <tr>
-                        <th className="px-3 py-1.5 text-left font-medium w-24">Código</th>
-                        <th className="px-3 py-1.5 text-left font-medium">Descripción</th>
-                        <th className="px-3 py-1.5 text-left font-medium w-16">Unidad</th>
-                        <th className="px-3 py-1.5 text-right font-medium w-28">P. con IVA</th>
-                        <th className="px-3 py-1.5 text-right font-medium w-28">P. sin IVA</th>
-                        <th className="px-3 py-1.5 text-left font-medium w-28">Fecha</th>
-                        <th className="px-3 py-1.5 w-16"></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filtered.map((e, idx) =>
-                        editingId === e.id ? (
-                          <EditEntryRow
-                            key={e.id}
-                            entry={e}
-                            catalogId={catalog.id}
-                            onSaved={handleEntrySaved}
-                            onCancel={() => setEditingId(null)}
-                          />
-                        ) : (
-                          <tr
-                            key={e.id}
-                            className={`border-b hover:bg-[#E8F5EE]/40 transition-colors ${idx % 2 === 0 ? '' : 'bg-gray-50/50'}`}
+                  <div className="text-[11px]" role="table" aria-label={`Precios de ${catalog.name}`}>
+                    <div role="row" className={`${COLUMNAS} hidden @xl:grid bg-[#E8F5EE] text-[#143D34] font-medium`}>
+                      <div role="columnheader" className="px-3 py-1.5">Código</div>
+                      <div role="columnheader" className="px-3 py-1.5">Descripción y de dónde salió</div>
+                      <div role="columnheader" className="px-2 py-1.5">Unidad</div>
+                      <div role="columnheader" className="px-2 py-1.5 text-right">P. con IVA</div>
+                      <div role="columnheader" className="px-2 py-1.5 text-right">P. sin IVA</div>
+                      <div role="columnheader" className="px-3 py-1.5">Fecha</div>
+                      <div role="columnheader" className="px-1 py-1.5"><span className="sr-only">Acciones</span></div>
+                    </div>
+                    {filtered.map((e, idx) => {
+                      if (editingId === e.id) {
+                        return (
+                          <EntryForm key={e.id} entry={e} catalogId={catalog.id} onSaved={handleEntrySaved} onCancel={() => setEditingId(null)} />
+                        )
+                      }
+                      const marca = resaltado?.id === e.id ? resaltado.texto : null
+                      return (
+                        <Fragment key={e.id}>
+                          <div
+                            role="row"
+                            data-entry-id={e.id}
+                            data-testid="precio-renglon"
+                            className={`${COLUMNAS} border-b items-start transition-colors ${
+                              marca ? 'bg-[#E8F5EE] ring-2 ring-inset ring-[#2D8D68]/40' : `hover:bg-[#E8F5EE]/40 ${idx % 2 === 0 ? '' : 'bg-gray-50/50'}`
+                            }`}
                           >
-                            <td className="px-3 py-1.5 font-mono text-gray-400">{e.codigo}</td>
-                            <td className="px-3 py-1.5 text-gray-800">{e.descripcion}</td>
-                            <td className="px-3 py-1.5 text-gray-500">{e.unidad}</td>
-                            <td className="px-3 py-1.5 text-right">{e.precio_con_iva ? fmtCurrency(e.precio_con_iva) : '—'}</td>
-                            <td className="px-3 py-1.5 text-right font-medium">{e.precio_sin_iva ? fmtCurrency(e.precio_sin_iva) : '—'}</td>
-                            <td
-                              className={`px-3 py-1.5 ${e.fecha_precio ? 'text-gray-500' : 'text-amber-600'}`}
+                            <div role="cell" className="hidden @xl:block px-3 py-1.5 font-mono text-gray-400 [overflow-wrap:anywhere]">{e.codigo}</div>
+                            <div role="cell" className="px-3 py-1.5 min-w-0">
+                              {marca && (
+                                <div role="status" className="mb-1 inline-flex items-center gap-1 text-[10px] font-semibold text-[#1B5E4B] bg-white rounded-full px-2 py-0.5">
+                                  <CheckCircle size={11} className="text-[#2D8D68] flex-shrink-0" /> {marca}
+                                </div>
+                              )}
+                              <div className="@xl:hidden font-mono text-[10px] text-gray-400 [overflow-wrap:anywhere]">
+                                {[e.codigo, e.unidad].filter(Boolean).join(' · ')}
+                              </div>
+                              <div className="text-gray-800 [overflow-wrap:anywhere]">{e.descripcion}</div>
+                              <OrigenPrecio entrada={e} className="mt-0.5" />
+                              {entryError?.id === e.id && (
+                                <p role="alert" className="mt-1 text-[10px] text-red-600">{entryError.mensaje}</p>
+                              )}
+                            </div>
+                            <div role="cell" className="hidden @xl:block px-2 py-1.5 text-gray-500 [overflow-wrap:anywhere]">{e.unidad}</div>
+                            <div role="cell" className="hidden @xl:block px-2 py-1.5 text-right tabular-nums">{e.precio_con_iva ? fmtCurrency(e.precio_con_iva) : '—'}</div>
+                            <div role="cell" className="px-3 @xl:px-2 pb-1 @3xs:py-1.5 flex items-baseline gap-2 @3xs:block @3xs:text-right">
+                              <div className="font-medium tabular-nums" data-testid="precio-sin-iva">{e.precio_sin_iva ? fmtPesos(e.precio_sin_iva) : '—'}</div>
+                              <div className={`@xl:hidden text-[10px] ${e.fecha_precio ? 'text-gray-400' : 'text-amber-600'}`}>
+                                {e.fecha_precio ? fmtDate(e.fecha_precio) : 'sin fecha'}
+                              </div>
+                            </div>
+                            <div
+                              role="cell"
+                              className={`hidden @xl:block px-3 py-1.5 ${e.fecha_precio ? 'text-gray-500' : 'text-amber-600'}`}
                               title={e.fecha_precio ? (e.proveedor ? `Proveedor: ${e.proveedor}` : undefined) : 'Precio sin fecha'}
                             >
                               {fmtDate(e.fecha_precio)}
-                            </td>
-                            <td className="px-3 py-1.5">
-                              {puedeEditar && (
-                              <div className="flex items-center gap-1 justify-end">
-                                <button
-                                  onClick={() => setEditingId(e.id)}
-                                  className="p-1 rounded text-gray-400 hover:text-[#2D8D68] hover:bg-[#E8F5EE] transition-colors"
-                                  title="Editar"
-                                >
-                                  <Pencil size={11} />
-                                </button>
-                                <button
-                                  onClick={() => handleDeleteEntry(e.id)}
-                                  disabled={deletingId === e.id}
-                                  className="p-1 rounded text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors disabled:opacity-40"
-                                  title="Eliminar"
-                                >
-                                  {deletingId === e.id
-                                    ? <div className="w-2.5 h-2.5 border-2 border-red-400 border-t-transparent rounded-full animate-spin" />
-                                    : <Trash2 size={11} />}
-                                </button>
-                              </div>
+                            </div>
+                            <div role="cell" className="@3xs:col-span-2 @xl:col-span-1 px-2 @xl:px-1 pb-1.5 @xl:py-1">
+                              {confirmarBorrar === e.id ? (
+                                <div className="flex flex-wrap items-center justify-end gap-1">
+                                  <button
+                                    onClick={() => handleDeleteEntry(e.id)}
+                                    disabled={deletingId === e.id}
+                                    className="text-[10px] font-semibold bg-red-600 hover:bg-red-700 text-white rounded px-2 py-1 disabled:opacity-50"
+                                  >
+                                    {deletingId === e.id ? 'Eliminando…' : 'Eliminar'}
+                                  </button>
+                                  <button onClick={() => setConfirmarBorrar(null)} className="text-[10px] text-gray-500 hover:text-gray-800 px-1">
+                                    Cancelar
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="flex flex-wrap items-center gap-0.5 justify-end">
+                                  {puedeEditar && (
+                                    <button
+                                      onClick={() => setBuscando(e)}
+                                      className={`${accion} hover:text-sky-700 hover:bg-sky-50`}
+                                      title="Buscar en internet"
+                                      aria-label={`Buscar en internet el precio de ${e.descripcion ?? e.codigo ?? 'este renglón'}`}
+                                      data-testid="buscar-en-internet"
+                                    >
+                                      <IconoBuscarInternet size={13} />
+                                    </button>
+                                  )}
+                                  <button
+                                    onClick={() => setHistorial((h) => (h === e.id ? null : e.id))}
+                                    className={`${accion} hover:text-[#2D8D68] hover:bg-[#E8F5EE] ${historial === e.id ? 'text-[#2D8D68] bg-[#E8F5EE]' : ''}`}
+                                    title="Historial del precio"
+                                    aria-label="Historial del precio"
+                                    aria-expanded={historial === e.id}
+                                  >
+                                    <History size={13} />
+                                  </button>
+                                  {puedeEditar && (
+                                    <>
+                                      <button
+                                        onClick={() => setEditingId(e.id)}
+                                        className={`${accion} hover:text-[#2D8D68] hover:bg-[#E8F5EE]`}
+                                        title="Editar"
+                                        aria-label="Editar"
+                                      >
+                                        <Pencil size={12} />
+                                      </button>
+                                      <button
+                                        onClick={() => setConfirmarBorrar(e.id)}
+                                        className={`${accion} hover:text-red-600 hover:bg-red-50`}
+                                        title="Eliminar"
+                                        aria-label="Eliminar"
+                                      >
+                                        <Trash2 size={12} />
+                                      </button>
+                                    </>
+                                  )}
+                                </div>
                               )}
-                            </td>
-                          </tr>
-                        )
-                      )}
-                      {addingEntry && puedeEditar && (
-                        <AddEntryRow
-                          catalogId={catalog.id}
-                          onSaved={handleEntryAdded}
-                          onCancel={() => setAddingEntry(false)}
-                        />
-                      )}
-                    </tbody>
-                  </table>
+                            </div>
+                          </div>
+                          {historial === e.id && <HistorialPrecio catalogId={catalog.id} entry={e} />}
+                        </Fragment>
+                      )
+                    })}
+                    {addingEntry && puedeEditar && (
+                      <EntryForm entry={null} catalogId={catalog.id} onSaved={handleEntryAdded} onCancel={() => setAddingEntry(false)} />
+                    )}
+                  </div>
                   {/* Footer */}
-                  <div className="px-3 py-2 bg-[#E8F5EE]/50 text-[10px] text-gray-500 border-t flex items-center justify-between">
+                  <div className="px-3 py-2 bg-[#E8F5EE]/50 text-[10px] text-gray-500 border-t flex items-center justify-between gap-2">
                     <span>
                       {searchQ
-                        ? `${filtered.length} resultado(s) de ${entries.length} entradas`
-                        : `${entries.length} entradas`}
+                        ? `${filtered.length} de ${entries.length} precios`
+                        : `${entries.length} precios`}
                     </span>
                     {!addingEntry && puedeEditar && (
                       <button
                         onClick={() => setAddingEntry(true)}
                         className="flex items-center gap-1 text-[#2D8D68] hover:text-[#1B5E4B] font-semibold text-[11px]"
                       >
-                        <Plus size={11} /> Agregar entrada
+                        <Plus size={11} /> Agregar un precio
                       </button>
                     )}
                   </div>
                 </>
               ) : (
                 <div className="p-4 text-xs text-gray-400 italic flex items-center justify-between">
-                  <span>{searchQ ? 'Sin resultados para la búsqueda.' : 'Sin entradas en esta lista.'}</span>
+                  <span>{searchQ ? 'Sin resultados para la búsqueda.' : 'Esta lista no tiene precios.'}</span>
                   {!searchQ && !addingEntry && puedeEditar && (
                     <button
                       onClick={() => setAddingEntry(true)}
                       className="flex items-center gap-1 text-[#2D8D68] hover:text-[#1B5E4B] font-semibold text-[11px]"
                     >
-                      <Plus size={11} /> Agregar entrada
+                      <Plus size={11} /> Agregar un precio
                     </button>
                   )}
                 </div>
@@ -784,11 +848,11 @@ function CatalogRow({
               <span className="text-xs font-semibold text-gray-700">Aplicar a presupuesto</span>
             </div>
             {budgets.length > 0 ? (
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <select
                   value={selectedBudgetId}
                   onChange={(e) => setSelectedBudgetId(e.target.value)}
-                  className="flex-1 text-xs border rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-[#2D8D68] focus:border-transparent"
+                  className="flex-1 min-w-0 text-xs border rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-[#2D8D68] focus:border-transparent"
                   onClick={(e) => e.stopPropagation()}
                 >
                   <option value="">Elegí un presupuesto…</option>
@@ -812,18 +876,32 @@ function CatalogRow({
               <p className="text-xs text-gray-400">Todavía no hay presupuestos. Creá uno primero.</p>
             )}
             {applyResult && (
-              <div className={`mt-2 text-xs px-3 py-2 rounded-lg flex items-center gap-1.5 ${
-                applyResult.success
-                  ? 'bg-[#E8F5EE] text-[#166534] border border-green-200'
-                  : 'bg-red-50 text-red-700 border border-red-200'
-              }`}>
+              <div
+                role={applyResult.success ? 'status' : 'alert'}
+                className={`mt-2 text-xs px-3 py-2 rounded-lg flex items-center gap-1.5 ${
+                  applyResult.success
+                    ? 'bg-[#E8F5EE] text-[#166534] border border-green-200'
+                    : 'bg-red-50 text-red-700 border border-red-200'
+                }`}
+              >
                 {applyResult.success && <Check size={12} />}
-                {applyResult.message}
+                <span className="flex-1">{applyResult.message}</span>
+                {!applyResult.success && (
+                  <button onClick={() => setApplyResult(null)} aria-label="Cerrar" className="opacity-60 hover:opacity-100"><X size={12} /></button>
+                )}
               </div>
             )}
           </div>
           )}
         </div>
+      )}
+
+      {buscando && (
+        <BuscarPrecio
+          destino={{ modo: 'entrada', catalogId: catalog.id, catalogo: catalog.name, entrada: buscando }}
+          onGuardado={handleBuscado}
+          onClose={() => setBuscando(null)}
+        />
       )}
     </div>
   )
@@ -840,6 +918,9 @@ export default function Catalogs() {
   const [showUploads, setShowUploads] = useState(true)
   const [showUpload, setShowUpload] = useState(false)
   const [showExcelUpload, setShowExcelUpload] = useState(false)
+  // "Buscar un precio" (uno que todavía no está en la lista) y lo que se guardó con él
+  const [buscarNuevo, setBuscarNuevo] = useState(false)
+  const [guardado, setGuardado] = useState<(GuardadoEnLista & { catalogo: string; sinOrigen: boolean }) | null>(null)
 
   useEffect(() => {
     setLoading(true)
@@ -875,23 +956,40 @@ export default function Catalogs() {
     setCatalogs((prev) => prev.map((c) => (c.id === catalog.id ? catalog : c)))
   }
 
+  function handleBuscadoNuevo(g: PrecioGuardado) {
+    setBuscarNuevo(false)
+    setGuardado((prev) => ({ catalogId: g.catalogId, entrada: g.entrada, n: (prev?.n ?? 0) + 1, catalogo: g.catalogo, sinOrigen: g.sinOrigen }))
+  }
+
   const hayOficial = catalogs.some((c) => c.oficial)
 
   return (
-    <div className="p-6 fade-in">
-      <div className="flex items-center gap-2 text-[#2D8D68] text-[11px] font-bold tracking-wider mb-1">
-        <BookOpen size={14} /> PRECIOS
+    <div className="px-3 py-5 sm:p-6 fade-in">
+      <div className="max-w-5xl">
+        <div className="flex items-center gap-2 text-[#2D8D68] text-[11px] font-bold tracking-wider mb-1">
+          <BookOpen size={14} /> PRECIOS
+        </div>
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-1">
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="w-1 h-7 bg-[#2D8D68] rounded-full" />
+            <h1 className="text-xl font-extrabold text-gray-900">LISTA DE PRECIOS</h1>
+            <span className="bg-[#E8F5EE] text-[#1B5E4B] text-xs font-medium px-2 py-0.5 rounded-full">
+              {catalogs.length} {catalogs.length === 1 ? 'lista' : 'listas'}
+            </span>
+          </div>
+          {puedeEditar && (
+            <button
+              onClick={() => setBuscarNuevo(true)}
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 bg-white border border-[#2D8D68]/50 text-[#1B5E4B] hover:bg-[#E8F5EE] font-semibold px-4 py-2 rounded-xl text-sm shadow-sm transition-colors"
+            >
+              <IconoBuscarInternet size={15} /> Buscar un precio
+            </button>
+          )}
+        </div>
+        <p className="text-sm text-gray-500 mb-4 pl-4 max-w-3xl">
+          Cada lista tiene el precio, la fecha y de dónde salió cada uno. La app calcula con la lista <strong>oficial</strong>; las demás son solo para consultar.
+        </p>
       </div>
-      <div className="flex items-center gap-3 mb-1">
-        <div className="w-1 h-7 bg-[#2D8D68] rounded-full" />
-        <h1 className="text-xl font-extrabold text-gray-900">LISTA DE PRECIOS</h1>
-        <span className="bg-[#E8F5EE] text-[#1B5E4B] text-xs font-medium px-2 py-0.5 rounded-full">
-          {catalogs.length} {catalogs.length === 1 ? 'lista' : 'listas'}
-        </span>
-      </div>
-      <p className="text-sm text-gray-500 mb-4 pl-4 max-w-3xl">
-        Cada lista tiene el precio y la fecha de cada material. La app calcula con la lista <strong>oficial</strong>; las demás son solo para consultar.
-      </p>
 
       {/* Upload link: panels start collapsed */}
       {puedeEditar && (
@@ -907,7 +1005,7 @@ export default function Catalogs() {
           {showUploads ? 'Ocultar' : 'Subir una lista nueva'}
         </button>
         {showUploads && (
-          <div className="flex items-center gap-2 mt-2">
+          <div className="flex flex-wrap items-center gap-2 mt-2">
             <button
               onClick={() => { setShowUpload((prev) => !prev); setShowExcelUpload(false) }}
               className={`flex items-center gap-1.5 text-xs font-semibold px-4 py-2 rounded-lg transition-colors ${
@@ -935,7 +1033,26 @@ export default function Catalogs() {
       </div>
       )}
 
-      <div className="max-w-3xl space-y-3">
+      <div className="max-w-5xl space-y-3">
+        {/* Lo que se guardó con "Buscar un precio" */}
+        {guardado && (
+          <div role="status" data-testid="precio-guardado" className="flex items-start gap-2 rounded-xl border border-[#2D8D68]/30 bg-[#E8F5EE] px-3 py-2.5 text-xs text-[#143D34]">
+            <CheckCircle size={15} className="flex-shrink-0 mt-px text-[#2D8D68]" />
+            <div className="min-w-0 flex-1 [overflow-wrap:anywhere]">
+              <p>
+                <strong>Guardado en «{guardado.catalogo}»:</strong>{' '}
+                {[guardado.entrada.codigo, guardado.entrada.descripcion].filter(Boolean).join(' · ')}
+                {guardado.entrada.precio_sin_iva ? `, ${fmtPesos(guardado.entrada.precio_sin_iva)} sin IVA` : ''}.
+              </p>
+              <OrigenPrecio entrada={guardado.entrada} className="mt-0.5" />
+              {guardado.sinOrigen && (
+                <p className="mt-1 text-amber-800">El precio se guardó, pero el servidor todavía no guarda de dónde salió (falta actualizarlo).</p>
+              )}
+            </div>
+            <button onClick={() => setGuardado(null)} aria-label="Cerrar" className="opacity-60 hover:opacity-100 flex-shrink-0"><X size={14} /></button>
+          </div>
+        )}
+
         {/* Upload forms */}
         {showUpload && puedeEditar && (
           <UploadForm onSuccess={handleUploaded} onCancel={() => setShowUpload(false)} />
@@ -975,9 +1092,20 @@ export default function Catalogs() {
         )}
 
         {catalogs.map((c) => (
-          <CatalogRow key={c.id} catalog={c} budgets={budgets} onDeleted={handleDeleted} onChanged={handleChanged} />
+          <CatalogRow
+            key={c.id}
+            catalog={c}
+            budgets={budgets}
+            onDeleted={handleDeleted}
+            onChanged={handleChanged}
+            guardado={guardado}
+          />
         ))}
       </div>
+
+      {buscarNuevo && (
+        <BuscarPrecio destino={{ modo: 'nueva' }} onGuardado={handleBuscadoNuevo} onClose={() => setBuscarNuevo(false)} />
+      )}
     </div>
   )
 }

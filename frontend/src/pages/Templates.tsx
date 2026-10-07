@@ -1,10 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { Library, ChevronDown, ChevronRight, Trash2, Plus, Pencil, Search, X, CheckCircle } from 'lucide-react'
-import { mensajeDeError, templateApi } from '../lib/api'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
+import { Library, ChevronDown, ChevronRight, Trash2, Plus, Pencil, Search, X, CheckCircle, Wand2 } from 'lucide-react'
+import { correccionesApi, mensajeDeError, templateApi } from '../lib/api'
+import type { LoteCorrecciones } from '../lib/api'
 import { compararFormulas, palabrasDe, tieneTodas } from '../lib/buscar'
 import { conTildes, nombreParametro } from '../lib/textos'
 import { useAuth } from '../contexts/AuthContext'
 import TemplateEditor from '../components/ui/TemplateEditor'
+import NotaCorreccion from '../components/NotaCorreccion'
 import type { Template, TemplateParam, TemplateResource } from '../types'
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
@@ -211,7 +214,8 @@ function TemplateCard({
                   </thead>
                   <tbody>
                     {groups[tipo].map((r, i) => (
-                      <tr key={i} className="border-b last:border-0 hover:bg-gray-50">
+                      <Fragment key={i}>
+                      <tr className={`hover:bg-gray-50 ${r.correccion?.texto ? '' : 'border-b last:border-0'}`}>
                         <td className="px-3 py-1.5 font-mono text-gray-400">{r.codigo || '—'}</td>
                         <td className="px-3 py-1.5 text-gray-800">{r.descripcion || '—'}</td>
                         <td className="px-3 py-1.5 font-mono text-gray-700">
@@ -228,6 +232,14 @@ function TemplateCard({
                               : `${r.desperdicio_pct}%`}
                         </td>
                       </tr>
+                      {r.correccion?.texto && (
+                        <tr className="border-b last:border-0">
+                          <td colSpan={5} className="px-3 pb-1.5 pt-0">
+                            <NotaCorreccion texto={r.correccion.texto} />
+                          </td>
+                        </tr>
+                      )}
+                      </Fragment>
                     ))}
                   </tbody>
                 </table>
@@ -237,6 +249,48 @@ function TemplateCard({
         </div>
       )}
     </div>
+  )
+}
+
+/** "Revisión de Ginkgo: 15 correcciones para aplicar · Ver" arriba de la lista. Si no hay o falla, no se muestra. */
+function AvisoCorrecciones() {
+  const [lote, setLote] = useState<LoteCorrecciones | null>(null)
+  useEffect(() => {
+    let vivo = true
+    correccionesApi.listar().then((l) => { if (vivo) setLote(l) }).catch(() => {})
+    return () => { vivo = false }
+  }, [])
+  const lista = lote?.correcciones ?? []
+  if (lista.length === 0) return null
+  const paraAplicar = lista.filter((c) => !c.aplicada && (c.estado === 'para_aplicar' || c.estado === 'en_parte')).length
+  const noCoinciden = lista.filter((c) => !c.aplicada && c.estado === 'no_coincide').length
+  const aplicadas = lista.filter((c) => !!c.aplicada).length
+  const pendiente = paraAplicar > 0
+  const partes = [
+    paraAplicar > 0 && `${paraAplicar} ${paraAplicar === 1 ? 'corrección' : 'correcciones'} para aplicar`,
+    aplicadas > 0 && `${aplicadas} ${aplicadas === 1 ? 'aplicada' : 'aplicadas'}`,
+    noCoinciden > 0 && `${noCoinciden} no ${noCoinciden === 1 ? 'coincide' : 'coinciden'}`,
+  ].filter(Boolean)
+  return (
+    <Link
+      to="/app/templates/correcciones"
+      data-testid="aviso-correcciones"
+      className={`mb-3 flex items-center gap-2.5 rounded-xl border px-3 py-2.5 text-sm shadow-sm transition-colors ${
+        pendiente
+          ? 'border-[#2D8D68]/40 bg-white hover:bg-[#F3FAF6] text-gray-800'
+          : 'border-gray-200 bg-white hover:bg-gray-50 text-gray-600'
+      }`}
+    >
+      <span className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${pendiente ? 'bg-[#2D8D68] text-white' : 'bg-[#E8F5EE] text-[#2D8D68]'}`} aria-hidden>
+        <Wand2 size={16} />
+      </span>
+      <span className="min-w-0 flex-1">
+        <strong className="font-semibold">{lote?.titulo || 'Revisión de Ginkgo'}:</strong> {partes.join(' · ')}
+      </span>
+      <span className="flex-shrink-0 inline-flex items-center gap-0.5 text-xs font-semibold text-[#2D8D68]">
+        Ver <ChevronRight size={14} />
+      </span>
+    </Link>
   )
 }
 
@@ -383,6 +437,8 @@ export default function Templates() {
       </div>
 
       <div className="max-w-3xl pt-4">
+        <AvisoCorrecciones />
+
         {/* Rubros */}
         {categories.length > 0 && (
           <div className="flex flex-wrap gap-2 mb-3" role="group" aria-label="Rubro">

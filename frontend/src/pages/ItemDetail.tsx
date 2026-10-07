@@ -26,6 +26,9 @@ import { escaleraDe, fmtPct, indirectosCompletos, pctsEscalera } from '../lib/ca
 import { fmtCurrency, fmtNumber, fmtPercent, unidadEnPalabras } from '../lib/format'
 import { ESTILO, estadoDeTrabajo, precioPorUnidad } from '../lib/semaforo'
 import BuscadorFormulas from '../components/ui/BuscadorFormulas'
+import BuscarPrecio, { IconoBuscarInternet, normalizarCodigo } from '../components/BuscarPrecio'
+import type { PrecioGuardado } from '../components/BuscarPrecio'
+import OrigenPrecio from '../components/OrigenPrecio'
 import PreguntaConversion, { factorComoTexto, leerFactor } from '../components/ui/PreguntaConversion'
 import { nombreParametro } from '../lib/textos'
 import type { ItemResource, BudgetItem, Budget, ItemAudit, IndirectConfig } from '../types'
@@ -128,9 +131,31 @@ interface ResourceRowProps {
   onEditDone: () => void
   // Muestra la cuenta, el redondeo y la cantidad con desperdicio ("Ver cómo se calcula")
   verCuenta: boolean
+  // Sin precio (en rojo): ofrece buscarlo en internet
+  sinPrecio?: boolean
+  onBuscar?: (r: ItemResource) => void
 }
 
-function ResourceRow({ resource, tipo, onSave, onDelete, startEditing, onEditDone, verCuenta }: ResourceRowProps) {
+/** "Sin precio" en rojo y, para quien edita, "Buscar en internet". */
+function SinPrecio({ resource, onBuscar }: { resource: ItemResource; onBuscar?: (r: ItemResource) => void }) {
+  const { puedeEditar } = useAuth()
+  return (
+    <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1" data-testid="recurso-sin-precio">
+      <span className="text-[10px] font-semibold text-red-600">Sin precio</span>
+      {puedeEditar && onBuscar && (
+        <button
+          onClick={() => onBuscar(resource)}
+          data-testid="buscar-en-internet"
+          className="inline-flex items-center gap-1 text-[10px] font-semibold text-sky-700 bg-white border border-sky-200 hover:bg-sky-50 rounded-full px-2 py-0.5"
+        >
+          <IconoBuscarInternet size={11} /> Buscar en internet
+        </button>
+      )}
+    </div>
+  )
+}
+
+function ResourceRow({ resource, tipo, onSave, onDelete, startEditing, onEditDone, verCuenta, sinPrecio, onBuscar }: ResourceRowProps) {
   const { puedeEditar } = useAuth()
   const [editing, setEditing] = useState(startEditing)
   const [draft, setDraft] = useState<Partial<ItemResource>>({})
@@ -287,9 +312,12 @@ function ResourceRow({ resource, tipo, onSave, onDelete, startEditing, onEditDon
   // Read mode
   if (tipo === 'mano_obra') {
     return (
-      <tr className="border-b border-gray-100 hover:bg-[#E8F5EE]/20 transition-colors">
-        <td className="px-3 py-1.5 font-mono text-[10px] text-gray-400">{resource.codigo ?? '—'}</td>
-        <td className="px-3 py-1.5 text-gray-800">{resource.descripcion ?? '—'}</td>
+      <tr className={`border-b border-gray-100 transition-colors ${sinPrecio ? 'bg-red-50/70 hover:bg-red-50' : 'hover:bg-[#E8F5EE]/20'}`}>
+        <td className={`px-3 py-1.5 font-mono text-[10px] ${sinPrecio ? 'text-red-500' : 'text-gray-400'}`}>{resource.codigo ?? '—'}</td>
+        <td className={`px-3 py-1.5 ${sinPrecio ? 'text-red-700' : 'text-gray-800'}`}>
+          {resource.descripcion ?? '—'}
+          {sinPrecio && <SinPrecio resource={resource} onBuscar={onBuscar} />}
+        </td>
         <td className="px-3 py-1.5 text-right text-gray-700">{fmtNumber(resource.trabajadores, 0)}</td>
         <td className="px-3 py-1.5 text-right text-gray-700">
           {fmtNumber(resource.dias, 2)}
@@ -316,9 +344,9 @@ function ResourceRow({ resource, tipo, onSave, onDelete, startEditing, onEditDon
   }
 
   return (
-    <tr className="border-b border-gray-100 hover:bg-[#E8F5EE]/20 transition-colors">
-      <td className="px-3 py-1.5 font-mono text-[10px] text-gray-400">{resource.codigo ?? '—'}</td>
-      <td className="px-3 py-1.5 text-gray-800">
+    <tr className={`border-b border-gray-100 transition-colors ${sinPrecio ? 'bg-red-50/70 hover:bg-red-50' : 'hover:bg-[#E8F5EE]/20'}`}>
+      <td className={`px-3 py-1.5 font-mono text-[10px] ${sinPrecio ? 'text-red-500' : 'text-gray-400'}`}>{resource.codigo ?? '—'}</td>
+      <td className={`px-3 py-1.5 ${sinPrecio ? 'text-red-700' : 'text-gray-800'}`}>
         {resource.descripcion ?? '—'}
         {verCuenta && resource.formula && (
           <span className="ml-1.5 font-mono text-[10px] text-gray-400" title="Cantidad (Q = cantidad del trabajo)">= {resource.formula}</span>
@@ -334,6 +362,7 @@ function ResourceRow({ resource, tipo, onSave, onDelete, startEditing, onEditDon
             redondeo{resource.cantidad_redondeo ? ` +${fmtNumber(resource.cantidad_redondeo, 2)}` : ''}
           </span>
         )}
+        {sinPrecio && <SinPrecio resource={resource} onBuscar={onBuscar} />}
       </td>
       <td className="px-3 py-1.5 text-gray-500 text-[10px] uppercase">{resource.unidad ?? '—'}</td>
       <td className="px-3 py-1.5 text-right text-gray-700">{fmtNumber(resource.cantidad, 2)}</td>
@@ -374,9 +403,12 @@ interface SectionProps {
   itemId: string
   onReload: () => void
   verCuenta: boolean
+  // Códigos sin precio (normalizados) y qué hacer al tocar "Buscar en internet"
+  faltantes: Set<string>
+  onBuscar: (r: ItemResource) => void
 }
 
-function ResourceSection({ tipo, recursos, itemQty, budgetId, itemId, onReload, verCuenta }: SectionProps) {
+function ResourceSection({ tipo, recursos, itemQty, budgetId, itemId, onReload, verCuenta, faltantes, onBuscar }: SectionProps) {
   const { puedeEditar } = useAuth()
   const [open, setOpen] = useState(true)
   const [adding, setAdding] = useState(false)
@@ -479,6 +511,8 @@ function ResourceSection({ tipo, recursos, itemQty, budgetId, itemId, onReload, 
                       startEditing={false}
                       onEditDone={() => {}}
                       verCuenta={verCuenta}
+                      sinPrecio={!!r.codigo && faltantes.has(normalizarCodigo(r.codigo)) && !r.lo_compra_cliente && !(r.precio_unitario > 0)}
+                      onBuscar={onBuscar}
                     />
                   ))}
                   {/* New resource row (inline) */}
@@ -1009,6 +1043,13 @@ export default function ItemDetail() {
   // No se pudieron traer los números nuevos después de un cambio (el cambio sí se guardó)
   const [refreshError, setRefreshError] = useState(false)
   const [templateModalOpen, setTemplateModalOpen] = useState(false)
+  // Buscar en internet el precio de un recurso sin precio, y lo que pasó al guardarlo
+  const [buscarPrecio, setBuscarPrecio] = useState<ItemResource | null>(null)
+  const [precioBuscado, setPrecioBuscado] = useState<
+    | { tipo: 'ok'; g: PrecioGuardado; codigo: string; recursos: number }
+    | { tipo: 'error'; g: PrecioGuardado; codigo: string; mensaje: string }
+    | null
+  >(null)
   // Materiales sin precio, tal como los calcula el servidor sobre lo guardado
   const [faltantes, setFaltantes] = useState<PrecioFaltante[]>([])
   // 'cargando' hasta que el servidor contesta por lo guardado ahora; 'error' si no se pudo revisar.
@@ -1091,6 +1132,22 @@ export default function ItemDetail() {
     refrescarFaltantes()
   }, [id, itemId, refrescarFaltantes])
 
+  // El precio quedó en la lista: los recursos de este trabajo con ese código lo toman (como un precio cargado a mano)
+  const tomarPrecio = useCallback(async (g: PrecioGuardado, codigo: string) => {
+    if (!id || !itemId) return
+    const cod = normalizarCodigo(codigo)
+    const mismos = recursos.filter((r) => normalizarCodigo(r.codigo) === cod)
+    try {
+      for (const r of mismos) {
+        await budgetApi.updateResource(id, itemId, r.id, { precio_unitario: g.precio, catalog_entry_id: g.entrada.id })
+      }
+      setPrecioBuscado({ tipo: 'ok', g, codigo, recursos: mismos.length })
+    } catch (err) {
+      setPrecioBuscado({ tipo: 'error', g, codigo, mensaje: mensajeDeError(err) })
+    }
+    await reloadResources()
+  }, [id, itemId, recursos, reloadResources])
+
   useEffect(() => {
     const cancelled = { v: false }
     loadData(cancelled)
@@ -1108,6 +1165,7 @@ export default function ItemDetail() {
   }, [id, itemId, loadData])
 
   const cantidad = item?.cantidad ?? 0
+  const codigosSinPrecio = new Set(faltantes.map((f) => normalizarCodigo(f.codigo)))
 
   // Unit prices from item record (backend calculated)
   const matUnit = item?.mat_unitario ?? 0
@@ -1280,9 +1338,63 @@ export default function ItemDetail() {
             Faltan precios:{' '}
             {faltantes.slice(0, 5).map((f) => f.descripcion || f.codigo).join(', ')}
             {faltantes.length > 5 && ` y ${faltantes.length - 5} más`}.{' '}
-            <Link to="/app/catalogs" className="underline font-semibold">Cargalos en Lista de precios.</Link>
+            <Link to="/app/catalogs" className="underline font-semibold">Cargalos en Lista de precios</Link>
+            {puedeEditar ? ' o buscalos en internet desde cada renglón en rojo.' : '.'}
           </div>
         </div>
+      )}
+
+      {precioBuscado && (
+        <div
+          role={precioBuscado.tipo === 'ok' ? 'status' : 'alert'}
+          data-testid="precio-buscado"
+          className={`mb-4 flex items-start gap-2 text-xs rounded-lg px-3 py-2 border ${
+            precioBuscado.tipo === 'ok' ? 'bg-[#E8F5EE] border-[#2D8D68]/30 text-[#143D34]' : 'bg-red-50 border-red-200 text-red-700'
+          }`}
+        >
+          {precioBuscado.tipo === 'ok'
+            ? <Check size={14} className="flex-shrink-0 mt-0.5 text-[#2D8D68]" />
+            : <AlertTriangle size={14} className="flex-shrink-0 mt-0.5" />}
+          <div className="min-w-0 flex-1 [overflow-wrap:anywhere]">
+            <p>
+              <strong>{precioBuscado.codigo}: {fmtARS(precioBuscado.g.precio)} sin IVA</strong>, guardado en «{precioBuscado.g.catalogo}».{' '}
+              {precioBuscado.tipo === 'ok'
+                ? 'Este trabajo ya lo usa.'
+                : `Pero este trabajo no lo pudo tomar: ${precioBuscado.mensaje}`}
+            </p>
+            <OrigenPrecio entrada={precioBuscado.g.entrada} className="mt-0.5" />
+            {precioBuscado.g.sinOrigen && (
+              <p className="mt-1 text-amber-800">El servidor todavía no guarda de dónde salió el precio (falta actualizarlo).</p>
+            )}
+            {precioBuscado.tipo === 'error' && (
+              <button
+                onClick={() => void tomarPrecio(precioBuscado.g, precioBuscado.codigo)}
+                className="mt-1.5 font-semibold underline"
+              >
+                Probá de nuevo
+              </button>
+            )}
+          </div>
+          <button onClick={() => setPrecioBuscado(null)} aria-label="Cerrar" className="opacity-60 hover:opacity-100 flex-shrink-0"><X size={14} /></button>
+        </div>
+      )}
+
+      {buscarPrecio && (
+        <BuscarPrecio
+          destino={{
+            modo: 'recurso',
+            codigo: buscarPrecio.codigo ?? '',
+            descripcion: buscarPrecio.descripcion ?? buscarPrecio.codigo ?? '',
+            unidad: buscarPrecio.tipo === 'mano_obra' ? 'jornal' : buscarPrecio.unidad,
+            tipo: buscarPrecio.tipo,
+          }}
+          onGuardado={(g) => {
+            const codigo = buscarPrecio.codigo ?? ''
+            setBuscarPrecio(null)
+            void tomarPrecio(g, codigo)
+          }}
+          onClose={() => setBuscarPrecio(null)}
+        />
       )}
 
       {item && id && <ItemParams budgetId={id} item={item} onSaved={reloadResources} />}
@@ -1308,6 +1420,8 @@ export default function ItemDetail() {
             itemId={itemId ?? ''}
             onReload={reloadResources}
             verCuenta={verCuenta}
+            faltantes={codigosSinPrecio}
+            onBuscar={setBuscarPrecio}
           />
         ))}
       </div>

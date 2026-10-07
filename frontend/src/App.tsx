@@ -20,6 +20,7 @@ import Catalogs from './pages/Catalogs'
 import Versions from './pages/Versions'
 import DiferenciasExcel from './pages/DiferenciasExcel'
 import Templates from './pages/Templates'
+import Correcciones from './pages/Correcciones'
 import Ayuda from './pages/Ayuda'
 
 export default function App() {
@@ -52,8 +53,13 @@ export default function App() {
             <Route path="settings/markups" element={<MarkupChain />} />
             <Route path="catalogs" element={<Catalogs />} />
             <Route path="templates" element={<Templates />} />
+            {/* Fórmulas → Correcciones (revisión de Ginkgo) */}
+            <Route path="templates/correcciones" element={<Correcciones />} />
+            <Route path="formulas/correcciones" element={<Navigate to="/app/templates/correcciones" replace />} />
             <Route path="ayuda" element={<Ayuda />} />
           </Route>
+
+          <Route path="/formulas/correcciones" element={<Navigate to="/app/templates/correcciones" replace />} />
 
           {/* 404 */}
           <Route path="*" element={<Navigate to="/app/dashboard" replace />} />
