@@ -362,7 +362,7 @@ def _save_catalog(db, org_id: str, filename: str, entries: list[dict]) -> dict: 
         .data or []
     )
     if not previous:
-        name = f"Catalogo - {filename}"
+        name = f"Catálogo - {filename}"
         created = db.table("price_catalogs").insert({
             "org_id": org_id,
             "name": name,
@@ -421,7 +421,7 @@ async def import_excel(
 ):
     """Import a construction budget Excel (Las Heras format)."""
     if not file.filename or not file.filename.lower().endswith((".xlsx", ".xls")):
-        raise HTTPException(400, "Solo archivos .xlsx o .xls")
+        raise HTTPException(400, "Subí un archivo de Excel (.xlsx o .xls)")
 
     contents = await file.read()
     df_dict = pd.read_excel(BytesIO(contents), sheet_name=None, header=None)
@@ -572,7 +572,7 @@ async def export_budget_excel(
         .execute()
     )
     if not items.data:
-        raise HTTPException(404, "Presupuesto sin items")
+        raise HTTPException(404, "El presupuesto no tiene trabajos")
 
     iva_pct = budget_config(db, org_id, budget.data)["iva_pct"]
     df = pd.DataFrame(excel_rows(items.data, iva_pct))
@@ -643,7 +643,7 @@ def _terrac_response(db, budget: dict, org_id: str) -> StreamingResponse:  # typ
         lambda: db.table("budget_items").select("*").eq("budget_id", bid).eq("org_id", org_id).order("id")
     )
     if not items:
-        raise HTTPException(404, "Presupuesto sin items")
+        raise HTTPException(404, "El presupuesto no tiene trabajos")
     items.sort(key=lambda i: (i.get("sort_order") is None, i.get("sort_order") or 0))
 
     ids = [str(i["id"]) for i in items if not is_section(i)]
@@ -961,7 +961,7 @@ async def export_budget_pdf(
         .execute()
     )
     if not items_result.data:
-        raise HTTPException(404, "Presupuesto sin items")
+        raise HTTPException(404, "El presupuesto no tiene trabajos")
     all_items = items_result.data
 
     # Indirect % of this budget (no error if missing — use defaults)
@@ -1058,7 +1058,7 @@ async def export_budget_pdf(
         ]
 
     kpi_data = [
-        kpi_cell("Items totales", str(items_count)),
+        kpi_cell("Trabajos", str(items_count)),
         kpi_cell("Costo Directo", _fmt_ars(directo_total)),
         kpi_cell("Indirectos + Beneficio + Impuestos",
                  _fmt_ars(indirecto_total + beneficio_total + impuestos_total)),
@@ -1163,7 +1163,7 @@ async def export_budget_pdf(
     # ══════════════════════════════════════════════════════════════════════════
 
     elements.append(PageBreak())
-    elements.append(Paragraph("Detalle de Items", section_heading_style))
+    elements.append(Paragraph("Detalle de trabajos", section_heading_style))
 
     sections = pdf_detail_groups(all_items)
 
@@ -1173,7 +1173,7 @@ async def export_budget_pdf(
     COL_W = [1.6*cm, 5.4*cm, 1.2*cm, 1.7*cm, 2.1*cm, 2.1*cm, 2.4*cm, 2.2*cm, 2.2*cm, 2.2*cm, 2.5*cm]
     detail_header = [
         "Código", "Descripción", "Unid.", "Cantidad",
-        "P.Unit MAT", "P.Unit MO", "Directo", "Indirecto", "Beneficio", "Impuestos", "Precio s/IVA",
+        "Materiales\npor unidad", "Mano de obra\npor unidad", "Directo", "Indirecto", "Beneficio", "Impuestos", "Precio\nsin IVA",
     ]
 
     table_rows: list = [detail_header]
@@ -1568,7 +1568,7 @@ def _client_pdf_response(budget_data: dict, all_items: list[dict], cfg: dict) ->
 
     # Ítem | Trabajo | Unidad | Cantidad | Precio unitario | Total
     col_w = [1.5 * cm, pw - 1.5 * cm - 1.4 * cm - 2.0 * cm - 2.8 * cm - 3.0 * cm, 1.4 * cm, 2.0 * cm, 2.8 * cm, 3.0 * cm]
-    header = ["Ítem", "Trabajo", "Unidad", "Cantidad", "Precio unitario", "Total"]
+    header = ["Código", "Trabajo", "Unidad", "Cantidad", "Precio unitario", "Total"]
 
     for rubro in data["rubros"]:
         rows: list = [header]

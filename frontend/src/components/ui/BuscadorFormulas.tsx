@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { ReactNode, Ref } from 'react'
 import { Search } from 'lucide-react'
+import { conTildes } from '../../lib/textos'
 import { palabrasDe, tieneTodas } from '../../lib/buscar'
 
 // Una fórmula de la lista (en Cargar obra viene del catálogo del Maestro, en el detalle de las fórmulas de la empresa)
@@ -129,7 +130,7 @@ export default function BuscadorFormulas<R extends FormulaBuscable, Q extends Fo
         {extra}
         {Object.entries(grupos).map(([cat, items]) => (
           <div key={cat}>
-            <div className="px-3 pt-2 pb-1 text-[11px] font-bold text-gray-500 uppercase tracking-wide">{cat}</div>
+            <div className="px-3 pt-2 pb-1 text-[11px] font-bold text-gray-500 uppercase tracking-wide">{conTildes(cat)}</div>
             {items.map((r) => (
               <button
                 key={r.id ?? r.codigo}

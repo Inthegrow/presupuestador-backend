@@ -148,7 +148,7 @@ function TreeItem({ node, selectedId, onSelect, onEditSection, onDeleteSection, 
         ) : (
           <>
             <span className={`truncate flex-1 ${isTopLevel ? 'font-semibold text-[12px]' : 'text-[11px]'}`}>
-              {node.description ?? '(sin descripcion)'}
+              {node.description ?? '(sin nombre)'}
             </span>
             {hasChildren && isTopLevel && (
               <span className="text-[9px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full font-medium tabular-nums">
@@ -161,7 +161,7 @@ function TreeItem({ node, selectedId, onSelect, onEditSection, onDeleteSection, 
                   <button
                     onClick={handleStartEdit}
                     className="p-0.5 text-gray-400 hover:text-[#2D8D68] hover:bg-[#E8F5EE] rounded transition-colors"
-                    title="Editar nombre"
+                    title="Cambiar el nombre del rubro" aria-label="Cambiar el nombre del rubro"
                   >
                     <Pencil size={11} />
                   </button>
@@ -170,7 +170,7 @@ function TreeItem({ node, selectedId, onSelect, onEditSection, onDeleteSection, 
                   <button
                     onClick={handleDeleteClick}
                     className="p-0.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors"
-                    title="Eliminar seccion"
+                    title="Borrar el rubro (está vacío)" aria-label="Borrar el rubro"
                   >
                     <Trash2 size={11} />
                   </button>
@@ -184,13 +184,13 @@ function TreeItem({ node, selectedId, onSelect, onEditSection, onDeleteSection, 
       {/* Delete confirmation */}
       {showDeleteConfirm && (
         <div className="mx-2 my-1 p-2 bg-red-50 border border-red-200 rounded-lg text-[11px]">
-          <p className="text-red-700 mb-1.5">Eliminar seccion "{node.description}"?</p>
+          <p className="text-red-700 mb-1.5">¿Borrar el rubro "{node.description}"?</p>
           <div className="flex gap-1.5">
             <button
               onClick={handleConfirmDelete}
               className="px-2 py-0.5 bg-red-500 text-white rounded-lg text-[10px] font-medium hover:bg-red-600 transition-colors"
             >
-              Eliminar
+              Borrar
             </button>
             <button
               onClick={handleCancelDelete}

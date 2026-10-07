@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { RefreshCw, Eye, GitCompare, Plus, CalendarClock } from 'lucide-react'
-import { budgetApi } from '../lib/api'
+import { budgetApi, textoDeError } from '../lib/api'
 import { useAuth } from '../contexts/AuthContext'
 import { fmtDate, fmtPesos } from '../lib/format'
 import type { Budget, BudgetVersion, PriceUpdateResult } from '../types'
@@ -15,12 +15,8 @@ function netoDe(v: BudgetVersion): number | null {
   return typeof viejo === 'number' && Number.isFinite(viejo) ? viejo : null
 }
 
-// La API contesta "409: {...json...}": mostrar solo el mensaje
-function errorText(e: unknown): string {
-  const msg = e instanceof Error ? e.message : String(e)
-  const m = msg.match(/"mensaje"\s*:\s*"((?:[^"\\]|\\.)*)"/) || msg.match(/"detail"\s*:\s*"((?:[^"\\]|\\.)*)"/)
-  return m ? m[1].replace(/\\"/g, '"') : msg || 'Error al actualizar precios'
-}
+// The server's message, whole (quotes, accents and line breaks included): lib/api.ts mensajeDeTexto
+const errorText = (e: unknown): string => textoDeError(e, 'No se pudieron actualizar los precios.')
 
 export default function Versions() {
   const { id } = useParams<{ id: string }>()
@@ -59,7 +55,7 @@ export default function Versions() {
         }
       })
       .catch((err) => {
-        setError(err instanceof Error ? err.message : 'Error al cargar versiones')
+        setError(textoDeError(err, 'No se pudieron cargar las versiones.'))
       })
       .finally(() => setLoading(false))
   }, [id])
@@ -67,12 +63,13 @@ export default function Versions() {
   async function createVersion() {
     if (!id) return
     setCreating(true)
+    setPriceError(null)
     try {
       await budgetApi.createVersion(id)
       const data = await budgetApi.getVersions(id)
       setVersions(mapVersions(data))
-    } catch {
-      // ignore
+    } catch (err) {
+      setPriceError(`No se guardó la versión: ${errorText(err)}`)
     }
     setCreating(false)
   }
@@ -131,14 +128,14 @@ export default function Versions() {
           ) : (
             <Plus size={14} />
           )}
-          Guardar version actual
+          Guardar versión
         </button>
         </div>
         )}
       </div>
 
       {priceError && (
-        <div className="max-w-2xl bg-red-50 border border-red-200 rounded-xl p-4 mb-4 text-sm text-red-700">{priceError}</div>
+        <div className="max-w-2xl bg-red-50 border border-red-200 rounded-xl p-4 mb-4 text-sm text-red-700 whitespace-pre-line">{priceError}</div>
       )}
 
       {priceResult && (
@@ -165,7 +162,7 @@ export default function Versions() {
 
       {error && (
         <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-4 text-sm text-red-700">
-          <p className="font-semibold mb-1">Error al cargar versiones</p>
+          <p className="font-semibold mb-1">No se pudieron cargar las versiones</p>
           <p className="text-xs">{error}</p>
         </div>
       )}
@@ -173,8 +170,8 @@ export default function Versions() {
       {!loading && versions.length === 0 ? (
         <div className="max-w-2xl bg-white rounded-xl border p-8 text-center text-gray-400">
           <RefreshCw size={32} className="mx-auto mb-3 text-gray-300" />
-          <p className="text-sm">No hay versiones guardadas todavia.</p>
-          <p className="text-xs mt-1">Guarda una version para crear un punto de restauracion.</p>
+          <p className="text-sm">No hay versiones guardadas todavía.</p>
+          <p className="text-xs mt-1">Guardá una versión para tener a qué volver si algo cambia.</p>
         </div>
       ) : (
         <div className="max-w-2xl space-y-3">

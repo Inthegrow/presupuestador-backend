@@ -1,11 +1,12 @@
 import { useEffect, useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { LayoutGrid, TrendingUp, DollarSign, Plus, Search } from 'lucide-react'
+import { LayoutGrid, TrendingUp, DollarSign, Plus, Search, ArrowRight } from 'lucide-react'
 import { budgetApi } from '../lib/api'
 import { fmtCurrency } from '../lib/format'
 import type { Budget, AnalysisResponse } from '../types'
 import BudgetCard from '../components/ui/BudgetCard'
 import { useAuth } from '../contexts/AuthContext'
+import { FORMAS_DE_EMPEZAR } from '../components/layout/formasDeEmpezar'
 
 function timeAgo(dateStr: string): string {
   const date = new Date(dateStr)
@@ -92,7 +93,7 @@ export default function Dashboard() {
           <div className="w-1 h-8 bg-[#2D8D68] rounded-full" />
           <h1 className="text-2xl font-extrabold text-gray-900">MIS PRESUPUESTOS</h1>
           <span className="bg-[#E8F5EE] text-[#1B5E4B] text-xs font-medium px-2 py-0.5 rounded-full">
-            {budgets.length} obras
+            {budgets.length} {budgets.length === 1 ? 'obra' : 'obras'}
           </span>
         </div>
         {puedeEditar && (
@@ -158,22 +159,42 @@ export default function Dashboard() {
         </div>
       )}
       {error && (
-        <div className="mb-4 bg-amber-50 border border-amber-200 text-amber-700 text-xs px-4 py-2 rounded-lg">
-          {error} Mostrando datos de ejemplo.
+        <div role="alert" className="mb-4 bg-amber-50 border border-amber-200 text-amber-700 text-xs px-4 py-2 rounded-lg flex items-center gap-3">
+          <span>{error}</span>
+          <button onClick={() => { setError(''); loadBudgets() }} className="font-semibold underline hover:no-underline">
+            Probar de nuevo
+          </button>
         </div>
       )}
 
-      {/* Budget cards */}
+      {/* Empty: the three ways to start, as cards */}
       {!loading && budgets.length === 0 && !error && (
-        <div className="mb-6 text-center py-12 bg-white rounded-xl border border-gray-100 shadow-sm">
-          <p className="text-gray-500 text-sm mb-2">No hay presupuestos todavía.</p>
-          {puedeEditar && (
-            <button
-              onClick={() => navigate('/app/import')}
-              className="bg-[#2D8D68] hover:bg-[#1B5E4B] text-white font-semibold px-4 py-2 rounded-lg text-xs transition-colors"
-            >
-              Importar Excel
-            </button>
+        <div className="mb-6 bg-white rounded-xl border border-gray-100 shadow-sm p-6" data-testid="tablero-vacio">
+          <p className="text-gray-900 font-semibold text-sm">Todavía no hay presupuestos.</p>
+          {puedeEditar ? (
+            <>
+              <p className="text-gray-500 text-sm mb-4">Elegí cómo querés empezar:</p>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                {FORMAS_DE_EMPEZAR.map((f) => (
+                  <button
+                    key={f.clave}
+                    onClick={() => navigate(f.ruta)}
+                    className="group text-left rounded-xl border border-gray-200 p-4 hover:border-[#2D8D68] hover:bg-[#F0FAF5] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#2D8D68]/40 transition-all"
+                  >
+                    <span className="w-9 h-9 rounded-lg bg-[#E8F5EE] text-[#2D8D68] flex items-center justify-center mb-3">
+                      <f.Icono size={18} />
+                    </span>
+                    <span className="flex items-center gap-1 text-sm font-semibold text-[#143D34]">
+                      {f.titulo}
+                      <ArrowRight size={14} className="text-[#2D8D68] opacity-0 -translate-x-1 group-hover:opacity-100 group-hover:translate-x-0 transition-all" />
+                    </span>
+                    <span className="block text-xs text-gray-500 mt-0.5 leading-snug">{f.linea}</span>
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : (
+            <p className="text-gray-500 text-sm">Los carga quien edita; cuando haya alguno, lo vas a ver acá.</p>
           )}
         </div>
       )}
@@ -207,7 +228,7 @@ export default function Dashboard() {
               const a = analyses[b.id]
               const dateStr = b.updated_at || b.created_at
               const itemsText = a ? `${a.items_count} ${a.items_count === 1 ? 'trabajo' : 'trabajos'}` : ''
-              const STATUS_MAP: Record<string, string> = { draft: 'Borrador', active: 'Activo', approved: 'Aprobado', sent: 'Enviado', review: 'En Revisión' }
+              const STATUS_MAP: Record<string, string> = { draft: 'Borrador', active: 'Activo', approved: 'Aprobado', sent: 'Enviado', review: 'En revisión' }
               const statusText = STATUS_MAP[b.status?.toLowerCase() || ''] || b.status || ''
               const detail = [statusText, itemsText].filter(Boolean).join(' - ')
               return (

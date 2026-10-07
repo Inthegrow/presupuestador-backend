@@ -27,6 +27,7 @@ import { fmtCurrency, fmtNumber, fmtPercent, unidadEnPalabras } from '../lib/for
 import { ESTILO, estadoDeTrabajo, precioPorUnidad } from '../lib/semaforo'
 import BuscadorFormulas from '../components/ui/BuscadorFormulas'
 import PreguntaConversion, { factorComoTexto, leerFactor } from '../components/ui/PreguntaConversion'
+import { nombreParametro } from '../lib/textos'
 import type { ItemResource, BudgetItem, Budget, ItemAudit, IndirectConfig } from '../types'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -35,9 +36,9 @@ type Tipo = ItemResource['tipo']
 
 const TIPO_LABELS: Record<Tipo, string> = {
   material: 'Materiales',
-  mano_obra: 'Mano de Obra - Personas',
-  equipo: 'Mano de Obra - Equipos',
-  mo_material: 'Materiales Indirectos',
+  mano_obra: 'Mano de obra',
+  equipo: 'Equipos',
+  mo_material: 'Materiales indirectos',
   subcontrato: 'Subcontratos',
 }
 
@@ -45,18 +46,18 @@ const TIPO_SECTIONS: Tipo[] = ['material', 'mano_obra', 'equipo', 'mo_material',
 
 const FIELD_LABELS: Record<string, string> = {
   cantidad: 'Cantidad',
-  mat_unitario: 'MAT Unitario',
-  mo_unitario: 'MO Unitario',
-  description: 'Descripcion',
+  mat_unitario: 'Materiales por unidad',
+  mo_unitario: 'Mano de obra por unidad',
+  description: 'Descripción',
   unidad: 'Unidad',
-  code: 'Codigo',
-  notas_calculo: 'Memoria de Calculo',
+  code: 'Código',
+  notas_calculo: 'Memoria de cálculo',
 }
 
 const SOURCE_CONFIG: Record<string, { label: string; icon: typeof Pencil; color: string }> = {
-  manual_edit: { label: 'Edicion manual', icon: Pencil, color: 'text-blue-600' },
-  ai_suggestion: { label: 'Sugerencia IA', icon: Cpu, color: 'text-purple-600' },
-  excel_import: { label: 'Importacion Excel', icon: Upload, color: 'text-green-600' },
+  manual_edit: { label: 'Cambio a mano', icon: Pencil, color: 'text-blue-600' },
+  ai_suggestion: { label: 'Sugerencia de la IA', icon: Cpu, color: 'text-purple-600' },
+  excel_import: { label: 'Importación del Excel', icon: Upload, color: 'text-green-600' },
   catalog_update: { label: 'Lista de precios', icon: BookOpen, color: 'text-orange-600' },
 }
 
@@ -194,7 +195,7 @@ function ResourceRow({ resource, tipo, onSave, onDelete, startEditing, onEditDon
             <input className={inputCls} value={draft.codigo ?? ''} onChange={(e) => set('codigo', e.target.value || null)} placeholder="COD" />
           </td>
           <td className="px-2 py-1.5">
-            <input className={inputCls} value={draft.descripcion ?? ''} onChange={(e) => set('descripcion', e.target.value || null)} placeholder="Descripcion" />
+            <input className={inputCls} value={draft.descripcion ?? ''} onChange={(e) => set('descripcion', e.target.value || null)} placeholder="Descripción" />
           </td>
           <td className="px-2 py-1.5">
             <input className={numCls} type="number" step="1" min="0" value={draft.trabajadores ?? 0} onChange={(e) => set('trabajadores', parseFloat(e.target.value) || 0)} />
@@ -230,7 +231,7 @@ function ResourceRow({ resource, tipo, onSave, onDelete, startEditing, onEditDon
           <input className={inputCls} value={draft.codigo ?? ''} onChange={(e) => set('codigo', e.target.value || null)} placeholder="COD" />
         </td>
         <td className="px-2 py-1.5">
-          <input className={inputCls} value={draft.descripcion ?? ''} onChange={(e) => set('descripcion', e.target.value || null)} placeholder="Descripcion" />
+          <input className={inputCls} value={draft.descripcion ?? ''} onChange={(e) => set('descripcion', e.target.value || null)} placeholder="Descripción" />
           {!verCuenta && (
             <div className="mt-1">
               <label className="inline-flex items-center gap-1 text-[10px] text-gray-500" title="Lo compra el cliente: se ve pero no suma al costo">
@@ -320,7 +321,7 @@ function ResourceRow({ resource, tipo, onSave, onDelete, startEditing, onEditDon
       <td className="px-3 py-1.5 text-gray-800">
         {resource.descripcion ?? '—'}
         {verCuenta && resource.formula && (
-          <span className="ml-1.5 font-mono text-[10px] text-gray-400" title="Cantidad (Q = cantidad del ítem)">= {resource.formula}</span>
+          <span className="ml-1.5 font-mono text-[10px] text-gray-400" title="Cantidad (Q = cantidad del trabajo)">= {resource.formula}</span>
         )}
         {verCuenta && resource.rendimiento && (
           <span className="ml-1.5 font-mono text-[10px] text-gray-400" title="Días = Q / rendimiento">días = Q / {resource.rendimiento}</span>
@@ -416,18 +417,18 @@ function ResourceSection({ tipo, recursos, itemQty, budgetId, itemId, onReload, 
     setNewEditStarted(false)
   }
 
-  const moHeaders = ['Codigo', 'Descripcion', 'Trabajadores', 'Dias', 'Cargas %', 'Jornales Efect.', 'Jornal', 'Subtotal', '']
+  const moHeaders = ['Código', 'Descripción', 'Trabajadores', 'Días', 'Cargas sociales %', 'Jornales', 'Jornal', 'Subtotal', '']
   const matHeaders = verCuenta
-    ? ['Codigo', 'Descripcion', 'Unidad', 'Cantidad', 'Desperdicio %', 'Cantidad con desperdicio', 'Precio Unit.', 'Subtotal', '']
-    : ['Codigo', 'Descripcion', 'Unidad', 'Cantidad', 'Desperdicio %', 'Precio Unit.', 'Subtotal', '']
+    ? ['Código', 'Descripción', 'Unidad', 'Cantidad', 'Desperdicio %', 'Cantidad con desperdicio', 'Precio por unidad', 'Subtotal', '']
+    : ['Código', 'Descripción', 'Unidad', 'Cantidad', 'Desperdicio %', 'Precio por unidad', 'Subtotal', '']
   const headers = tipo === 'mano_obra' ? moHeaders : matHeaders
 
   const tipoUnitLabel =
-    tipo === 'material' ? 'MAT'
-    : tipo === 'mano_obra' ? 'MO'
-    : tipo === 'equipo' ? 'EQ'
-    : tipo === 'mo_material' ? 'Mat.Ind'
-    : 'Sub'
+    tipo === 'material' ? 'Materiales por unidad'
+    : tipo === 'mano_obra' ? 'Mano de obra por unidad'
+    : tipo === 'equipo' ? 'Equipos por unidad'
+    : tipo === 'mo_material' ? 'Materiales indirectos por unidad'
+    : 'Subcontratos por unidad'
 
   return (
     <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
@@ -460,7 +461,7 @@ function ResourceSection({ tipo, recursos, itemQty, budgetId, itemId, onReload, 
                     {headers.map((h) => (
                       <th
                         key={h}
-                        className={`px-3 py-2 text-[10px] uppercase font-semibold tracking-wide ${h === '' ? 'w-16' : h === 'Descripcion' ? 'text-left' : h === 'Codigo' ? 'text-left' : h === 'Unidad' ? 'text-left' : 'text-right'}`}
+                        className={`px-3 py-2 text-[10px] uppercase font-semibold tracking-wide ${h === '' ? 'w-16' : h === 'Descripción' ? 'text-left' : h === 'Código' ? 'text-left' : h === 'Unidad' ? 'text-left' : 'text-right'}`}
                       >
                         {h}
                       </th>
@@ -509,7 +510,7 @@ function ResourceSection({ tipo, recursos, itemQty, budgetId, itemId, onReload, 
                     <tr className="bg-[#E8F5EE]/60">
                       <td colSpan={headers.length} className="px-3 py-1.5 text-right text-[10px] text-[#1B5E4B]">
                         {fmtARS(total)} ÷ {fmtNumber(itemQty, 2)} =&nbsp;
-                        <strong>Precio Unitario {tipoUnitLabel}: {fmtARS(unitPrice)}</strong>
+                        <strong>{tipoUnitLabel}: {fmtARS(unitPrice)}</strong>
                       </td>
                     </tr>
                   )}
@@ -552,7 +553,7 @@ function AuditHistory({ audits, loading }: { audits: ItemAudit[]; loading: boole
   if (audits.length === 0) {
     return (
       <div className="p-6 text-center text-gray-400 text-sm">
-        Sin cambios registrados para este item.
+        Sin cambios registrados para este trabajo.
       </div>
     )
   }
@@ -703,7 +704,7 @@ function ItemParams({
     for (const [k, v] of Object.entries(draft)) {
       const n = Number(v.trim().replace(',', '.'))
       if (v.trim() === '' || !Number.isFinite(n)) {
-        setError(`"${k}" tiene que ser un número`)
+        setError(`${nombreParametro(k)} tiene que ser un número.`)
         return
       }
       values[k] = n
@@ -714,7 +715,7 @@ function ItemParams({
       await budgetApi.updateItemParams(budgetId, item.id, values)
       onSaved()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error al guardar')
+      setError(mensajeDeError(err, 'No se pudo guardar.'))
     }
     setSaving(false)
   }
@@ -727,11 +728,12 @@ function ItemParams({
         <span className="text-[11px] font-bold text-[#2D8D68] tracking-wider">PARÁMETROS</span>
         {Object.keys(draft).map((k) => (
           <label key={k} className="flex items-center gap-1 text-xs text-gray-600">
-            <span className="font-mono">{k}</span>
+            <span title={`En la fórmula: ${k}`}>{nombreParametro(k)}</span>
             {puedeEditar ? (
               <input
                 value={draft[k]}
                 onChange={(e) => setDraft({ ...draft, [k]: e.target.value })}
+                aria-label={nombreParametro(k)}
                 className="w-20 text-right px-2 py-1 text-xs border border-gray-200 rounded-md focus:outline-none focus:border-[#2D8D68]"
               />
             ) : (
@@ -788,7 +790,7 @@ function TemplateModal({ budgetId, itemId, reemplaza, recursosCargados, descripc
   useEffect(() => {
     templateApi.list()
       .then((tmplList) => setTemplates(Array.isArray(tmplList) ? tmplList : []))
-      .catch(() => setError('Error cargando las fórmulas.'))
+      .catch(() => setError('No se pudieron cargar las fórmulas.'))
       .finally(() => setLoading(false))
   }, [])
 
@@ -845,7 +847,7 @@ function TemplateModal({ budgetId, itemId, reemplaza, recursosCargados, descripc
         if (err.detail.codigo === 'A_MEDIAS') Promise.resolve(onApplied()).catch(() => {})
       } else {
         setPaso(null)
-        setError('Error al aplicar la fórmula. Intentá de nuevo.')
+        setError('No se pudo aplicar la fórmula. Probá de nuevo.')
       }
       setApplying(null)
     }
@@ -1044,7 +1046,7 @@ export default function ItemDetail() {
     if (!id || !itemId) {
       setLoading(false)
       setAuditsLoading(false)
-      setError('Faltan parametros de presupuesto o item.')
+      setError('Falta el presupuesto o el trabajo en la dirección.')
       return
     }
 
@@ -1061,10 +1063,10 @@ export default function ItemDetail() {
       if (it) setItem(it)
       setRecursos(Array.isArray(res) ? res : [])
       if (ind) setIndirects(ind)
-      if (!it) setError('No se encontro el item.')
+      if (!it) setError('No encontré este trabajo.')
       refrescarFaltantes()
     } catch {
-      if (!cancelled?.v) setError('Error cargando datos del item.')
+      if (!cancelled?.v) setError('No se pudieron cargar los datos del trabajo.')
     } finally {
       if (!cancelled?.v) setLoading(false)
     }
@@ -1127,7 +1129,7 @@ export default function ItemDetail() {
       <div className="p-6 fade-in">
         <div className="flex items-center gap-2 text-sm text-gray-400">
           <div className="w-4 h-4 border-2 border-[#2D8D68] border-t-transparent rounded-full animate-spin" />
-          Cargando detalle del item...
+          Cargando el trabajo…
         </div>
       </div>
     )
@@ -1137,7 +1139,7 @@ export default function ItemDetail() {
     return (
       <div className="p-6 fade-in">
         <div className="flex items-center gap-1.5 text-xs mb-4">
-          <span className="text-gray-400 cursor-pointer hover:text-[#2D8D68]" onClick={() => navigate('/app/dashboard')}>Presupuestos</span>
+          <span className="text-gray-400 cursor-pointer hover:text-[#2D8D68]" onClick={() => navigate('/app/dashboard')}>Mis presupuestos</span>
           <ChevronRight size={12} className="text-gray-300" />
           <span className="text-gray-400 cursor-pointer hover:text-[#2D8D68]" onClick={() => navigate(`/app/budgets/${id ?? '1'}/editor`)}>{budget?.name ?? 'Presupuesto'}</span>
         </div>
@@ -1163,11 +1165,11 @@ export default function ItemDetail() {
       )}
       {/* Breadcrumb */}
       <div className="flex items-center gap-1.5 text-xs mb-2">
-        <span className="text-gray-400 cursor-pointer hover:text-[#2D8D68]" onClick={() => navigate('/app/dashboard')}>Presupuestos</span>
+        <span className="text-gray-400 cursor-pointer hover:text-[#2D8D68]" onClick={() => navigate('/app/dashboard')}>Mis presupuestos</span>
         <ChevronRight size={12} className="text-gray-300" />
         <span className="text-gray-400 cursor-pointer hover:text-[#2D8D68]" onClick={() => navigate(`/app/budgets/${id ?? '1'}/editor`)}>{budget?.name ?? 'Presupuesto'}</span>
         <ChevronRight size={12} className="text-gray-300" />
-        <span className="font-semibold text-gray-900">{item ? `${item.code ?? ''} ${item.description ?? ''}`.trim() : 'Item'}</span>
+        <span className="font-semibold text-gray-900">{item ? `${item.code ?? ''} ${item.description ?? ''}`.trim() : 'Trabajo'}</span>
       </div>
 
       {/* Back button + section label */}
@@ -1216,7 +1218,7 @@ export default function ItemDetail() {
           <div className="flex-1">
             <div className="flex items-start gap-x-3 gap-y-1 flex-wrap">
               <h1 className="text-xl font-extrabold text-[#143D34] min-w-0 break-words">
-                {item ? `${item.code ?? ''} ${item.description ?? ''}`.trim().toUpperCase() : 'DETALLE DE ITEM'}
+                {item ? `${item.code ?? ''} ${item.description ?? ''}`.trim().toUpperCase() : 'DETALLE DEL TRABAJO'}
               </h1>
               {item && faltantesEstado !== 'cargando' && (
                 <div className="flex items-center gap-2 flex-wrap pt-1" data-testid="estado-trabajo">
@@ -1247,7 +1249,7 @@ export default function ItemDetail() {
               {item?.notas_calculo && (
                 <span className="inline-flex items-center gap-1 text-[10px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">
                   <Calculator size={9} />
-                  Con memoria de calculo
+                  Con memoria de cálculo
                 </span>
               )}
             </div>
@@ -1331,7 +1333,7 @@ export default function ItemDetail() {
           className="w-full bg-[#E8F5EE]/30 px-4 py-2.5 flex items-center gap-2 border-b hover:bg-[#E8F5EE]/60 transition-colors"
         >
           <Calculator size={14} className="text-[#2D8D68]" />
-          <span className="font-bold text-sm text-[#2D8D68]">Memoria de Calculo</span>
+          <span className="font-bold text-sm text-[#2D8D68]">Memoria de cálculo</span>
           {item?.notas_calculo && (
             <span className="text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full font-medium">
               con datos
@@ -1397,7 +1399,7 @@ export default function ItemDetail() {
                 {item?.notas_calculo ? (
                   <pre className="whitespace-pre-wrap text-sm text-gray-700 font-mono bg-gray-50 rounded-lg p-3 mb-3">{item.notas_calculo}</pre>
                 ) : (
-                  <p className="text-sm text-gray-400 italic mb-3">Sin memoria de calculo para este item.</p>
+                  <p className="text-sm text-gray-400 italic mb-3">Sin memoria de cálculo para este trabajo.</p>
                 )}
                 {puedeEditar && (
                 <button
@@ -1408,7 +1410,7 @@ export default function ItemDetail() {
                   className="flex items-center gap-1 text-xs text-[#2D8D68] hover:text-[#1B5E4B] font-medium transition-colors"
                 >
                   <Pencil size={12} />
-                  {item?.notas_calculo ? 'Editar memoria' : 'Agregar memoria de calculo'}
+                  {item?.notas_calculo ? 'Editar memoria' : 'Agregar memoria de cálculo'}
                 </button>
                 )}
               </div>

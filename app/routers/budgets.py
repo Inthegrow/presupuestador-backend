@@ -125,7 +125,7 @@ async def create_full_budget(payload: CreateFullBudget, user: dict = Depends(req
     }
     budget_result = db.table("budgets").insert(budget_data).execute()
     if not budget_result.data:
-        raise HTTPException(500, "Error al crear presupuesto")
+        raise HTTPException(500, "No se pudo crear el presupuesto. Probá de nuevo.")
     budget = budget_result.data[0]
     budget_id = budget["id"]
 
@@ -304,7 +304,7 @@ async def update_item(
         .execute()
     )
     if not existing.data:
-        raise HTTPException(404, "Item no encontrado")
+        raise HTTPException(404, "Trabajo no encontrado")
 
     update_data = payload.model_dump(exclude_unset=True)
     if "parent_id" in update_data:
@@ -388,7 +388,7 @@ async def update_item(
     except Exception:
         logger.warning("audit_logs insert failed", exc_info=True)
 
-    return {"message": "Item actualizado", "item": updated.data}
+    return {"message": "Trabajo actualizado", "item": updated.data}
 
 
 @router.get("/{budget_id}/items/{item_id}/audits")
@@ -464,7 +464,7 @@ async def get_item_resources(
         .execute()
     )
     if not item.data:
-        raise HTTPException(404, "Item no encontrado")
+        raise HTTPException(404, "Trabajo no encontrado")
     result = (
         db.table("item_resources")
         .select("*")
@@ -494,7 +494,7 @@ async def get_item_missing_prices(
         .execute()
     )
     if not item.data:
-        raise HTTPException(404, "Item no encontrado")
+        raise HTTPException(404, "Trabajo no encontrado")
     resources = (
         db.table("item_resources")
         .select("*")
@@ -595,7 +595,7 @@ async def create_trabajo(
         db.table("item_templates").select("*").eq("id", payload.template_id).eq("org_id", org_id).execute().data
     )
     if not templates:
-        raise HTTPException(404, "Template no encontrado")
+        raise HTTPException(404, "Fórmula no encontrada")
     template = templates[0]
     check_factor(payload.factor)
 
@@ -815,13 +815,13 @@ async def update_item_params(
         .execute()
     )
     if not existing.data:
-        raise HTTPException(404, "Item no encontrado")
+        raise HTTPException(404, "Trabajo no encontrado")
 
     item = existing.data
     current = item.get("parametros") or {}
     unknown = sorted(set(payload.parametros) - set(current))
     if unknown:
-        raise HTTPException(422, [f"El ítem no tiene el parámetro '{unknown[0]}'"])
+        raise HTTPException(422, [f"El trabajo no tiene el parámetro '{unknown[0]}'"])
     parametros = {**current, **payload.parametros}
 
     try:
@@ -859,7 +859,7 @@ async def create_resource(
         .execute()
     )
     if not item.data:
-        raise HTTPException(404, "Item no encontrado")
+        raise HTTPException(404, "Trabajo no encontrado")
 
     resource_data = payload.model_dump()
     cantidad_efectiva, subtotal = _calc_resource_subtotal(resource_data)
@@ -885,7 +885,7 @@ async def create_resource(
 
     result = db.table("item_resources").insert(row).execute()
     if not result.data:
-        raise HTTPException(500, "Error al crear recurso")
+        raise HTTPException(500, "No se pudo agregar el recurso. Probá de nuevo.")
 
     _recalc_item_from_resources(db, iid, org_id, _budget_config(db, str(budget_id), org_id))
     return result.data[0]
@@ -916,7 +916,7 @@ async def update_resource(
         .execute()
     )
     if not item.data:
-        raise HTTPException(404, "Item no encontrado")
+        raise HTTPException(404, "Trabajo no encontrado")
 
     existing = (
         db.table("item_resources")
@@ -952,7 +952,7 @@ async def update_resource(
         .execute()
     )
     if not result.data:
-        raise HTTPException(500, "Error al actualizar recurso")
+        raise HTTPException(500, "No se pudo actualizar el recurso. Probá de nuevo.")
 
     _recalc_item_from_resources(db, iid, org_id, _budget_config(db, str(budget_id), org_id))
     return result.data[0]
@@ -982,7 +982,7 @@ async def delete_resource(
         .execute()
     )
     if not item.data:
-        raise HTTPException(404, "Item no encontrado")
+        raise HTTPException(404, "Trabajo no encontrado")
 
     existing = (
         db.table("item_resources")
@@ -1023,7 +1023,7 @@ async def bulk_create_resources(
         .execute()
     )
     if not item.data:
-        raise HTTPException(404, "Item no encontrado")
+        raise HTTPException(404, "Trabajo no encontrado")
 
     rows = []
     for resource in payload.resources:
@@ -1053,7 +1053,7 @@ async def bulk_create_resources(
 
     result = db.table("item_resources").insert(rows).execute()
     if not result.data:
-        raise HTTPException(500, "Error al crear recursos")
+        raise HTTPException(500, "No se pudieron agregar los recursos. Probá de nuevo.")
 
     _recalc_item_from_resources(db, iid, org_id, _budget_config(db, str(budget_id), org_id))
     return result.data
@@ -1102,7 +1102,7 @@ async def create_section(
     }
     result = db.table("budget_items").insert(section_row).execute()
     if not result.data:
-        raise HTTPException(500, "Error al crear seccion")
+        raise HTTPException(500, "No se pudo crear el rubro. Probá de nuevo.")
     return result.data[0]
 
 
@@ -1135,7 +1135,7 @@ async def assign_catalog_to_budget(
         .execute()
     )
     if not catalog.data:
-        raise HTTPException(404, "Catalogo no encontrado")
+        raise HTTPException(404, "Catálogo no encontrado")
 
     result = apply_catalog(db, org_id, budget, cid)
     return {
@@ -1209,7 +1209,7 @@ async def recalculate_budget(
     budget = _get_budget(db, bid, org_id)
     items = _get_items(bid, org_id)
     if not items:
-        raise HTTPException(404, "Presupuesto sin items")
+        raise HTTPException(404, "El presupuesto no tiene trabajos")
     return _run_cascade(db, org_id, budget, items)
 
 

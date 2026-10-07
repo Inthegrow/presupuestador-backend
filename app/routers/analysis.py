@@ -249,7 +249,7 @@ async def apply_indirects(
 
     items = _get_items(bid, org_id)
     if not items:
-        raise HTTPException(404, "Presupuesto sin items")
+        raise HTTPException(404, "El presupuesto no tiene trabajos")
 
     # Only leaf items (actual work items, not sections)
     updates = reprice_budget(db, org_id, budget, config, items)
@@ -299,7 +299,7 @@ async def cascade_recalculate(
     budget = _get_budget(db, bid, org_id)
     items = _get_items(bid, org_id)
     if not items:
-        raise HTTPException(404, "Presupuesto sin items")
+        raise HTTPException(404, "El presupuesto no tiene trabajos")
     return _run_cascade(db, org_id, budget, items)
 
 
@@ -504,11 +504,11 @@ def apply_catalog(db, org_id: str, budget: dict, catalog_id: str) -> dict:
         if codigo and entry.get("precio_sin_iva") is not None:
             price_map[codigo] = entry
     if not price_map:
-        raise HTTPException(404, "Catalogo sin entradas con precios")
+        raise HTTPException(404, "El catálogo no tiene precios cargados")
 
     items = _get_items(str(budget["id"]), org_id)
     if not items:
-        raise HTTPException(404, "Presupuesto sin items")
+        raise HTTPException(404, "El presupuesto no tiene trabajos")
 
     matched: list[dict] = []
     unmatched = 0
@@ -554,7 +554,7 @@ async def update_prices(
     budget = _get_budget(db, bid, org_id)
     items = _get_items(bid, org_id)
     if not items:
-        raise HTTPException(404, "Presupuesto sin items")
+        raise HTTPException(404, "El presupuesto no tiene trabajos")
 
     anterior = budget.get("precios_al")
     # Save the current state as a version BEFORE changing anything: if this
@@ -646,7 +646,7 @@ async def get_analysis(
     org_id = user["org_id"]
     items = _get_items(str(budget_id), org_id)
     if not items:
-        raise HTTPException(404, "Presupuesto vacio o sin acceso")
+        raise HTTPException(404, "El presupuesto está vacío o no tenés acceso")
 
     # Old items without stored IVA take the IVA of this budget, as /full and the exports do
     db = get_data_db()
@@ -800,7 +800,7 @@ async def get_version(
         .execute()
     )
     if not result.data:
-        raise HTTPException(404, "Version no encontrada")
+        raise HTTPException(404, "Versión no encontrada")
 
     return {
         "version_id": str(version_id),

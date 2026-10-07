@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { BarChart2, Download } from 'lucide-react'
-import { budgetApi } from '../lib/api'
+import { budgetApi, mensajeDeError } from '../lib/api'
 import { fmtCurrency } from '../lib/format'
 import { escaleraDe, indirectosCompletos, pctsEscalera } from '../lib/cascada'
 import CostSummaryBar from '../components/ui/CostSummaryBar'
@@ -120,7 +120,7 @@ export default function Analysis() {
         setIndirects(ind)
       })
       .catch((err) => {
-        setError(err instanceof Error ? err.message : 'Error al cargar el presupuesto')
+        setError(mensajeDeError(err, 'No se pudo cargar el presupuesto.'))
       })
       .finally(() => setLoading(false))
   }, [id])
@@ -154,7 +154,7 @@ export default function Analysis() {
     rubro: 'Rubro',
     piso: 'Piso',
     material: 'Material',
-    tipo: 'Tipo de Trabajo',
+    tipo: 'Gremio',
   }
 
   const budgetName = budget?.name ?? 'Presupuesto'
@@ -176,12 +176,12 @@ export default function Analysis() {
       <div className="flex-shrink-0">
         {/* Section label */}
         <div className="flex items-center gap-2 text-[#2D8D68] text-[11px] font-bold tracking-wider mb-1">
-          <BarChart2 size={14} /> VISTA DE ANALISIS
+          <BarChart2 size={14} /> ANÁLISIS
         </div>
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-3">
             <div className="w-1 h-7 bg-[#2D8D68] rounded-full" />
-            <h1 className="text-xl font-extrabold text-gray-900">ANALISIS — {budgetName.toUpperCase()}</h1>
+            <h1 className="text-xl font-extrabold text-gray-900">ANÁLISIS — {budgetName.toUpperCase()}</h1>
           </div>
           <button
             onClick={() => navigate(`/app/budgets/${id ?? '1'}/export`)}
@@ -199,13 +199,13 @@ export default function Analysis() {
         {loading && (
           <div className="flex items-center gap-2 text-sm text-gray-400 mb-3">
             <div className="w-4 h-4 border-2 border-[#2D8D68] border-t-transparent rounded-full animate-spin" />
-            Cargando analisis...
+            Cargando el análisis…
           </div>
         )}
 
         {error && (
           <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-3 text-sm text-red-700">
-            <p className="font-semibold mb-1">Error al cargar el analisis</p>
+            <p className="font-semibold mb-1">No se pudo cargar el análisis</p>
             <p className="text-xs">{error}</p>
           </div>
         )}
@@ -233,10 +233,10 @@ export default function Analysis() {
           <table className="w-full text-xs">
             <thead className="bg-[#E8F5EE] text-[#143D34] sticky top-0">
               <tr>
-                <th className="px-3 py-2 text-left font-semibold text-[11px] tracking-wide">Seccion</th>
-                <th className="px-3 py-2 text-right font-semibold text-[11px] tracking-wide">MAT</th>
-                <th className="px-3 py-2 text-right font-semibold text-[11px] tracking-wide">MO</th>
-                <th className="px-3 py-2 text-right font-semibold text-[11px] tracking-wide">Directo</th>
+                <th className="px-3 py-2 text-left font-semibold text-[11px] tracking-wide">{VIEW_MODE_LABELS[viewMode]}</th>
+                <th className="px-3 py-2 text-right font-semibold text-[11px] tracking-wide">Materiales</th>
+                <th className="px-3 py-2 text-right font-semibold text-[11px] tracking-wide">Mano de obra</th>
+                <th className="px-3 py-2 text-right font-semibold text-[11px] tracking-wide">Costo directo</th>
                 <th className="px-3 py-2 text-right font-semibold text-[11px] tracking-wide">Indirecto</th>
                 <th className="px-3 py-2 text-right font-semibold text-[11px] tracking-wide">Beneficio</th>
                 <th className="px-3 py-2 text-right font-semibold text-[11px] tracking-wide">Impuestos</th>
@@ -267,7 +267,7 @@ export default function Analysis() {
             </tbody>
             <tfoot className="bg-[#E8F5EE] font-semibold text-xs border-t border-[#2D8D68]/20 sticky bottom-0 z-10">
               <tr>
-                <td className="px-3 py-2.5 text-[#2D8D68] uppercase text-[10px] tracking-wider font-bold">TOTAL OBRA</td>
+                <td className="px-3 py-2.5 text-[#2D8D68] uppercase text-[10px] tracking-wider font-bold">TOTAL DE LA OBRA</td>
                 <td className="px-3 py-2.5 cost-cell text-[#143D34] font-extrabold text-sm">{fmtCurrency(matTotal)}</td>
                 <td className="px-3 py-2.5 cost-cell text-[#143D34] font-extrabold text-sm">{fmtCurrency(moTotal)}</td>
                 <td className="px-3 py-2.5 cost-cell text-blue-700 font-bold">{fmtCurrency(directoTotal)}</td>

@@ -44,8 +44,9 @@ const TILDES = [
 
   // 1. Datos: sin paso Precios; sin lista oficial lo dice; el nombre es obligatorio y se avisa
   await page.goto(`${B}/app/new-project`); await page.waitForTimeout(1500)
-  const pasos = await page.locator('span.mt-2.text-xs').allTextContents()
-  check(JSON.stringify(pasos) === JSON.stringify(['Datos', 'Estructura', 'Indirectos', 'Resultado']), `pasos: ${pasos.join(' → ')}`)
+  // Pasos como pastillas, igual que Cargar obra (entrega 7): 1 Datos · 2 Trabajos · 3 Indirectos · 4 Listo
+  const pasos = (await page.getByTestId('pasos').locator('li').allTextContents()).map((t) => t.trim())
+  check(JSON.stringify(pasos) === JSON.stringify(['1Datos', '2Trabajos', '3Indirectos', '4Listo']), `pasos: ${pasos.join(' → ')}`)
   check(/todavía no hay lista oficial/.test(await page.getByTestId('linea-precios').textContent()), 'sin lista oficial: lo dice en Datos')
   check(await page.getByText(/Superficie|Duración/).count() === 0, 'no pide superficie ni duración (no hay dónde guardarlas)')
   await page.getByRole('button', { name: /Siguiente/ }).click(); await page.waitForTimeout(300)
@@ -64,7 +65,7 @@ const TILDES = [
 
   // 2. Estructura: 5 trabajos en 2 rubros
   await page.getByRole('button', { name: /Siguiente/ }).click(); await page.waitForTimeout(500)
-  check(await page.getByRole('button', { name: /Subir plano \(IA\)/ }).count() === 1 && await page.getByRole('button', { name: /Importar JSON/ }).count() === 1, 'siguen "Subir plano (IA)" e "Importar JSON"')
+  check(await page.getByRole('button', { name: /Subir un plano/ }).count() === 1 && await page.getByRole('button', { name: /Importar un archivo \(\.json\)/ }).count() === 1, 'siguen "Subir un plano" e "Importar un archivo (.json)"')
   for (const [, desc, cant] of TILDES) {
     await page.getByRole('checkbox', { name: desc, exact: true }).click()
     if (cant) await page.getByLabel(`Cantidad de ${desc}`, { exact: true }).fill(cant)
@@ -145,23 +146,23 @@ const TILDES = [
   check(CLAVES.every((k) => generalDespues[k] === generalAntes[k]), 'los indirectos generales de la empresa no cambiaron')
 
   // 9. El editor muestra los trabajos adentro de sus rubros
-  await page.getByRole('button', { name: 'Abrir en el editor' }).click(); await page.waitForTimeout(2500)
+  await page.getByRole('button', { name: 'Abrir el presupuesto' }).click(); await page.waitForTimeout(2500)
   check(page.url().includes(`/app/budgets/${bud.id}/editor`), 'abre el editor del presupuesto nuevo')
   await shot('08_editor')
 
-  // 10. Subir plano (IA) + Definir manual: si la IA falla no queda nada creado; Cancelar no crea nada;
+  // 10. Subir un plano + A mano: si la IA falla no queda nada creado; Cancelar no crea nada;
   //     al confirmar, los rubros del plano van después de los armados a mano
   const PLANO = 'Prueba plano'
   const conNombre = async () => (await j('GET', '/budgets')).filter((x) => x.name === PLANO)
   await page.goto(`${B}/app/new-project`); await page.waitForTimeout(1500)
   await page.getByLabel(/Nombre del presupuesto/).fill(PLANO)
   await page.getByRole('button', { name: /Siguiente/ }).click(); await page.waitForTimeout(400)
-  await page.getByRole('button', { name: /Definir manual/ }).click()
+  await page.getByRole('button', { name: /^A mano/ }).click()
   await page.getByPlaceholder(/Nombre del rubro/).fill('Demolición')
   await page.getByRole('button', { name: /Agregar trabajo/ }).click()
   await page.getByPlaceholder('Descripción del trabajo').fill('Picado de revoques')
   await page.getByPlaceholder('Cant.').fill('30')
-  await page.getByRole('button', { name: /Subir plano \(IA\)/ }).click()
+  await page.getByRole('button', { name: /Subir un plano/ }).click()
   const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64')
   await page.locator('input[type=file]').setInputFiles({ name: 'plano.png', mimeType: 'image/png', buffer: png })
   await page.waitForTimeout(300)
@@ -208,7 +209,7 @@ const TILDES = [
     await page.getByLabel(/Nombre del presupuesto/).fill(nombre)
     await page.getByRole('button', { name: /Siguiente/ }).click(); await page.waitForTimeout(400)
     await page.getByRole('checkbox', { name: 'Contrapiso', exact: true }).click()
-    await page.getByRole('button', { name: /Subir plano \(IA\)/ }).click()
+    await page.getByRole('button', { name: /Subir un plano/ }).click()
     await page.locator('input[type=file]').setInputFiles({ name: 'plano.png', mimeType: 'image/png', buffer: png })
     await page.getByRole('button', { name: /Siguiente/ }).click(); await page.waitForTimeout(800)
   }
@@ -243,15 +244,15 @@ const TILDES = [
   await page.goto(`${B}/app/new-project`); await page.waitForTimeout(1500)
   await page.getByLabel(/Nombre del presupuesto/).fill('JSON raro')
   await page.getByRole('button', { name: /Siguiente/ }).click(); await page.waitForTimeout(500)
-  await page.getByRole('button', { name: /Importar JSON/ }).click(); await page.waitForTimeout(300)
+  await page.getByRole('button', { name: /Importar un archivo \(\.json\)/ }).click(); await page.waitForTimeout(300)
   await subirJson('nombre_numero.json', '[{"nombre":123,"items":[]}]')
   check(await page.getByRole('alert').filter({ hasText: 'Rubro 1: el nombre tiene que ser texto.' }).count() === 1, 'JSON con nombre numérico: error visible')
-  check(await page.getByText('Estructura importada').count() === 0 && await page.getByRole('button', { name: /Importar JSON/ }).count() === 1, 'JSON con nombre numérico: no importa y el asistente sigue andando')
+  check(await page.getByText('Del archivo:').count() === 0 && await page.getByRole('button', { name: /Importar un archivo \(\.json\)/ }).count() === 1, 'JSON con nombre numérico: no importa y el asistente sigue andando')
   await subirJson('valido.json', '[{"nombre":"Pintura","items":[{"descripcion":"Pintura interior","unidad":"m2","cantidad":120}]}]')
-  check(await page.getByText(/Estructura importada: 1 rubros,\s*1 trabajos/).count() === 1 && await page.getByRole('alert').count() === 0, 'JSON válido: arma su rubro y borra el error')
+  check(await page.getByText(/Del archivo: 1 rubro,\s*1 trabajo\b/).count() === 1 && await page.getByRole('alert').count() === 0, 'JSON válido: arma su rubro y borra el error')
   await subirJson('descripcion_numero.json', '[{"nombre":"Rubro","items":[{"descripcion":123}]}]')
   check(await page.getByRole('alert').filter({ hasText: 'Rubro 1, trabajo 1: la descripción tiene que ser texto.' }).count() === 1, 'JSON con descripción numérica: error visible')
-  check(await page.getByText(/Estructura importada: 1 rubros,\s*1 trabajos/).count() === 1, 'el JSON rechazado no pisa el que ya estaba importado')
+  check(await page.getByText(/Del archivo: 1 rubro,\s*1 trabajo\b/).count() === 1, 'el JSON rechazado no pisa el que ya estaba importado')
   await page.screenshot({ path: `${SHOTS}/14_json_rechazado.png` })
   await page.getByRole('button', { name: /Siguiente/ }).click(); await page.waitForTimeout(800)
   await page.getByRole('button', { name: /Crear presupuesto/i }).click(); await page.waitForTimeout(1500)

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Library, ChevronDown, ChevronRight, Trash2, Plus, Pencil, Search, X, CheckCircle } from 'lucide-react'
 import { mensajeDeError, templateApi } from '../lib/api'
 import { compararFormulas, palabrasDe, tieneTodas } from '../lib/buscar'
+import { conTildes, nombreParametro } from '../lib/textos'
 import { useAuth } from '../contexts/AuthContext'
 import TemplateEditor from '../components/ui/TemplateEditor'
 import type { Template, TemplateParam, TemplateResource } from '../types'
@@ -10,9 +11,9 @@ import type { Template, TemplateParam, TemplateResource } from '../types'
 
 const TIPO_LABELS: Record<string, string> = {
   material: 'Materiales',
-  mano_obra: 'Mano de Obra',
+  mano_obra: 'Mano de obra',
   equipo: 'Equipos',
-  mo_material: 'Mat. Indirectos',
+  mo_material: 'Materiales indirectos',
   subcontrato: 'Subcontratos',
 }
 
@@ -125,7 +126,7 @@ function TemplateCard({
             )}
             {template.categoria && (
               <span className="bg-purple-100 text-purple-700 rounded text-xs px-2 py-0.5 font-medium">
-                {template.categoria}
+                {conTildes(template.categoria)}
               </span>
             )}
           </div>
@@ -136,8 +137,8 @@ function TemplateCard({
           <p className="text-xs text-gray-400 mt-1">
             {recursos.length} {recursos.length === 1 ? 'recurso' : 'recursos'}
             {parametros.length > 0 && (
-              <span className="ml-2 font-mono">
-                {parametros.map((p) => `${p.clave} = ${p.valor}${p.unidad ? ` ${p.unidad}` : ''}`).join(' · ')}
+              <span className="ml-2" title={parametros.map((p) => `En la fórmula: ${p.clave}`).join(' · ')}>
+                {parametros.map((p) => `${nombreParametro(p.clave, p.descripcion, !p.unidad)} = ${p.valor}${p.unidad ? ` ${p.unidad}` : ''}`).join(' · ')}
               </span>
             )}
             {template.desperdicio_pct !== null && template.desperdicio_pct !== undefined && (
@@ -164,7 +165,7 @@ function TemplateCard({
                 ? 'bg-red-600 text-white hover:bg-red-700'
                 : 'text-gray-400 hover:text-red-600 hover:bg-red-50'
             } disabled:opacity-50`}
-            title={confirmDelete ? 'Confirmar eliminacion' : 'Eliminar fórmula'}
+            title={confirmDelete ? 'Tocá de nuevo para eliminarla' : 'Eliminar fórmula'}
           >
             {deleting ? (
               <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
@@ -199,12 +200,12 @@ function TemplateCard({
                 <table className="w-full text-[11px]">
                   <thead className="bg-gray-50">
                     <tr>
-                      <th className="px-3 py-1.5 text-left text-gray-500 font-medium">Codigo</th>
-                      <th className="px-3 py-1.5 text-left text-gray-500 font-medium">Descripcion</th>
+                      <th className="px-3 py-1.5 text-left text-gray-500 font-medium">Código</th>
+                      <th className="px-3 py-1.5 text-left text-gray-500 font-medium">Descripción</th>
                       <th className="px-3 py-1.5 text-left text-gray-500 font-medium">Cantidad</th>
                       <th className="px-3 py-1.5 text-left text-gray-500 font-medium">Unidad</th>
                       <th className="px-3 py-1.5 text-right text-gray-500 font-medium">
-                        {tipo === 'mano_obra' ? 'Cargas %' : 'Desperd. %'}
+                        {tipo === 'mano_obra' ? 'Cargas sociales %' : 'Desperdicio %'}
                       </th>
                     </tr>
                   </thead>
@@ -396,7 +397,7 @@ export default function Templates() {
                     : 'bg-white border border-gray-200 text-gray-600 hover:border-[#2D8D68] hover:text-[#2D8D68]'
                 }`}
               >
-                {cat === TODOS ? 'Todos los rubros' : cat}
+                {cat === TODOS ? 'Todos los rubros' : conTildes(cat)}
               </button>
             ))}
           </div>
@@ -408,7 +409,7 @@ export default function Templates() {
             {hayFiltro
               ? `${visibles.length} de ${templates.length} ${templates.length === 1 ? 'fórmula' : 'fórmulas'}`
               : `${templates.length} ${templates.length === 1 ? 'fórmula' : 'fórmulas'}`}
-            {activeCategory !== TODOS && <span className="text-gray-400"> · en {activeCategory}</span>}
+            {activeCategory !== TODOS && <span className="text-gray-400"> · en {conTildes(activeCategory)}</span>}
           </p>
         )}
 
@@ -453,8 +454,8 @@ export default function Templates() {
               <Search size={28} className="mx-auto mb-3 text-gray-300" />
               <p className="text-sm text-gray-700">
                 {palabras.length > 0
-                  ? <>Ninguna fórmula dice «{q.trim()}»{activeCategory !== TODOS ? <> en {activeCategory}</> : null}.</>
-                  : <>No hay fórmulas en {activeCategory}.</>}
+                  ? <>Ninguna fórmula dice «{q.trim()}»{activeCategory !== TODOS ? <> en {conTildes(activeCategory)}</> : null}.</>
+                  : <>No hay fórmulas en {conTildes(activeCategory)}.</>}
               </p>
               <p className="text-xs mt-1 mb-4">
                 {puedeEditar ? 'Probá con otra palabra o creá una nueva.' : 'Probá con otra palabra.'}

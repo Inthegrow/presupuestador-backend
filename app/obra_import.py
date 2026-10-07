@@ -61,7 +61,7 @@ MAPEO: list[dict] = [
     {"patron": r"LADRILLO HUECO DEL 8\b", "plantillas": [("5.1.6", 1.0)]},
     {"patron": r"^YESO PROYECTADO", "plantillas": [("5.5.5", 1.0)]},
     {"patron": r"^REVOQUE EXTERIOR CON HIDROFUGO CON SILLETA", "plantillas": [("5.5.3", 1.0)],
-     "nota": "La silleta no está en la fórmula: el Excel de la obra cobra este ítem bastante más caro."},
+     "nota": "La silleta no está en la fórmula: el Excel de la obra cobra este trabajo bastante más caro."},
     {"patron": r"^REVOQUE EXTERIOR CON HIDROFUGO", "plantillas": [("5.5.3", 1.0)]},
     {"patron": r"^REVOQUE (INTERIOR )?GRUESO FRATAZADO \+ HIDROFUGO", "plantillas": [("5.5.4", 1.0)],
      "nota": "La fórmula de grueso interior no lleva hidrófugo."},

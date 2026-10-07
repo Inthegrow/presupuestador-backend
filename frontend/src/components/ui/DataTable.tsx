@@ -91,7 +91,7 @@ export default function DataTable({ items, onEditItem, onViewDetail, onDeleteIte
         updateCellState(item.id, field, { justSaved: false })
       }, 1500)
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Error al guardar'
+      const message = err instanceof Error ? err.message : 'No se pudo guardar'
       updateCellState(key.id, key.field, { saving: false, error: message })
       // Clear error after 4 seconds
       setTimeout(() => {
@@ -165,7 +165,7 @@ export default function DataTable({ items, onEditItem, onViewDetail, onDeleteIte
           ) : null}
         </span>
         {state.hasAudit && !state.justSaved ? (
-          <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-blue-500" title="Editado manualmente" />
+          <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-blue-500" title="Cambiado a mano" />
         ) : null}
       </td>
     )
@@ -187,19 +187,19 @@ export default function DataTable({ items, onEditItem, onViewDetail, onDeleteIte
       <table className="w-full text-xs">
         <thead className="sticky top-0 z-10">
           <tr className="bg-[#E8F5EE] text-[#143D34]">
-            <th className="px-3 py-2 text-left font-semibold text-[11px] tracking-wide">Codigo</th>
-            <th className="px-3 py-2 text-left font-semibold text-[11px] tracking-wide">Descripcion</th>
+            <th className="px-3 py-2 text-left font-semibold text-[11px] tracking-wide">Código</th>
+            <th className="px-3 py-2 text-left font-semibold text-[11px] tracking-wide">Trabajo</th>
             <th className="px-3 py-2 text-left font-semibold text-[11px] tracking-wide">Unidad</th>
             <th className="px-3 py-2 text-right font-semibold text-[11px] tracking-wide">
               Cant.
               {onEditItem ? <Pencil size={8} className="inline ml-1 text-[#2D8D68]/50" /> : null}
             </th>
             <th className="px-3 py-2 text-right font-semibold text-[11px] tracking-wide">
-              MAT Unit
+              Materiales por unidad
               {onEditItem ? <Pencil size={8} className="inline ml-1 text-[#2D8D68]/50" /> : null}
             </th>
             <th className="px-3 py-2 text-right font-semibold text-[11px] tracking-wide">
-              MO Unit
+              Mano de obra por unidad
               {onEditItem ? <Pencil size={8} className="inline ml-1 text-[#2D8D68]/50" /> : null}
             </th>
             <th className="px-3 py-2 text-right font-semibold text-[11px] tracking-wide">Directo</th>
@@ -258,7 +258,7 @@ export default function DataTable({ items, onEditItem, onViewDetail, onDeleteIte
                     <button
                       onClick={() => onViewDetail(item.id)}
                       className="p-1 text-gray-300 hover:text-[#2D8D68] transition-colors rounded hover:bg-[#E8F5EE]"
-                      title="Ver detalle del ítem"
+                      title="Ver el detalle del trabajo" aria-label="Ver el detalle del trabajo"
                     >
                       <FileText size={13} />
                     </button>
@@ -270,7 +270,7 @@ export default function DataTable({ items, onEditItem, onViewDetail, onDeleteIte
                           onClick={() => { onDeleteItem(item.id, item.description ?? ''); setDeletingId(null) }}
                           className="px-1.5 py-0.5 text-[9px] bg-red-500 text-white rounded font-medium hover:bg-red-600"
                         >
-                          Si
+                          Sí
                         </button>
                         <button
                           onClick={() => setDeletingId(null)}
@@ -283,7 +283,7 @@ export default function DataTable({ items, onEditItem, onViewDetail, onDeleteIte
                       <button
                         onClick={() => setDeletingId(item.id)}
                         className="p-1 text-gray-300 hover:text-red-500 transition-colors rounded hover:bg-red-50"
-                        title="Eliminar item"
+                        title="Borrar el trabajo" aria-label="Borrar el trabajo"
                       >
                         <Trash2 size={13} />
                       </button>

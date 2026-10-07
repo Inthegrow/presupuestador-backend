@@ -38,6 +38,9 @@ export interface BudgetItem {
   neto_total: number
   iva_total?: number
   total_final?: number
+  // What the obra's Excel said (only budgets loaded from an Excel with totals; null otherwise)
+  excel_neto?: number | null
+  excel_directo?: number | null
   notas?: string
   notas_calculo?: string
   sort_order: number

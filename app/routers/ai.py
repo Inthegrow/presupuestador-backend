@@ -217,7 +217,7 @@ def _pdf_pages_to_images(content: bytes) -> list[bytes]:
     except ImportError:
         raise HTTPException(
             501,
-            "Soporte PDF no disponible en el servidor. "
+            "El servidor no puede leer archivos PDF. "
             "Subí el plano como imagen JPG o PNG.",
         )
 
@@ -367,7 +367,7 @@ async def analyze_plan(
     if client is None:
         raise HTTPException(
             503,
-            "Análisis IA no disponible — OPENAI_API_KEY no está configurada.",
+            "El análisis con inteligencia artificial no está disponible: falta configurar OPENAI_API_KEY.",
         )
 
     # Validate file type
@@ -531,7 +531,7 @@ async def analyze_plan(
                 "secciones": [
                     {
                         "codigo": "1",
-                        "nombre": "Items detectados",
+                        "nombre": "Trabajos detectados",
                         "items": [
                             {
                                 "codigo": s.get("code", f"1.{i+1}"),
@@ -1093,7 +1093,7 @@ async def insert_ai_suggestions(
     # Group items by section
     sections_map: dict[str, list[dict]] = {}
     for item in items:
-        sec_name = item.get("seccion_nombre", "Items IA")
+        sec_name = item.get("seccion_nombre", "Trabajos sugeridos por IA")
         if sec_name not in sections_map:
             sections_map[sec_name] = []
         sections_map[sec_name].append(item)
@@ -1132,7 +1132,7 @@ async def insert_ai_suggestions(
                 "budget_id": str(budget_id),
                 "org_id": org_id,
                 "code": item.get("codigo", f"{sec_code}.{ii + 1}"),
-                "description": item.get("descripcion", "Item IA"),
+                "description": item.get("descripcion", "Trabajo sugerido por IA"),
                 "unidad": item.get("unidad", "u"),
                 "cantidad": item_cantidad,
                 "notas": item.get("notas", "Sugerido por IA"),

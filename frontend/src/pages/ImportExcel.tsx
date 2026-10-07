@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Upload, CheckCircle } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
-import { budgetApi } from '../lib/api'
+import { budgetApi, textoDeError } from '../lib/api'
 import { fmtPesos } from '../lib/format'
 import { useAuth } from '../contexts/AuthContext'
 import FileUpload from '../components/ui/FileUpload'
@@ -47,8 +47,7 @@ export default function ImportExcel() {
       const res = await budgetApi.importExcel(formData)
       setResult(res)
     } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Error desconocido'
-      setError(`Error al importar: ${msg}`)
+      setError(`No se pudo importar: ${textoDeError(e, 'probá de nuevo.')}`)
     } finally {
       setImporting(false)
     }
@@ -58,7 +57,7 @@ export default function ImportExcel() {
     return (
       <div className="p-6 fade-in">
         <div className="flex items-center gap-2 text-[#2D8D68] text-[11px] font-bold tracking-wider mb-1">
-          <Upload size={14} /> IMPORTACION
+          <Upload size={14} /> IMPORTACIÓN
         </div>
         <div className="max-w-xl bg-white border rounded-xl shadow-sm px-6 py-5 text-sm text-gray-700">
           Tu usuario solo puede mirar.
@@ -70,14 +69,14 @@ export default function ImportExcel() {
   return (
     <div className="p-6 fade-in">
       <div className="flex items-center gap-2 text-[#2D8D68] text-[11px] font-bold tracking-wider mb-1">
-        <Upload size={14} /> IMPORTACION
+        <Upload size={14} /> IMPORTACIÓN
       </div>
       <div className="flex items-center gap-3 mb-2">
         <div className="w-1 h-7 bg-[#2D8D68] rounded-full" />
         <h1 className="text-xl font-extrabold text-gray-900">IMPORTAR EXCEL</h1>
       </div>
       <p className="text-gray-500 text-sm mb-6 ml-4">
-        Arrastra tu Excel de presupuesto. El sistema detecta hojas, items, listas de precios y recursos automaticamente.
+        Copiás un presupuesto ya hecho, con sus precios: arrastrá el Excel y la app arma los trabajos, sus recursos y las listas de precios.
       </p>
 
       <div className="max-w-3xl">
@@ -86,7 +85,7 @@ export default function ImportExcel() {
           <div className="mb-6">
             <FileUpload
               accept=".xlsx,.xls"
-              label="Arrastra tu Excel aca"
+              label="Arrastrá tu Excel acá"
               hint=".xlsx o .xls — Formato Terrac (Las Heras, Lugones, El Encuentro)"
               onFile={handleFile}
               icon={
@@ -112,12 +111,12 @@ export default function ImportExcel() {
             </div>
 
             <div className="bg-[#E8F5EE] rounded-lg p-3 border border-green-200 text-xs text-[#143D34] mb-4">
-              El sistema va a:
+              La app va a:
               <ul className="mt-1 space-y-0.5 ml-3 list-disc">
-                <li>Detectar listas de precios (00_Mat, 00_MO, 00_Eq, 00_Sub)</li>
-                <li>Importar items desde hoja 01_C&P</li>
-                <li>Leer hojas de detalle → recursos por item</li>
-                <li>Corregir codigos-fecha automaticamente si los detecta</li>
+                <li>Leer las listas de precios (00_Mat, 00_MO, 00_Eq, 00_Sub)</li>
+                <li>Copiar los trabajos de la hoja 01_C&amp;P</li>
+                <li>Leer las hojas de detalle: los recursos de cada trabajo</li>
+                <li>Corregir solos los códigos que Excel convirtió en fechas</li>
               </ul>
             </div>
 
@@ -136,7 +135,7 @@ export default function ImportExcel() {
                 {importing && (
                   <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
                 )}
-                {importing ? 'Importando...' : 'Importar como presupuesto nuevo'}
+                {importing ? 'Importando…' : 'Importar como presupuesto nuevo'}
               </button>
               <button
                 onClick={() => { setFile(null); setError('') }}
@@ -155,14 +154,14 @@ export default function ImportExcel() {
               <CheckCircle size={28} className="text-[#2D8D68]" />
               <div>
                 <h3 className="font-bold text-gray-900 text-lg">{result.budget_name}</h3>
-                <p className="text-xs text-gray-500">Importado exitosamente</p>
+                <p className="text-xs text-gray-500">Listo: quedó importado</p>
               </div>
             </div>
 
             <div className="grid grid-cols-4 gap-3 mb-5">
               <div className="bg-[#E8F5EE] rounded-lg p-3 text-center">
                 <div className="text-xl font-bold text-[#2D8D68]">{result.items_inserted}</div>
-                <div className="text-[10px] text-gray-500">ITEMS</div>
+                <div className="text-[10px] text-gray-500">TRABAJOS</div>
               </div>
               <div className="bg-[#E8F5EE] rounded-lg p-3 text-center">
                 <div className="text-xl font-bold text-[#2D8D68]">{result.resources_inserted}</div>
@@ -204,13 +203,13 @@ export default function ImportExcel() {
                 onClick={() => navigate(`/app/budgets/${result.budget_id}/editor`)}
                 className="bg-[#2D8D68] hover:bg-[#1B5E4B] text-white font-semibold px-5 py-2.5 rounded-lg text-sm transition-colors"
               >
-                Abrir en Editor
+                Abrir el presupuesto
               </button>
               <button
                 onClick={() => navigate('/app/dashboard')}
                 className="bg-white border text-gray-600 px-5 py-2.5 rounded-lg text-sm hover:bg-gray-50 transition-colors"
               >
-                Volver al Dashboard
+                Volver a Mis presupuestos
               </button>
               <button
                 onClick={() => { setFile(null); setResult(null) }}
@@ -227,9 +226,9 @@ export default function ImportExcel() {
           <p className="font-semibold mb-2">Formatos compatibles</p>
           <ul className="space-y-1 text-gray-600">
             <li>Listas de precios (00_Mat, 00_MO, 00_Eq, 00_Sub) → van a <strong>Lista de precios</strong></li>
-            <li>01_C&P → crea el <strong>arbol de items</strong> con costos</li>
-            <li>Hojas detalle (1.1, 1.2, etc.) → crean los <strong>recursos por item</strong></li>
-            <li>Codigos-fecha (Excel bug) → se <strong>corrigen automaticamente</strong></li>
+            <li>01_C&amp;P → arma los <strong>rubros y trabajos</strong> con sus costos</li>
+            <li>Hojas de detalle (1.1, 1.2, etc.) → arman los <strong>recursos de cada trabajo</strong></li>
+            <li>Códigos que Excel convirtió en fechas → se <strong>corrigen solos</strong></li>
           </ul>
         </div>
       </div>

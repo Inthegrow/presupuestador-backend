@@ -3,8 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import { AlertTriangle, CheckCircle, ChevronDown, ChevronUp, ClipboardCheck, Trash2 } from 'lucide-react'
 import FileUpload from '../components/ui/FileUpload'
 import BuscadorFormulas from '../components/ui/BuscadorFormulas'
-import { catalogApi, obraApi } from '../lib/api'
-import { borrarBorrador, duenoBorrador, guardarBorrador, leerBorrador } from '../lib/borrador'
+import { catalogApi, obraApi, textoDeError } from '../lib/api'
+import { borrarBorrador, duenoBorrador, guardarBorrador, haceCuanto, leerBorrador } from '../lib/borrador'
 import type { Borrador } from '../lib/borrador'
 import { useAuth } from '../contexts/AuthContext'
 import type { ObraAnalisis, ObraAsignaciones, ObraCarga, ObraPrecio, ObraPropuesta, ObraRecetaCatalogo, ObraTarea } from '../lib/api'
@@ -14,12 +14,8 @@ import type { PriceCatalog } from '../types'
 
 const AUTH_ENABLED = import.meta.env.VITE_AUTH_ENABLED === 'true'
 
-function errorText(e: unknown): string {
-  const msg = e instanceof Error ? e.message : String(e)
-  // The API answers "409: {...json...}": show only the message
-  const m = msg.match(/"mensaje"\s*:\s*"([^"]+)"/) || msg.match(/"detail"\s*:\s*"([^"]+)"/)
-  return m ? m[1] : msg
-}
+// The server's message, whole (quotes, accents and line breaks included): lib/api.ts mensajeDeTexto
+const errorText = (e: unknown): string => textoDeError(e)
 
 function normUnidad(u?: string | null): string {
   return (u || '').replace('²', '2').replace('³', '3').trim().toLowerCase()
@@ -31,24 +27,6 @@ function fmtNum(n: number): string {
 
 function fmtMillones(n: number): string {
   return Math.abs(n) >= 1_000_000 ? `$${fmtNum(n / 1_000_000)} M` : fmtCurrency(n)
-}
-
-// "hace 12 minutos", "hace 3 horas", "ayer" or the date
-function haceCuanto(iso: string, ahora = new Date()): string {
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return ''
-  const min = Math.floor((ahora.getTime() - d.getTime()) / 60000)
-  if (min < 1) return 'hace un momento'
-  if (min < 60) return `hace ${min} ${min === 1 ? 'minuto' : 'minutos'}`
-  const mismoDia = d.toDateString() === ahora.toDateString()
-  if (mismoDia) {
-    const h = Math.floor(min / 60)
-    return `hace ${h} ${h === 1 ? 'hora' : 'horas'}`
-  }
-  const ayer = new Date(ahora)
-  ayer.setDate(ayer.getDate() - 1)
-  if (d.toDateString() === ayer.toDateString()) return 'ayer'
-  return fmtDate(iso.slice(0, 10))
 }
 
 // What happened with the yellow jobs that went in without confirmation
@@ -815,7 +793,7 @@ export default function CargarObra() {
           </div>
         )}
         {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-lg">{error}</div>
+          <div role="alert" data-testid="error-cargar-obra" className="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-lg whitespace-pre-line">{error}</div>
         )}
 
         {/* Paso 2 */}

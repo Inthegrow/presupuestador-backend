@@ -106,7 +106,7 @@ def _fecha_or_warning(raw: object, where: str, warnings_list: list[str]) -> str 
     try:
         return fecha_iso(raw)
     except ValueError:
-        warnings_list.append(f"{where}: fecha '{raw}' no reconocida, quedo sin fecha")
+        warnings_list.append(f"{where}: fecha '{raw}' no reconocida, quedó sin fecha")
         return None
 
 
@@ -117,7 +117,7 @@ def _fecha_or_warning(raw: object, where: str, warnings_list: list[str]) -> str 
 async def upload_csv_catalog(
     file: UploadFile = File(...),
     tipo: CatalogTipo = Query(..., description="Tipo: material, mano_obra, equipo, subcontrato"),
-    name: str = Query(None, description="Nombre del catalogo (default: nombre del archivo)"),
+    name: str = Query(None, description="Nombre del catálogo (si no se indica, el nombre del archivo)"),
     user: dict = Depends(require_editor),
 ):
     """Upload a CSV price list and create a catalog with entries.
@@ -141,8 +141,8 @@ async def upload_csv_catalog(
     if not reader.fieldnames or not required_cols.issubset({c.strip().lower() for c in reader.fieldnames}):
         raise HTTPException(
             400,
-            f"CSV debe tener columnas: {', '.join(sorted(required_cols))}. "
-            f"Encontradas: {reader.fieldnames}",
+            f"El archivo .csv tiene que tener las columnas: {', '.join(sorted(required_cols))}. "
+            f"Tiene: {reader.fieldnames}",
         )
 
     # Normalize fieldnames
@@ -182,7 +182,7 @@ async def upload_csv_catalog(
         })
 
     if not rows:
-        raise HTTPException(400, "CSV sin filas validas")
+        raise HTTPException(400, "El archivo .csv no tiene filas válidas (con código y precio)")
 
     # Create catalog
     catalog_name = name or (file.filename or "catalogo").rsplit(".", 1)[0]
@@ -192,7 +192,7 @@ async def upload_csv_catalog(
         "source_file": file.filename,
     }).execute()
     if not catalog_result.data:
-        raise HTTPException(500, "Error al crear catalogo")
+        raise HTTPException(500, "No se pudo crear el catálogo. Probá de nuevo.")
     catalog_id = catalog_result.data[0]["id"]
 
     # Insert entries
@@ -308,7 +308,7 @@ def _parse_excel_rows(ws, warnings_list: list[str] | None = None) -> list[dict]:
 @router.post("/upload-excel")
 async def upload_excel_catalog(
     file: UploadFile = File(...),
-    name: str = Query(None, description="Prefijo de nombre para los catalogos (default: nombre del archivo)"),
+    name: str = Query(None, description="Comienzo del nombre de los catálogos (si no se indica, el nombre del archivo)"),
     user: dict = Depends(require_editor),
 ):
     """Upload an Excel file (.xlsx/.xls) with up to 4 tabs and create one catalog per tab.
@@ -323,12 +323,12 @@ async def upload_excel_catalog(
     (flexible aliases accepted: precio_unitario, precio_sin_iva, precio, costo, etc.)
     """
     if file.filename and not file.filename.lower().endswith((".xlsx", ".xls")):
-        raise HTTPException(400, "El archivo debe ser .xlsx o .xls")
+        raise HTTPException(400, "El archivo tiene que ser un Excel (.xlsx o .xls)")
 
     try:
         import openpyxl  # type: ignore[import]
     except ImportError:
-        raise HTTPException(500, "openpyxl no esta instalado en el servidor")
+        raise HTTPException(500, "El servidor no puede leer archivos Excel (falta openpyxl)")
 
     content = await file.read()
     try:
@@ -349,18 +349,18 @@ async def upload_excel_catalog(
     for sheet_name in wb.sheetnames:
         tipo = TAB_TIPO_MAP.get(sheet_name.strip().lower())
         if tipo is None:
-            warnings_list.append(f"Solapa '{sheet_name}' ignorada — nombre no reconocido")
+            warnings_list.append(f"Solapa '{sheet_name}' no se cargó: el nombre no es uno de los conocidos")
             continue
 
         ws = wb[sheet_name]
         try:
             rows = _parse_excel_rows(ws, warnings_list)
         except Exception as exc:
-            warnings_list.append(f"Solapa '{sheet_name}' con error al leer: {exc}")
+            warnings_list.append(f"Solapa '{sheet_name}' no se pudo leer: {exc}")
             continue
 
         if not rows:
-            warnings_list.append(f"Solapa '{sheet_name}' sin filas validas — saltada")
+            warnings_list.append(f"Solapa '{sheet_name}' no se cargó: no tiene filas válidas")
             continue
 
         # Create catalog
@@ -372,7 +372,7 @@ async def upload_excel_catalog(
         }).execute()
 
         if not catalog_result.data:
-            warnings_list.append(f"No se pudo crear el catalogo para la solapa '{sheet_name}'")
+            warnings_list.append(f"No se pudo crear el catálogo de la solapa '{sheet_name}'")
             continue
 
         catalog_id = catalog_result.data[0]["id"]
@@ -398,7 +398,7 @@ async def upload_excel_catalog(
     if catalogs_created == 0:
         raise HTTPException(
             400,
-            "No se creo ningun catalogo. Verificá que las solapas se llamen: "
+            "No se creó ningún catálogo. Revisá que las solapas se llamen: "
             "Materiales, Mano de obra, Equipos, Subcontratos (o variantes como Mat, MO, Eq, Sub).",
         )
 
@@ -457,7 +457,7 @@ async def update_catalog(
         .execute()
     )
     if not catalog.data:
-        raise HTTPException(404, "Catalogo no encontrado")
+        raise HTTPException(404, "Catálogo no encontrado")
 
     result = (
         db.table("price_catalogs")
@@ -493,7 +493,7 @@ async def list_catalog_entries(
         .execute()
     )
     if not catalog.data:
-        raise HTTPException(404, "Catalogo no encontrado")
+        raise HTTPException(404, "Catálogo no encontrado")
 
     q = (
         db.table("catalog_entries")
@@ -514,7 +514,7 @@ async def list_catalog_entries(
 @router.get("/{catalog_id}/search")
 async def search_catalog_entries(
     catalog_id: UUID,
-    q: str = Query(..., min_length=1, description="Texto de busqueda en descripcion"),
+    q: str = Query(..., min_length=1, description="Texto a buscar en la descripción"),
     user: dict = Depends(get_current_user),
 ):
     """Search catalog entries by description (case-insensitive)."""
@@ -532,7 +532,7 @@ async def search_catalog_entries(
         .execute()
     )
     if not catalog.data:
-        raise HTTPException(404, "Catalogo no encontrado")
+        raise HTTPException(404, "Catálogo no encontrado")
 
     result = (
         db.table("catalog_entries")
@@ -568,7 +568,7 @@ async def delete_catalog(
         .execute()
     )
     if not catalog.data:
-        raise HTTPException(404, "Catalogo no encontrado")
+        raise HTTPException(404, "Catálogo no encontrado")
 
     # Delete entries first, then catalog
     db.table("catalog_entries").delete().eq("catalog_id", cid).eq("org_id", org_id).execute()
@@ -601,7 +601,7 @@ async def create_catalog_entry(
         .execute()
     )
     if not catalog.data:
-        raise HTTPException(404, "Catalogo no encontrado")
+        raise HTTPException(404, "Catálogo no encontrado")
 
     try:
         precio = price_from_payload(data)
@@ -671,7 +671,7 @@ async def update_catalog_entry(
     except ValueError as exc:
         raise HTTPException(400, str(exc))
     if not update_data:
-        raise HTTPException(400, "No hay campos validos para actualizar")
+        raise HTTPException(400, "No hay datos válidos para actualizar")
 
     saved = update_entries(db, org_id, [({**entry.data, "id": eid}, update_data)])
     return saved[0] if saved else {"updated": True}
@@ -777,13 +777,13 @@ async def apply_catalog_to_budget(
         .execute()
     )
     if not catalog.data:
-        raise HTTPException(404, "Catalogo no encontrado")
+        raise HTTPException(404, "Catálogo no encontrado")
 
     # Same recalculation as "Actualizar precios" (every resource tipo, what the client
     # buys at $0, the cascade of the budget)
     result = apply_catalog(db, org_id, budget, cid)
     if not result["matched"] and not result["unmatched"]:
-        raise HTTPException(404, "Presupuesto sin recursos en items")
+        raise HTTPException(404, "Los trabajos del presupuesto no tienen recursos")
     return {
         "items_matched": result["matched"],
         "items_unmatched": result["unmatched"],

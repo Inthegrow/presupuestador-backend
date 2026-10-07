@@ -12,6 +12,8 @@ let ok = 0, bad = 0
 const check = (c, m) => { console.log((c ? 'OK   ' : 'FALLA') + ' ' + m); c ? ok++ : bad++ }
 const j = async (method, url, body) => (await fetch(API + url, { method, headers: { 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })).json()
 const RUBRO = 'Yeseria y durleria'
+// Como lo muestra la pantalla (entrega 7): con tildes; el dato guardado no cambia
+const RUBRO_VISTO = 'Yesería y durlería'
 
 // ¿El elemento está entero dentro de la ventana?
 async function aLaVista(page, loc) {
@@ -83,7 +85,7 @@ async function aLaVista(page, loc) {
   check(await page.getByTestId('formula').count() === total, '"Borrar la búsqueda" vuelve a mostrar todas')
 
   // 3. Rubro + orden natural por número
-  await page.getByRole('button', { name: RUBRO, exact: true }).click(); await page.waitForTimeout(300)
+  await page.getByRole('button', { name: RUBRO_VISTO, exact: true }).click(); await page.waitForTimeout(300)
   const codigos = await page.getByTestId('formula-codigo').allInnerTexts()
   const esperado = ['6.1', '6.2', '6.3', '6.4', '6.5', '6.6', '6.7', '6.8', '6.9', '6.10', '6.11']
   check(JSON.stringify(codigos.map((c) => c.trim())) === JSON.stringify(esperado), `orden por número: ${codigos.join(', ')}`)
@@ -106,14 +108,14 @@ async function aLaVista(page, loc) {
   const nueva = page.locator('[data-testid="formula"]', { hasText: 'Buña perimetral de prueba' })
   check(await nueva.count() === 1, 'la fórmula nueva aparece en la lista')
   check(await buscar.inputValue() === '', 'la búsqueda que la escondía se limpió')
-  check(await page.getByRole('button', { name: RUBRO, exact: true }).getAttribute('aria-pressed') === 'true', 'el rubro sigue elegido (no la escondía)')
+  check(await page.getByRole('button', { name: RUBRO_VISTO, exact: true }).getAttribute('aria-pressed') === 'true', 'el rubro sigue elegido (no la escondía)')
   check(await nueva.getByText('Fórmula creada').count() === 1, 'queda marcada "Fórmula creada"')
   check(await aLaVista(page, nueva), 'la lista bajó hasta ella: está a la vista')
   await page.screenshot({ path: SHOTS + '/06_formula_creada.png' })
   await page.waitForTimeout(5000)
   check(await page.getByText('Fórmula creada').count() === 0, 'la marca se va sola después de un momento')
   // Creada con otro rubro elegido: se vuelve a "Todos los rubros" para que se vea
-  await page.getByRole('button', { name: 'Albañileria', exact: true }).click(); await page.waitForTimeout(200)
+  await page.getByRole('button', { name: 'Albañilería', exact: true }).click(); await page.waitForTimeout(200)
   await boton.click()
   await modal.getByText('Nueva fórmula', { exact: true }).waitFor()
   await modal.locator('label', { hasText: 'Nombre' }).first().locator('input').fill('Prueba sin rubro')

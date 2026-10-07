@@ -558,9 +558,9 @@ def _write_coef(ws: Worksheet, obra: str, cfg: dict, totals: dict) -> None:
         ("SUBTOTAL 03 - CON BENEFICIO", None, "", totals["subtotal_03"], True),
         ("Ingresos brutos", pct["ingresos_brutos_pct"], "Subtotal 03", totals["iibb"], False),
         ("Impuesto al cheque", pct["imp_cheque_pct"], "Subtotal 03", totals["cheque"], False),
-        ("TOTAL (NETO) SIN IVA", None, "", totals["neto_total"], True),
-        ("IVA", pct["iva_pct"], "Total sin IVA", totals["iva_total"], False),
-        ("TOTAL CON IVA", None, "", totals["total_final"], True),
+        ("PRECIO SIN IVA", None, "", totals["neto_total"], True),
+        ("IVA", pct["iva_pct"], "Precio sin IVA", totals["iva_total"], False),
+        ("PRECIO CON IVA", None, "", totals["total_final"], True),
     ]
     r = 6
     for label, p, sobre, amount, strong in lines:

@@ -252,9 +252,9 @@ def get_user_session(
     except jwt.ExpiredSignatureError:
         raise HTTPException(401, "Token expirado")
     except jwt.InvalidTokenError as e:
-        raise HTTPException(401, f"Token invalido: {e}")
+        raise HTTPException(401, f"Token inválido: {e}")
     except Exception as e:
-        raise HTTPException(500, f"Error de autenticacion: {e}")
+        raise HTTPException(500, f"Error de autenticación: {e}")
 
     user_id = payload.get("sub")
     if not user_id:

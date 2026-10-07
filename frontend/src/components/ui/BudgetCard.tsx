@@ -11,7 +11,7 @@ const STATUS_LABELS: Record<string, string> = {
   active: 'Activo', activo: 'Activo',
   approved: 'Aprobado', aprobado: 'Aprobado',
   sent: 'Enviado', presentado: 'Enviado',
-  review: 'En Revisión',
+  review: 'En revisión',
   archivado: 'Archivado',
 }
 
@@ -89,7 +89,7 @@ export default function BudgetCard({ budget, directTotal, netoTotal, subtitle, t
           </span>
           <div className="flex items-center gap-2">
             <span className="text-[10px] text-gray-400">
-              {budget.source_file ? '✓ Excel' : 'Manual'}
+              {budget.source_file ? '✓ Excel' : 'A mano'}
             </span>
             {esAdmin && (
               <button
@@ -115,7 +115,7 @@ export default function BudgetCard({ budget, directTotal, netoTotal, subtitle, t
                 onClick={handleFirstConfirm}
                 className="flex-1 bg-red-500 hover:bg-red-600 text-white text-xs font-semibold py-1.5 rounded transition-colors"
               >
-                Si, eliminar
+                Sí, eliminar
               </button>
               <button
                 onClick={handleCancel}
@@ -134,16 +134,16 @@ export default function BudgetCard({ budget, directTotal, netoTotal, subtitle, t
             onClick={(e) => e.stopPropagation()}
           >
             <p className="text-xs text-red-800 mb-2 leading-relaxed">
-              <span className="font-bold">ATENCION:</span> Se eliminara permanentemente{' '}
-              <span className="font-semibold">"{budget.name}"</span> con todos sus items y recursos.
-              Esta accion NO se puede deshacer.
+              <span className="font-bold">ATENCIÓN:</span> se va a eliminar para siempre{' '}
+              <span className="font-semibold">"{budget.name}"</span> con todos sus trabajos y recursos.
+              No se puede deshacer.
             </p>
             <div className="flex gap-2">
               <button
                 onClick={handleConfirmDelete}
                 className="flex-1 bg-red-600 hover:bg-red-700 text-white text-xs font-bold py-1.5 rounded transition-colors"
               >
-                Confirmar eliminacion
+                Eliminar para siempre
               </button>
               <button
                 onClick={handleCancel}

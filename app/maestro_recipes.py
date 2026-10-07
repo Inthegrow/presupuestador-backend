@@ -73,8 +73,8 @@ PREMARCOS = {"7.2": "7.2.1", "7.3": "7.3.1"}
 REMOVED_CODES = {"5.6": "5.6 Recuadros se elimina: ya está en revoques (decisión con Sol)."}
 # Empty free items (no recipe)
 FREE_ITEMS = {
-    "7.5": ("7.5.1", "Otras terminaciones (ítem libre)"),
-    "9": ("9.1", "Cubierta (ítem libre)"),
+    "7.5": ("7.5.1", "Otras terminaciones (trabajo libre)"),
+    "9": ("9.1", "Cubierta (trabajo libre)"),
 }
 # Subrubros the system solves with floors (pisos)
 PER_FLOOR_CODES = {"4.3", "4.4", "4.5"}
@@ -543,7 +543,7 @@ def _parse_resource(sheet: _Sheet, tr: Translator, row: int, tipo: str, q_exampl
     if extra_notes:
         revisar = True
     if not uses_q_or_params(formula, params()):
-        notas.append(f"Número fijo ({fmt_num(example)}): no cambia con la cantidad del ítem.")
+        notas.append(f"Número fijo ({fmt_num(example)}): no cambia con la cantidad del trabajo.")
         revisar = True
 
     cached = _num(sheet.value(f"D{row}"))

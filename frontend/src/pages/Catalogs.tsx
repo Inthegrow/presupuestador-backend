@@ -3,7 +3,7 @@ import {
   BookOpen, Check, ChevronDown, ChevronRight, FileSpreadsheet, Pencil, Plus,
   Search, Trash2, Upload, X, Zap,
 } from 'lucide-react'
-import { budgetApi, catalogApi } from '../lib/api'
+import { budgetApi, catalogApi, textoDeError } from '../lib/api'
 import { useAuth } from '../contexts/AuthContext'
 import { fmtCurrency, fmtDate, todayIso } from '../lib/format'
 import type { Budget, CatalogEntry, PriceCatalog } from '../types'
@@ -25,7 +25,7 @@ function UploadForm({ onSuccess, onCancel }: { onSuccess: (catalog: PriceCatalog
       const catalog = await catalogApi.uploadCsv(file, name.trim(), tipo)
       onSuccess(catalog)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error subiendo CSV')
+      setError(textoDeError(err, 'No se pudo subir el archivo.'))
     } finally {
       setUploading(false)
     }
@@ -35,7 +35,7 @@ function UploadForm({ onSuccess, onCancel }: { onSuccess: (catalog: PriceCatalog
     <div className="bg-white rounded-xl border border-[#2D8D68] p-4 mb-4 shadow-sm">
       <div className="flex items-center gap-2 mb-3">
         <Upload size={14} className="text-[#2D8D68]" />
-        <span className="text-sm font-semibold text-gray-800">Nueva lista de precios por CSV</span>
+        <span className="text-sm font-semibold text-gray-800">Lista de precios nueva, desde un archivo (.csv)</span>
       </div>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div>
@@ -62,7 +62,7 @@ function UploadForm({ onSuccess, onCancel }: { onSuccess: (catalog: PriceCatalog
           </select>
         </div>
         <div>
-          <label className="block text-[11px] text-gray-500 mb-1 font-medium">Archivo CSV *</label>
+          <label className="block text-[11px] text-gray-500 mb-1 font-medium">Archivo (.csv) *</label>
           <input
             type="file"
             accept=".csv"
@@ -86,7 +86,7 @@ function UploadForm({ onSuccess, onCancel }: { onSuccess: (catalog: PriceCatalog
               Subiendo...
             </>
           ) : (
-            <><Upload size={12} /> Subir CSV</>
+            <><Upload size={12} /> Subir el archivo</>
           )}
         </button>
         <button
@@ -118,7 +118,7 @@ function ExcelUploadForm({ onSuccess, onCancel }: { onSuccess: (count: number) =
       setResult(res)
       onSuccess(res.catalogs_created)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error subiendo Excel')
+      setError(textoDeError(err, 'No se pudo subir el Excel.'))
     } finally {
       setUploading(false)
     }
@@ -232,7 +232,7 @@ function AddEntryRow({
       })
       onSaved(entry)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error guardando')
+      setError(textoDeError(err, 'No se pudo guardar.'))
     } finally {
       setSaving(false)
     }
@@ -353,7 +353,7 @@ function EditEntryRow({
       })
       onSaved(updated)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error guardando')
+      setError(textoDeError(err, 'No se pudo guardar.'))
     } finally {
       setSaving(false)
     }
@@ -515,7 +515,7 @@ function CatalogRow({
       await catalogApi.deleteCatalog(catalog.id)
       onDeleted(catalog.id)
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Error eliminando la lista')
+      alert(textoDeError(err, 'No se pudo eliminar la lista.'))
     } finally {
       setDeletingCatalog(false)
     }
@@ -530,7 +530,7 @@ function CatalogRow({
       setEntries(next)
       setFiltered(next.filter((e) => !searchQ.trim() || e.descripcion?.toLowerCase().includes(searchQ.toLowerCase())))
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Error eliminando entrada')
+      alert(textoDeError(err, 'No se pudo eliminar la entrada.'))
     } finally {
       setDeletingId(null)
     }
@@ -562,7 +562,7 @@ function CatalogRow({
       })
       setTimeout(() => setApplyResult(null), 5000)
     } catch (err) {
-      setApplyResult({ success: false, message: err instanceof Error ? err.message : 'Error al aplicar la lista' })
+      setApplyResult({ success: false, message: textoDeError(err, 'No se pudo aplicar la lista.') })
       setTimeout(() => setApplyResult(null), 5000)
     } finally {
       setApplying(false)
@@ -791,7 +791,7 @@ function CatalogRow({
                   className="flex-1 text-xs border rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-[#2D8D68] focus:border-transparent"
                   onClick={(e) => e.stopPropagation()}
                 >
-                  <option value="">Seleccionar presupuesto...</option>
+                  <option value="">Elegí un presupuesto…</option>
                   {budgets.map((b) => (
                     <option key={b.id} value={b.id}>{b.name}</option>
                   ))}
@@ -809,7 +809,7 @@ function CatalogRow({
                 </button>
               </div>
             ) : (
-              <p className="text-xs text-gray-400">No hay presupuestos disponibles. Crea uno primero.</p>
+              <p className="text-xs text-gray-400">Todavía no hay presupuestos. Creá uno primero.</p>
             )}
             {applyResult && (
               <div className={`mt-2 text-xs px-3 py-2 rounded-lg flex items-center gap-1.5 ${
@@ -849,7 +849,7 @@ export default function Catalogs() {
         setBudgets(buds)
       })
       .catch((err) => {
-        setError(err instanceof Error ? err.message : 'Error al cargar las listas de precios')
+        setError(textoDeError(err, 'No se pudieron cargar las listas de precios.'))
       })
       .finally(() => setLoading(false))
   }, [])
@@ -917,7 +917,7 @@ export default function Catalogs() {
               }`}
             >
               {showUpload ? <X size={13} /> : <Plus size={13} />}
-              {showUpload ? 'Cancelar' : 'Lista nueva (CSV)'}
+              {showUpload ? 'Cancelar' : 'Subir un archivo (.csv)'}
             </button>
             <button
               onClick={() => { setShowExcelUpload((prev) => !prev); setShowUpload(false) }}
@@ -953,7 +953,7 @@ export default function Catalogs() {
 
         {error && (
           <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-700">
-            <p className="font-semibold mb-1">Error al cargar las listas de precios</p>
+            <p className="font-semibold mb-1">No se pudieron cargar las listas de precios</p>
             <p className="text-xs">{error}</p>
           </div>
         )}
@@ -970,7 +970,7 @@ export default function Catalogs() {
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-8 text-center text-gray-400">
             <BookOpen size={32} className="mx-auto mb-3 text-gray-300" />
             <p className="text-sm">Todavía no hay listas de precios.</p>
-            <p className="text-xs mt-1">Subí un CSV para crear tu primera lista.</p>
+            <p className="text-xs mt-1">Subí un archivo (.csv) o un Excel para crear tu primera lista.</p>
           </div>
         )}
 

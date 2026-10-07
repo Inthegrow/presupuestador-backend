@@ -1,16 +1,12 @@
 import { Fragment, useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { ChevronDown, ChevronRight, GitCompare } from 'lucide-react'
-import { obraApi } from '../lib/api'
+import { obraApi, textoDeError } from '../lib/api'
 import type { ObraDiferencias, ObraDiferenciaTrabajo } from '../lib/api'
 import { fmtCurrency, fmtDate } from '../lib/format'
 
-function errorText(e: unknown): string {
-  const msg = e instanceof Error ? e.message : String(e)
-  // The API answers "409: {...json...}": show only the message
-  const m = msg.match(/"mensaje"\s*:\s*"((?:[^"\\]|\\.)*)"/) || msg.match(/"detail"\s*:\s*"((?:[^"\\]|\\.)*)"/)
-  return m ? m[1].replace(/\\"/g, '"') : msg
-}
+// The server's message, whole (quotes, accents and line breaks included): lib/api.ts mensajeDeTexto
+const errorText = (e: unknown): string => textoDeError(e)
 
 function fmtNum(n: number): string {
   return new Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(n)
@@ -278,12 +274,12 @@ export default function DiferenciasExcel() {
         )}
 
         {error && !sinTotales && (
-          <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-lg">{error}</div>
+          <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-lg whitespace-pre-line">{error}</div>
         )}
 
         {error && sinTotales && (
           <div className="bg-white border rounded-xl p-5">
-            <p className="text-sm text-gray-800 mb-4">{error}</p>
+            <p className="text-sm text-gray-800 mb-4 whitespace-pre-line">{error}</p>
             <button
               onClick={() => navigate('/app/cargar-obra')}
               className="bg-[#2D8D68] hover:bg-[#1B5E4B] text-white font-semibold px-5 py-2 rounded-lg text-sm"
