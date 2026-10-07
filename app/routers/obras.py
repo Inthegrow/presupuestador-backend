@@ -54,6 +54,7 @@ from app.obra_import import (
     excel_prices,
     item_notes,
     match_recipe,
+    obra_usa,
     parse_obra,
     plain,
     rule_for,
@@ -287,7 +288,8 @@ def _codes(pares: list) -> list[str]:
     return [str(p[0]) for p in pares or []]
 
 
-def _proposal(fila: dict, templates: dict[str, dict], memoria: dict[str, dict]) -> dict | None:
+def _proposal(fila: dict, templates: dict[str, dict], memoria: dict[str, dict],
+              obra: list[dict] | None = None) -> dict | None:
     """Recipe of a task before the screen's choice: memoria > regla (MAPEO).
 
     A suggestion by similar words is never the recipe (a weak match like "membrana
@@ -300,9 +302,10 @@ def _proposal(fila: dict, templates: dict[str, dict], memoria: dict[str, dict]) 
         return {"origen": "memoria", "pares": pares, "porque": PORQUE["memoria"],
                 "origenes": ["memoria" if p[1] is not None else None for p in pares]}
     if match_recipe(fila["descripcion"]):
-        rule = rule_for(fila, templates) or {}
+        rule = rule_for(fila, templates, obra=obra) or {}
+        # A rule variant says why ("La obra usa hormigón celular (hoja 4.1-6)")
         return {"origen": "regla", "pares": [list(p) for p in rule.get("plantillas", [])],
-                "porque": PORQUE["regla"], "origenes": list(rule.get("origen_factor") or [])}
+                "porque": rule.get("porque") or PORQUE["regla"], "origenes": list(rule.get("origen_factor") or [])}
     return None
 
 
@@ -310,13 +313,14 @@ def _same_factor(a: float | None, b: float | None) -> bool:
     return a is not None and b is not None and abs(float(a) - float(b)) < 1e-9
 
 
-def _decide(fila: dict, templates: dict[str, dict], memoria: dict[str, dict], elegida: dict | None) -> dict:
+def _decide(fila: dict, templates: dict[str, dict], memoria: dict[str, dict], elegida: dict | None,
+            obra: list[dict] | None = None) -> dict:
     """Origin, recipe pairs for build_plan (None = the automatic rule) and whether it is confirmed.
 
     "origenes": per pair, where its conversion came from: "nombre", "supuesto", "regla",
     "memoria", "mano" (Sol wrote it) or None (missing). None as a whole = the rule's own.
     """
-    base = _proposal(fila, templates, memoria)
+    base = _proposal(fila, templates, memoria, obra)
     if elegida is None:
         if base is None:
             return {"origen": None, "pares": None, "porque": None, "confirmada": False, "origenes": None}
@@ -452,6 +456,7 @@ def analyze(parsed: dict, templates: dict[str, dict], book: PriceBook, asignacio
     Excel has a cost (an obra that came only with quantities).
     """
     memoria = memoria or {}
+    obra = obra_usa(excel)  # what its detail sheets use: rule variants (hormigón celular → 5.2.4)
     filas = [f for f in parsed["filas"] if f["nivel"] == "item"]
     grupos: dict[str, list[dict]] = {}
     for f in filas:
@@ -468,12 +473,12 @@ def analyze(parsed: dict, templates: dict[str, dict], book: PriceBook, asignacio
         first = fs[0]
         sugeridas[key] = [] if (key in memoria or match_recipe(first["descripcion"])) \
             else suggest_recipes(first["descripcion"], templates)
-        d = _decide(first, templates, memoria, asignaciones.get(key))
+        d = _decide(first, templates, memoria, asignaciones.get(key), obra)
         decisiones[key] = d
         if d["pares"] is not None:
             efectivas[key] = {"plantillas": d["pares"]}
 
-    plan = build_plan(parsed, templates, efectivas)
+    plan = build_plan(parsed, templates, efectivas, obra)
     items = [i for i in plan["items"] if i["nivel"] == "item"]
     precios = _price_problems(items, book, excel)
     faltan_por_item: dict[str, set[str]] = {}
@@ -489,7 +494,7 @@ def analyze(parsed: dict, templates: dict[str, dict], book: PriceBook, asignacio
     tareas = []
     for key, its in by_key.items():
         first, d = its[0], decisiones[key]
-        rule = rule_for(first, templates, efectivas)
+        rule = rule_for(first, templates, efectivas, obra)
         receta = None
         partes: list[dict] = []
         if rule is not None:

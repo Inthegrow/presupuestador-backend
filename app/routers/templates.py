@@ -100,8 +100,9 @@ def factor_propuesto(descripcion: str, unidad_trabajo: object, template: dict) -
     codigo = str(template.get("codigo") or "")
     if not rule or not codigo:
         return None
-    # The recipes of the rule and of its alternative (the rule before a correction, see MAPEO)
-    pares = list(rule["plantillas"]) + list((rule.get("alternativa") or {}).get("plantillas") or [])
+    # The recipes of the rule, of its alternative (the rule before a correction) and of its variant (MAPEO)
+    pares = (list(rule["plantillas"]) + list((rule.get("alternativa") or {}).get("plantillas") or [])
+             + list((rule.get("variante") or {}).get("plantillas") or []))
     for code, factor in pares:
         if str(code) != codigo:
             continue

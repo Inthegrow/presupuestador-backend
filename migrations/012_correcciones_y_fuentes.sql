@@ -14,6 +14,8 @@ ALTER TABLE catalog_entries       ADD COLUMN IF NOT EXISTS fuente     text;
 ALTER TABLE catalog_entries       ADD COLUMN IF NOT EXISTS fuente_url text;
 ALTER TABLE catalog_price_history ADD COLUMN IF NOT EXISTS fuente     text;
 ALTER TABLE catalog_price_history ADD COLUMN IF NOT EXISTS fuente_url text;
+-- El proveedor de cada valor del historial (los valores viejos quedan en NULL)
+ALTER TABLE catalog_price_history ADD COLUMN IF NOT EXISTS proveedor  text;
 
 -- 2. Correcciones aplicadas
 CREATE TABLE IF NOT EXISTS correcciones_aplicadas (
@@ -37,12 +39,14 @@ CREATE INDEX IF NOT EXISTS idx_correcciones_aplicadas_org
 ALTER TABLE correcciones_aplicadas ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON correcciones_aplicadas FROM anon, authenticated;
 
--- Verificación (correr después). Tiene que dar: columnas = 4, tabla = 1, politicas = 0, rls = true,
+-- Verificación (correr después). Tiene que dar: columnas = 4, historial_proveedor = 1, tabla = 1, politicas = 0, rls = true,
 -- anon_lee = false, auth_lee = false
 -- SELECT
 --   (SELECT count(*) FROM information_schema.columns
 --     WHERE table_name IN ('catalog_entries', 'catalog_price_history')
 --       AND column_name IN ('fuente', 'fuente_url')) AS columnas,
+--   (SELECT count(*) FROM information_schema.columns
+--     WHERE table_name = 'catalog_price_history' AND column_name = 'proveedor') AS historial_proveedor,
 --   (SELECT count(*) FROM information_schema.tables WHERE table_name = 'correcciones_aplicadas') AS tabla,
 --   (SELECT count(*) FROM pg_policies WHERE tablename = 'correcciones_aplicadas') AS politicas,
 --   (SELECT relrowsecurity FROM pg_class WHERE relname = 'correcciones_aplicadas') AS rls,

@@ -13,14 +13,17 @@ from app.auth import get_current_user, require_admin, require_editor
 from app.budget_prices import HISTORY_CHUNK, fetch_all, today
 from app.catalog_prices import (
     FUENTE_A_MANO,
+    con_iva_proporcional,
     FUENTE_KEYS,
     falta_columna_fuente,
+    falta_columna_historial,
     fecha_iso,
     fuente_from_payload,
     fuente_importada,
     history_row,
     price_changed,
     price_from_payload,
+    sin_extras_historial,
     sin_fuente,
 )
 from app.db import get_data_db
@@ -55,14 +58,20 @@ _PROVEEDOR_ALIASES = {"proveedor", "prov", "supplier"}
 def record_history(db, entries: list[dict]) -> None:  # type: ignore[no-untyped-def]
     """Insert one catalog_price_history row per saved entry that has a price."""
     rows = [history_row(e) for e in entries if e.get("id") and e.get("precio_sin_iva") is not None]
-    if rows:
-        try:
-            db.table("catalog_price_history").insert(rows).execute()
-        except Exception as exc:
-            if not falta_columna_fuente(exc):
-                raise
-            # Without migration 012 the history has no origin columns
-            db.table("catalog_price_history").insert([sin_fuente(r) for r in rows]).execute()
+    insert_history_rows(db, rows)
+
+
+def insert_history_rows(db, rows: list[dict]) -> list[dict]:  # type: ignore[no-untyped-def]
+    """Insert price history rows. Without migration 012 the history has no fuente, fuente_url or
+    proveedor columns: they are dropped, no error."""
+    if not rows:
+        return []
+    try:
+        return db.table("catalog_price_history").insert(rows).execute().data or []
+    except Exception as exc:
+        if not falta_columna_historial(exc):
+            raise
+        return db.table("catalog_price_history").insert([sin_extras_historial(r) for r in rows]).execute().data or []
 
 
 def insert_entries(db, rows: list[dict]) -> list[dict]:  # type: ignore[no-untyped-def]
@@ -109,6 +118,10 @@ def update_entries(db, org_id: str, changes: list[tuple[dict, dict]]) -> list[di
     history: list[dict] = []
     for old, update_data in changes:
         update_data = dict(update_data)
+        if ("precio_sin_iva" in update_data and "precio_con_iva" not in update_data
+                and price_changed(old, {"precio_sin_iva": update_data["precio_sin_iva"]})):
+            # The price with VAT follows the new price (same ratio), or goes empty: never a stale one
+            update_data.update(con_iva_proporcional(old, update_data["precio_sin_iva"]))
         confirma = "precio_sin_iva" in update_data and not old.get("fecha_precio")
         if "fecha_precio" not in update_data and (price_changed(old, update_data) or confirma):
             # New price without an explicit date: it is today's price (in Argentina, the date the
@@ -747,7 +760,7 @@ async def get_entry_price_history(
 
     entry = (
         db.table("catalog_entries")
-        .select("id")
+        .select("*")
         .eq("id", eid)
         .eq("catalog_id", str(catalog_id))
         .eq("org_id", org_id)
@@ -765,7 +778,19 @@ async def get_entry_price_history(
         .order("created_at", desc=True)
         .execute()
     )
-    return [with_fuente(h) for h in result.data or []]
+    return [historial_con_proveedor(with_fuente(h), entry.data) for h in result.data or []]
+
+
+def historial_con_proveedor(row: dict, entry: dict) -> dict:
+    """A history row with ``proveedor``: the row's own (saved since migration 012). Older rows have
+    none: the entry's provider is only known for the value the entry has now (same price and date);
+    the others get null rather than a provider that may not be theirs."""
+    if row.get("proveedor") is not None:
+        return row
+    actual = (price_changed(entry, {"precio_sin_iva": row.get("precio_sin_iva"),
+                                    "fecha_precio": row.get("fecha_precio")}) is False
+              and entry.get("precio_sin_iva") is not None)
+    return {**row, "proveedor": entry.get("proveedor") if actual else None}
 
 
 # ── Delete catalog entry ─────────────────────────────────────────────────────

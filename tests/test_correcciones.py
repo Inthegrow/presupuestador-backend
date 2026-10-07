@@ -310,6 +310,14 @@ class TestAplicar:
         assert c3["estado"] == "en_parte"
         assert next(c for c in c3["cambios"] if c.get("codigo") == "YES")["estado_cambio"] == "salteado"
 
+    def test_precio_con_iva_sigue_y_deshacer_lo_restaura(self, client, db):
+        yesp = next(e for e in db.tables["catalog_entries"] if e["id"] == "e-yesp")
+        yesp["precio_con_iva"] = 21780  # 18000 + 21 %
+        assert client.post("/correcciones/C4/aplicar").status_code == 200
+        assert yesp["precio_con_iva"] == 23595  # 19500 + 21 %
+        assert client.post("/correcciones/C4/deshacer").status_code == 200
+        assert yesp["precio_con_iva"] == 21780 and yesp["precio_sin_iva"] == 18000
+
     def test_actualiza_precio_viejo(self, client, db):
         assert client.post("/correcciones/C4/aplicar").status_code == 200
         yesp = next(e for e in db.tables["catalog_entries"] if e["id"] == "e-yesp")
@@ -317,6 +325,7 @@ class TestAplicar:
         assert yesp["proveedor"] == "Easy" and yesp["fuente_url"] == "https://www.easy.com.ar/yeso-proyectado"
         [hist] = db.tables["catalog_price_history"]
         assert hist["entry_id"] == "e-yesp" and hist["fuente_url"] == "https://www.easy.com.ar/yeso-proyectado"
+        assert hist["proveedor"] == "Easy"
         otra = next(e for e in db.tables["catalog_entries"] if e["id"] == "e-otra")
         assert otra["precio_sin_iva"] == 18000
 

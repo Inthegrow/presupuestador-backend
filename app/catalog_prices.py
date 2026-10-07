@@ -57,8 +57,8 @@ def price_from_payload(data: dict) -> float | None:
 def history_row(entry: dict) -> dict:
     """Build a catalog_price_history row from a saved catalog entry.
 
-    The origin of the price (``fuente``, ``fuente_url``, migration 012) goes along only when
-    the entry has those columns: before the migration the history has no such columns.
+    The origin of the price (``fuente``, ``fuente_url``) and its ``proveedor`` go along when the
+    entry has them. Before migration 012 the history has no such columns: see sin_extras_historial.
     """
     row = {
         "entry_id": entry["id"],
@@ -66,15 +66,38 @@ def history_row(entry: dict) -> dict:
         "precio_sin_iva": entry.get("precio_sin_iva"),
         "fecha_precio": entry.get("fecha_precio"),
     }
-    for key in FUENTE_KEYS:
+    for key in HISTORIAL_EXTRAS:
         if key in entry:
             row[key] = entry.get(key)
     return row
 
 
+def con_iva_proporcional(old: dict, nuevo_sin_iva: object) -> dict:
+    """The new ``precio_con_iva`` when ``precio_sin_iva`` changes: same VAT ratio as before.
+
+    new con IVA = new sin IVA × old con IVA / old sin IVA. Without an old con IVA (or an old
+    sin IVA of 0) there is nothing to keep: an old con IVA becomes null (it no longer matches),
+    and an entry that had none stays without it. Returns {} when nothing has to be written.
+    """
+    def num(value: object) -> float | None:
+        try:
+            return float(value) if value not in (None, "") else None  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return None
+
+    viejo_con, viejo_sin, nuevo = num(old.get("precio_con_iva")), num(old.get("precio_sin_iva")), num(nuevo_sin_iva)
+    if viejo_con is None:
+        return {}
+    if nuevo is None or not viejo_sin or viejo_sin <= 0:
+        return {"precio_con_iva": None}
+    return {"precio_con_iva": round(nuevo * viejo_con / viejo_sin, 2)}
+
+
 # ── Origin of a price (migration 012) ─────────────────────────────────────────
 
 FUENTE_KEYS = ("fuente", "fuente_url")
+# Columns of catalog_price_history added by migration 012
+HISTORIAL_EXTRAS = (*FUENTE_KEYS, "proveedor")
 MAX_FUENTE = 500
 FUENTE_A_MANO = "Cargado a mano"
 
@@ -118,6 +141,17 @@ def falta_columna_fuente(exc: Exception) -> bool:
 
 def sin_fuente(row: dict) -> dict:
     return {k: v for k, v in row.items() if k not in FUENTE_KEYS}
+
+
+def falta_columna_historial(exc: Exception) -> bool:
+    """Writing the history failed because it has no fuente/fuente_url/proveedor column (no migration 012)."""
+    text = str(exc)
+    return (("fuente" in text or "proveedor" in text)
+            and ("column" in text or "PGRST204" in text or "42703" in text))
+
+
+def sin_extras_historial(row: dict) -> dict:
+    return {k: v for k, v in row.items() if k not in HISTORIAL_EXTRAS}
 
 
 def price_changed(old: dict, new: dict) -> bool:

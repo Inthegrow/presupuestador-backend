@@ -1157,3 +1157,26 @@ class TestExcelSinPrecios:
         res = diferencias(client)
         assert res.status_code == 409
         assert res.json()["detail"] == "Este Excel no traía precios: no hay con qué comparar."
+
+
+class TestHormigonCelular:
+    """Revisión de Ginkgo (B4): la obra usa hormigón celular (hoja 4.1-6) → contrapiso 5.2.4, y la propuesta dice por qué."""
+
+    def test_propuesta_dice_por_que(self, client):
+        from tests.test_obra_import import _P524, _ginkgo_workbook
+
+        extra = [{**copy.deepcopy(_P524), "id": "tmpl-5.2.4", "org_id": ORG, "nombre": "Contrapiso celular",
+                  "desperdicio_pct": None},
+                 {"codigo": "5.4.1", "unidad": "m2", "parametros": [], "recursos": [], "id": "tmpl-5.4.1",
+                  "org_id": ORG, "nombre": "Carpeta", "desperdicio_pct": None}]
+        tables = _tables()
+        tables["item_templates"] += extra
+        fake = FakeDB(tables)
+        with patch("app.routers.obras.get_data_db", return_value=fake):
+            body = analizar(client, wb=_ginkgo_workbook()).json()
+        tareas = _tareas(body)
+        contrapiso = tareas["CONTRAPISO E=10CM | m2"]["receta"]
+        assert contrapiso["codigo"] == "5.2.4"
+        assert contrapiso["porque"] == "La obra usa hormigón celular (hoja 4.1-6)"
+        telgopor = tareas["TELGOPOR 50 MM + CONTRAPISO EN AZOTEA ACCESIBLE E: 8CM | m2"]["receta"]
+        assert [p["codigo"] for p in telgopor["partes"]] == ["8.3", "5.2.4"]

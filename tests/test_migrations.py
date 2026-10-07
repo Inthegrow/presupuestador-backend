@@ -202,6 +202,8 @@ class TestCorreccionesMigration:
         for table in ("catalog_entries", "catalog_price_history"):
             for column in ("fuente", "fuente_url"):
                 assert re.search(rf"ALTER TABLE {table}\s+ADD COLUMN IF NOT EXISTS {column}\b", sql), (table, column)
+        assert re.search(r"ALTER TABLE catalog_price_history\s+ADD COLUMN IF NOT EXISTS proveedor\b", sql)
+        assert "AS historial_proveedor" in MIGRATION_012.read_text(encoding="utf-8")  # verification SELECT
         for column in ("org_id", "lote", "correccion_id", "estado", "aplicada_por", "aplicada_at", "deshecha_at",
                        "antes", "despues"):
             assert re.search(rf"^\s+{column}\s", sql, re.MULTILINE), column

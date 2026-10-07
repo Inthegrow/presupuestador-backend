@@ -16,9 +16,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from app import correcciones as corr
 from app.auth import get_current_user, require_editor
 from app.budget_prices import fetch_all
-from app.catalog_prices import history_row
+from app.catalog_prices import con_iva_proporcional, history_row
 from app.db import get_data_db
 from app.recipes import validate_template
+from app.routers.catalogs import insert_history_rows
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -34,7 +35,7 @@ A_MEDIAS_DESHACER = ("No se pudo deshacer la corrección y algunas fórmulas o p
                      "medias. Volvé a deshacerla.")
 AVISO_PRESUPUESTOS = ("Los presupuestos ya cargados no cambian solos. Para ver el efecto en Ginkgo, volvé a cargar "
                       "la obra en Cargar obra.")
-PRECIO_KEYS = ("precio_sin_iva", "fecha_precio", "proveedor", "fuente", "fuente_url")
+PRECIO_KEYS = ("precio_sin_iva", "precio_con_iva", "fecha_precio", "proveedor", "fuente", "fuente_url")
 
 
 # ── Lectura ──────────────────────────────────────────────────────────────────
@@ -195,8 +196,8 @@ class _Escritura:
         self.db.table("item_templates").delete().eq("id", str(row["id"])).eq("org_id", self.org_id).execute()
 
     def _historial(self, entry: dict) -> str | None:
-        hist = self.db.table("catalog_price_history").insert(history_row({**entry, "org_id": self.org_id})).execute()
-        hid = (hist.data or [{}])[0].get("id")
+        hist = insert_history_rows(self.db, [history_row({**entry, "org_id": self.org_id})])
+        hid = (hist or [{}])[0].get("id")
         if hid:
             self.inversas.append(lambda: self._borrar_historial(str(hid)))
         return str(hid) if hid else None
@@ -205,6 +206,9 @@ class _Escritura:
         self.db.table("catalog_price_history").delete().eq("id", hid).eq("org_id", self.org_id).execute()
 
     def precio(self, entry: dict, datos: dict, *, historial: bool = True) -> dict:
+        if "precio_con_iva" not in datos:
+            # The price with VAT follows the new price (same ratio as before), or goes empty
+            datos = {**datos, **con_iva_proporcional(entry, datos.get("precio_sin_iva"))}
         guardada = self._check(self.db.table("catalog_entries").update(datos).eq("id", str(entry["id"]))
                                .eq("org_id", self.org_id).execute(), f"el precio de {entry.get('codigo')}")[0]
         viejo = {k: entry.get(k) for k in datos}
@@ -325,7 +329,7 @@ async def aplicar_correccion(correccion_id: str, user: dict = Depends(require_ed
             if p["accion"] == "actualizar":
                 for entry in p["entradas"]:
                     antes["precios"].append({"id": str(entry["id"]), "codigo": entry.get("codigo"),
-                                             **{k: entry.get(k) for k in PRECIO_KEYS}})
+                                             **{k: entry[k] for k in PRECIO_KEYS if k in entry}})
                     guardada = escritura.precio(entry, p["datos"])
                     despues["precios"].append({"id": str(entry["id"]), "codigo": entry.get("codigo"),
                                                "historial_id": guardada["historial_id"],
@@ -449,7 +453,7 @@ async def deshacer_correccion(correccion_id: str, user: dict = Depends(require_e
             actual = entradas.get(p["id"])
             if actual is None:
                 continue
-            escritura.precio(actual, {k: p.get(k) for k in PRECIO_KEYS}, historial=False)
+            escritura.precio(actual, {k: p[k] for k in PRECIO_KEYS if k in p}, historial=False)
         for p in despues.get("precios") or []:
             if p.get("historial_id") and p["id"] in entradas:
                 hist = db.table("catalog_price_history").select("*").eq("id", p["historial_id"]).eq(

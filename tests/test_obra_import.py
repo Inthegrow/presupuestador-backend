@@ -12,6 +12,7 @@ from app.obra_import import (
     altura_from,
     build_plan,
     espesor_m_from,
+    expand_item,
     item_notes,
     match_recipe,
     parse_obra,
@@ -164,6 +165,115 @@ def test_mapeo_alternativa_build_plan_sin_formulas_faltantes() -> None:
                          "cantidad": 10, "excel": {}}]}
     plan = build_plan(parsed, _HOY)
     assert plan["plantillas_faltantes"] == [] and plan["items"][0]["plantillas"] == ["5.5.5"]
+
+
+# Revisión de Ginkgo, grupo B: revoque con silleta (5.5.7) y contrapiso de hormigón celular (5.2.4)
+_P524 = {"codigo": "5.2.4", "unidad": "m2", "parametros": [{"clave": "espesor_m", "valor": 0.1}],
+         "recursos": [{"tipo": "material", "codigo": "CEM", "formula": "Q*espesor_m*15"},
+                      {"tipo": "subcontrato", "codigo": "SUB-CONT", "formula": "Q"}]}
+_SIN_B = {**TEMPLATES, **{c: {"codigo": c, "unidad": "m2", "parametros": [], "recursos": []}
+                         for c in ("5.5.3", "5.4.1")}}
+_CON_B = {**_SIN_B, "5.5.7": {"codigo": "5.5.7", "unidad": "m2", "parametros": [], "recursos": []}, "5.2.4": _P524}
+_CELULAR = [{"texto": "BOMBEO HORMIGON CELULAR. INCLUYE MANO DE OBRA Y BOMBA.", "hoja": "4.1-6"}]
+_CASCOTE = [{"texto": "CASCOTE", "hoja": "4.2-7"}]
+_GINKGO_CONTRAPISOS = [
+    ("CONTRAPISO e=10cm", ["5.2.4"], 0.10),
+    ("CONTRAPISO EN HALL + RAMPAS. ESP.=10cm.", ["5.2.4"], 0.10),
+    ("CONTRAPISO EN INTERIOR e: 10cm", ["5.2.4"], 0.10),
+    ("CONTRAPISO/ CARPETA e=10cm", ["5.2.4"], 0.10),
+    ("TELGOPOR 50 mm + CONTRAPISO EN AZOTEA ACCESIBLE e: 8cm", ["8.3", "5.2.4"], 0.08),
+    ("TELGOPOR 50 mm + CONTRAPISO/CARPETA EN AZOTEA INACCESIBLE (BALCONES) e=4cm", ["8.3", "5.2.4"], 0.04),
+    ("TELGOPOR 50 mm + CONTRAPISO/ CARPETA EN AZOTEA ACCESIBLE e: 8cm", ["8.3", "5.2.4"], 0.08),
+]
+
+
+@pytest.mark.parametrize("descripcion", ["REVOQUE EXTERIOR CON HIDROFUGO CON SILLETA",
+                                         "Revoque exterior a la cal con silleta"])
+def test_mapeo_silleta(descripcion: str) -> None:
+    assert match_recipe(descripcion, _SIN_B)["plantillas"] == [("5.5.3", 1.0)]
+    assert "silleta no está en la fórmula" in match_recipe(descripcion, _SIN_B)["nota"]
+    assert match_recipe(descripcion, _CON_B)["plantillas"] == [("5.5.7", 1.0)]
+    # Without silleta it is the common one, with or without the new recipe
+    assert match_recipe("REVOQUE EXTERIOR CON HIDROFUGO", _CON_B)["plantillas"] == [("5.5.3", 1.0)]
+
+
+@pytest.mark.parametrize("descripcion, codigos, espesor", _GINKGO_CONTRAPISOS)
+def test_mapeo_contrapiso_celular_si_la_obra_lo_usa(descripcion: str, codigos: list, espesor: float) -> None:
+    fila = {"codigo": "4.2.7", "descripcion": descripcion, "unidad": "m²", "cantidad": 100, "nivel": "item",
+            "excel": {}}
+    rule = rule_for(fila, _CON_B, obra=_CELULAR)
+    assert [c for c, _ in rule["plantillas"]] == codigos
+    assert rule["porque"] == "La obra usa hormigón celular (hoja 4.1-6)"
+    assert rule["nota"].startswith("La obra usa hormigón celular (hoja 4.1-6).")
+    rows, params, _ = expand_item(fila, rule, _CON_B)
+    assert params["espesor_m"] == espesor
+    cem = next(r for r in rows if r["codigo"] == "CEM")
+    assert cem["cantidad"] == pytest.approx(100 * espesor * 15)
+    # Today's rule when the obra does not use it, when there is no detail sheet, or without 5.2.4
+    for templates, obra in ((_CON_B, _CASCOTE), (_CON_B, None), (_SIN_B, _CELULAR)):
+        hoy = rule_for(fila, templates, obra=obra)
+        assert [c for c, _ in hoy["plantillas"]] == [c if c != "5.2.4" else "5.2.3" for c in codigos]
+        assert "porque" not in hoy
+
+
+@pytest.mark.parametrize("descripcion", ["CONTRAPISO ALIVIANADO e=12cm", "Contrapiso de hormigón celular e: 12 cm",
+                                         "RELLENO CON CONTRAPISO BOMBEADO ESP. 12CM"])
+def test_mapeo_contrapiso_celular_por_palabra(descripcion: str) -> None:
+    fila = {"codigo": "1", "descripcion": descripcion, "unidad": "m2", "cantidad": 10, "nivel": "item", "excel": {}}
+    rule = rule_for(fila, _CON_B)  # obra without detail sheets
+    assert rule["plantillas"] == [("5.2.4", 1.0)] and "dice" in rule["porque"]
+    assert expand_item(fila, rule, _CON_B)[1]["espesor_m"] == 0.12
+    sin = rule_for(fila, _SIN_B)
+    assert sin["plantillas"] == [("5.2.3", 0.12)] and "porque" not in sin
+
+
+def test_mapeo_telgopor_celular_por_palabra() -> None:
+    rule = match_recipe("TELGOPOR 50 mm + CONTRAPISO CELULAR e: 8cm", _CON_B)
+    assert rule["plantillas"] == [("8.3", 1.0), ("5.2.4", 1.0)]
+
+
+def test_obra_usa_solo_las_hojas_de_detalle() -> None:
+    from app.obra_import import obra_usa
+    excel = {"SUB-CONT": {"descripcion": "BOMBEO HORMIGON CELULAR", "origen": "detalle", "hoja": "4.1-6"},
+             "SUB-HC": {"descripcion": "Hormigón celular", "origen": "lista", "hoja": "00_Sub"}}
+    assert obra_usa(excel) == [{"texto": "BOMBEO HORMIGON CELULAR", "hoja": "4.1-6"}]
+    assert obra_usa(None) == []
+
+
+def _ginkgo_workbook() -> openpyxl.Workbook:
+    """The contrapisos of Ginkgo's 01_C&P and its sheet 4.1-6 (bombeo de hormigón celular)."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "01_C&P"
+    ws["A1"] = "EDIFICIO GINKGO"
+    filas = [(None, "4. ALBAÑILERIA", None, None)] + [
+        (f"4.{i}", desc, "m²", 100) for i, (desc, _, _) in enumerate(_GINKGO_CONTRAPISOS, start=1)
+    ] + [("4.9", "CONTRAPISO/CARPETA EN BALCONES e=4cm", "m²", 20)]
+    for r, (a, b, c, d) in enumerate(filas, start=8):
+        ws.cell(r, 1, a)
+        ws.cell(r, 2, b)
+        ws.cell(r, 3, c)
+        ws.cell(r, 4, d)
+    _detail_sheet(wb, "4.1-6", "4.1-6", "CONTRAPISO EN HALL + RAMPAS. ESP.=10cm.", [
+        ("MATERIALES", [("CEM", "Bolsa Cemento Loma Negra 25 k", "u", 9000)]),
+        ("SUBCONTRATOS", [("SUB-CONT", "BOMBEO HORMIGON CELULAR. Incluye mano de obra y bomba.", "m2", 13000)]),
+    ])
+    return wb
+
+
+def test_ginkgo_elige_hormigon_celular() -> None:
+    from app.obra_import import excel_prices, obra_usa
+    wb = _ginkgo_workbook()
+    obra = obra_usa(excel_prices(wb))
+    plan = build_plan(parse_obra(wb), _CON_B, obra=obra)
+    elegidas = {i["descripcion"]: i["plantillas"] for i in plan["items"] if i["nivel"] == "item"}
+    for descripcion, codigos, _ in _GINKGO_CONTRAPISOS:
+        assert elegidas[descripcion] == codigos, descripcion
+    assert elegidas["CONTRAPISO/CARPETA EN BALCONES e=4cm"] == ["5.4.1"]
+    # Without the new recipe (correction not applied): as today
+    plan = build_plan(parse_obra(wb), _SIN_B, obra=obra)
+    assert {tuple(i["plantillas"]) for i in plan["items"] if i["nivel"] == "item"} == {
+        ("5.2.3",), ("8.3", "5.2.3"), ("5.4.1",)}
 
 
 @pytest.mark.parametrize("descripcion, espesor", [

@@ -148,3 +148,83 @@ class TestImportar:
         nueva = next(e for e in db.tables["catalog_entries"] if e["codigo"] == "ARE")
         assert nueva["fuente"] == "Importado de lista octubre.csv"
         assert db.tables["catalog_price_history"][0]["fuente"] == "Importado de lista octubre.csv"
+
+
+class TestPrecioConIva:
+    """Cuando cambia el precio sin IVA, el precio con IVA viejo sigue la misma proporción (o queda vacío)."""
+
+    def test_misma_proporcion(self, client, db):
+        entry(db).update(precio_sin_iva=10000, precio_con_iva=12100)
+        client.patch(f"/catalogs/{CAT}/entries/{ENTRY}", json={"precio_sin_iva": 20000})
+        assert entry(db)["precio_con_iva"] == 24200
+
+    def test_sin_con_iva_queda_sin(self, client, db):
+        entry(db).update(precio_con_iva=None)
+        client.patch(f"/catalogs/{CAT}/entries/{ENTRY}", json={"precio_sin_iva": 20000})
+        assert entry(db)["precio_con_iva"] is None
+
+    def test_sin_iva_viejo_en_cero_queda_vacio(self, client, db):
+        entry(db).update(precio_sin_iva=0, precio_con_iva=5000)
+        client.patch(f"/catalogs/{CAT}/entries/{ENTRY}", json={"precio_sin_iva": 20000})
+        assert entry(db)["precio_con_iva"] is None
+
+    def test_mismo_precio_no_lo_toca(self, client, db):
+        entry(db).update(precio_sin_iva=10000, precio_con_iva=12345)
+        client.patch(f"/catalogs/{CAT}/entries/{ENTRY}", json={"precio_sin_iva": 10000, "proveedor": "Otro"})
+        assert entry(db)["precio_con_iva"] == 12345
+
+
+class TestHistorialProveedor:
+    def test_proveedor_solo_del_valor_actual(self, client, db):
+        db.tables["catalog_price_history"] += [
+            {"id": "h1", "entry_id": ENTRY, "org_id": ORG, "precio_sin_iva": 8000, "fecha_precio": "2025-12-01",
+             "created_at": "2025-12-01"},
+            {"id": "h2", "entry_id": ENTRY, "org_id": ORG, "precio_sin_iva": 9000, "fecha_precio": "2026-01-10",
+             "created_at": "2026-01-10"},
+            {"id": "h3", "entry_id": ENTRY, "org_id": ORG, "precio_sin_iva": 7000, "fecha_precio": "2025-06-01",
+             "created_at": "2025-06-01", "proveedor": "Guardado"},
+        ]
+        hist = {h["id"]: h for h in client.get(f"/catalogs/{CAT}/entries/{ENTRY}/history").json()}
+        assert hist["h2"]["proveedor"] == "X"      # the value the entry has now: its provider
+        assert hist["h1"]["proveedor"] is None     # an older value: unknown, not invented
+        assert hist["h3"]["proveedor"] == "Guardado"
+
+
+class SinColumnaHistorialQuery(Query):
+    """Before migration 012: the history has no fuente/fuente_url/proveedor columns."""
+
+    def execute(self):
+        rows = self.payload if isinstance(self.payload, list) else [self.payload or {}]
+        if self.name == "catalog_price_history" and self.action == "insert" and any(
+                "proveedor" in r or "fuente" in r for r in rows):
+            raise RuntimeError("{'code': 'PGRST204', 'message': \"Could not find the 'proveedor' column of "
+                               "'catalog_price_history' in the schema cache\"}")
+        return super().execute()
+
+
+class SinColumnaHistorialDB(FakeDB):
+    def table(self, name):
+        return SinColumnaHistorialQuery(self, name)
+
+
+class TestHistorialGuardaProveedor:
+    def test_crear_y_editar_lo_guardan(self, client, db):
+        client.patch(f"/catalogs/{CAT}/entries/{ENTRY}", json={"precio_sin_iva": 9500, "proveedor": "Easy"})
+        r = client.post(f"/catalogs/{CAT}/entries", json={"codigo": "ARE", "precio_sin_iva": 100, "proveedor": "EVER"})
+        assert r.status_code == 200
+        provs = {h["entry_id"]: h["proveedor"] for h in db.tables["catalog_price_history"]}
+        assert provs[ENTRY] == "Easy" and provs[r.json()["id"]] == "EVER"
+
+    def test_get_usa_el_de_la_fila(self, client, db):
+        client.patch(f"/catalogs/{CAT}/entries/{ENTRY}", json={"precio_sin_iva": 9500, "proveedor": "Easy"})
+        client.patch(f"/catalogs/{CAT}/entries/{ENTRY}", json={"precio_sin_iva": 9800, "proveedor": "Sodimac"})
+        hist = client.get(f"/catalogs/{CAT}/entries/{ENTRY}/history").json()
+        assert sorted(h["proveedor"] for h in hist) == ["Easy", "Sodimac"]
+
+    def test_sin_migracion_se_guarda_sin_proveedor(self, client):
+        fake = SinColumnaHistorialDB(tables())
+        with patch("app.routers.catalogs.get_data_db", return_value=fake):
+            r = client.patch(f"/catalogs/{CAT}/entries/{ENTRY}", json={"precio_sin_iva": 9500, "proveedor": "Easy"})
+        assert r.status_code == 200, r.text
+        [hist] = fake.tables["catalog_price_history"]
+        assert hist["precio_sin_iva"] == 9500 and "proveedor" not in hist and "fuente" not in hist
