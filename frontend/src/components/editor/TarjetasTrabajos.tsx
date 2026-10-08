@@ -21,6 +21,10 @@ interface Props {
 const fmtCantidad = (v: number | null | undefined) =>
   new Intl.NumberFormat('es-AR', { maximumFractionDigits: 2 }).format(v ?? 0)
 
+// Para editar, la cantidad entera (sin redondear ni separador de miles): redondear es solo para mostrar
+const cantidadParaEditar = (v: number | null | undefined) =>
+  new Intl.NumberFormat('es-AR', { maximumFractionDigits: 10, useGrouping: false }).format(v ?? 0)
+
 /** "12,5" o "12.5" → 12.5; null si no es un número de 0 para arriba */
 function leerCantidad(t: string): number | null {
   const limpio = t.trim().replace(/\s/g, '')
@@ -49,10 +53,13 @@ function Tarjeta({
   const [error, setError] = useState<string | null>(null)
   const [recien, setRecien] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
+  // Lo que tenía el campo al abrirlo: si Sol no lo tocó, Guardar no cambia nada
+  const inicial = useRef('')
 
   useEffect(() => {
     if (!editando) return
-    setValor(fmtCantidad(item.cantidad).replace(/\./g, ''))
+    inicial.current = cantidadParaEditar(item.cantidad)
+    setValor(inicial.current)
     setError(null)
     // El foco después de montar el campo (en el celular abre el teclado numérico)
     const t = setTimeout(() => { inputRef.current?.focus(); inputRef.current?.select() }, 30)
@@ -62,6 +69,10 @@ function Tarjeta({
 
   const guardar = async (e?: FormEvent) => {
     e?.preventDefault()
+    if (valor.trim() === inicial.current) {
+      onDejarDeEditar()
+      return
+    }
     const n = leerCantidad(valor)
     if (n === null) {
       setError('Escribí un número: 0 o más.')

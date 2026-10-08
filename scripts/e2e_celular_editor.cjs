@@ -289,6 +289,33 @@ async function captura(page, nombre, entera = false) {
   check(await m.getByText(/^Cantidad: .* → /).count() > 0, 'celular: el aviso dice la cantidad vieja y la nueva')
   await captura(m, '08_celular_cantidad_guardada.png')
 
+  // Codex PR #47 (P2): abrir "Cambiar la cantidad" y tocar Guardar sin escribir no redondea la cantidad
+  let patches = 0
+  const contarPatch = (req) => { if (req.method() === 'PATCH' && /\/items\//.test(req.url())) patches++ }
+  m.on('request', contarPatch)
+  for (const [texto, numero] of [['0,125', 0.125], ['0,004', 0.004]]) {
+    await tarjetaDe().getByTestId('tarjeta-cambiar-cantidad').click()
+    await tarjetaDe().getByTestId('tarjeta-cantidad').fill(texto)
+    await tarjetaDe().getByRole('button', { name: 'Guardar' }).click()
+    await m.waitForTimeout(1200)
+    const guardada = (await j('GET', `/budgets/${id}/items`)).find((i) => i.id === idTrabajo).cantidad
+    check(cerca(guardada, numero, 1e-9), `celular: se guarda ${texto} tal cual (${guardada})`)
+    await tarjetaDe().getByTestId('tarjeta-cambiar-cantidad').click()
+    const enCampo = await tarjetaDe().getByTestId('tarjeta-cantidad').inputValue()
+    check(enCampo === texto, `celular: al abrir, el campo muestra la cantidad entera, sin redondear (${enCampo})`)
+    patches = 0
+    await tarjetaDe().getByRole('button', { name: 'Guardar' }).click()
+    await m.waitForTimeout(800)
+    const sigue = (await j('GET', `/budgets/${id}/items`)).find((i) => i.id === idTrabajo).cantidad
+    check(patches === 0 && cerca(sigue, numero, 1e-9), `celular: Guardar sin cambiar nada no manda nada ni redondea (${patches} pedidos, ${sigue})`)
+  }
+  m.off('request', contarPatch)
+  // vuelve a la cantidad de antes
+  await tarjetaDe().getByTestId('tarjeta-cambiar-cantidad').click()
+  await tarjetaDe().getByTestId('tarjeta-cantidad').fill(String(itemDespues.cantidad).replace('.', ','))
+  await tarjetaDe().getByRole('button', { name: 'Guardar' }).click()
+  await m.waitForTimeout(1200)
+
   // Agregar un trabajo: se despliega desde el botón, apilado
   const seccion = m.locator('section[aria-label="Agregá un trabajo"]')
   const bDesp = await m.getByTestId('desplegar-agregar').boundingBox()

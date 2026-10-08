@@ -582,6 +582,36 @@ const solapan = (a, b) => a && b && a.x < b.x + b.width - 0.5 && b.x < a.x + a.w
     check(await err.count() === 0 && await otraT.getAttribute('data-estado') === 'verde', `${donde}: "Probar de nuevo" revisa y sigue confirmada`)
     await page.unroute('**/obras/analizar')
 
+    // Codex PR #47 (P1): elegir otra fórmula y tocar Confirmar mientras el servidor todavía revisa → se confirma
+    // la fórmula elegida, no la propuesta del análisis anterior
+    const cuerpos = []
+    await page.route('**/obras/analizar', async (r) => {
+      cuerpos.push(r.request().postDataBuffer()?.toString('utf8') || '')
+      await new Promise((res) => setTimeout(res, 2500))
+      await r.continue()
+    })
+    const conSugerencia = page.locator('[data-testid="tarea-obra"][data-estado="amarillo"]', { has: page.locator('[data-testid="sugerencia"][data-misma-unidad="true"]') })
+    const tc = conSugerencia.first()
+    const claveElegida = await tc.getAttribute('data-clave')
+    const sug = tc.locator('[data-testid="sugerencia"][data-misma-unidad="true"]').first()
+    const codigoElegido = await sug.getAttribute('data-codigo')
+    const nombreElegido = (await sug.innerText()).trim()
+    const tarjetaElegida = page.locator(`[data-testid="tarea-obra"][data-clave="${claveElegida}"]`)
+    await sug.click()
+    await page.waitForTimeout(150)
+    await tarjetaElegida.getByRole('button', { name: 'Confirmar', exact: true }).click()
+    await page.waitForFunction(() => !document.body.innerText.includes('Revisando'), null, { timeout: 60000 })
+    await page.waitForTimeout(300)
+    const ultimo = cuerpos[cuerpos.length - 1] || ''
+    const mAsig = ultimo.match(/name="asignaciones"\r\n\r\n([\s\S]*?)\r\n--/)
+    const asigUltima = mAsig ? JSON.parse(mAsig[1]) : {}
+    const mandada = asigUltima[claveElegida]
+    check(!!mandada && mandada.confirmada === true && JSON.stringify(mandada.plantillas) === JSON.stringify([[codigoElegido, 1]]),
+      `${donde}: elegir otra fórmula y confirmar durante la revisión manda la elegida (${codigoElegido}: ${JSON.stringify(mandada)})`)
+    check(await tarjetaElegida.getAttribute('data-estado') === 'verde' && (await tarjetaElegida.innerText()).includes(nombreElegido),
+      `${donde}: y la tarjeta queda confirmada con «${nombreElegido}»`)
+    await page.unroute('**/obras/analizar')
+
     // "Confirmar los N para confirmar": todos juntos, un solo pedido
     pedidos = 0
     await page.route('**/obras/analizar', async (r) => { pedidos++; await r.continue() })

@@ -349,6 +349,7 @@ function TareaCard({
       className={`bg-white border border-l-4 ${est.borde} rounded-xl p-4 transition-colors`}
       data-testid="tarea-obra"
       data-estado={estado}
+      data-clave={t.clave}
     >
       <div className="flex flex-wrap gap-x-4 gap-y-3 items-start">
         <div className="flex-1 min-w-[220px]">
@@ -383,6 +384,9 @@ function TareaCard({
                   {i > 0 && ' · '}
                   <button
                     className="text-[#2D8D68] hover:underline py-1.5 md:py-0"
+                    data-testid="sugerencia"
+                    data-codigo={s.codigo}
+                    data-misma-unidad={String(normUnidad(s.unidad) === normUnidad(t.unidad))}
                     title={s.porque}
                     onClick={() => onElegir({ codigo: s.codigo, nombre: s.nombre, unidad: s.unidad })}
                   >
@@ -718,7 +722,10 @@ export default function CargarObra() {
     const marcadas: Record<string, true> = {}
     for (const t of lista) {
       if (!(t.clave in previas.current)) previas.current[t.clave] = asignaciones[t.clave]
-      next[t.clave] = { plantillas: asignacionPropuesta(t), confirmada: true }
+      // Lo último que decidió Sol manda: si eligió otra fórmula o escribió una conversión y la revisión todavía
+      // no volvió, la tarjeta muestra el análisis anterior, pero se confirma lo que eligió (no la propuesta vieja)
+      const decidida = asignaciones[t.clave]
+      next[t.clave] = { plantillas: decidida ? decidida.plantillas : asignacionPropuesta(t), confirmada: true }
       verdes[t.clave] = 'verde'
       marcadas[t.clave] = true
     }
@@ -1161,7 +1168,7 @@ export default function CargarObra() {
                   t={t}
                   estadoLocal={esRojo(t) ? 'rojo' : estadoDe(t)}
                   recienConfirmada={!!fijas[t.clave] && !!asignaciones[t.clave]?.confirmada}
-                  actualizando={!!cambiadas[t.clave] && !optimista[t.clave] && enRevision}
+                  actualizando={!!cambiadas[t.clave] && enRevision}
                   recetas={analisis.recetas}
                   excelConPrecios={analisis.excel_con_precios}
                   pendiente={pendientes[t.clave]}
