@@ -134,6 +134,7 @@ ROUTE_ROLES: dict[tuple[str, str], str] = {
     ("POST", "/correcciones/{correccion_id}/deshacer"): EDITOR,
     # Buscador de precios en internet (no guarda nada; consume la clave de OpenAI)
     ("POST", "/precios/buscar"): EDITOR,
+    ("GET", "/precios/buscador"): MEMBER,
 }
 
 # Rutas sin empresa elegida: la portada, /health y /me (que muestra el selector).

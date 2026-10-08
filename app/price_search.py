@@ -16,6 +16,11 @@ Salida de ``buscar_opciones``::
 ``precio_unidad_app_sin_iva`` y ``cuenta`` los calcula el servidor (no el modelo): precio publicado,
 menos el IVA (21 %) si lo incluye, dividido por cuántas unidades de la app trae la presentación.
 
+Errores (``BuscadorError.codigo``, el router responde 502 con ``{"codigo", "mensaje"}``): ``CLAVE_INVALIDA``
+(OpenAI rechazó la clave), ``SIN_CREDITO`` (sin crédito o demasiados pedidos), ``TIEMPO`` (más de un minuto),
+``MODELO`` (el modelo no está disponible) y ``ERROR_BUSQUEDA`` (cualquier otro, o una respuesta que no se lee).
+Sin clave: ``BuscadorNoConfigurado`` (503). ``estado()`` dice si está configurado, sin buscar nada.
+
 Reemplazar la búsqueda real (pruebas y servidor falso, sin red):
 
 1. Variable de entorno ``FAKE_BUSCADOR_ARCHIVO`` = ruta a un JSON. Si está, no se llama a OpenAI
@@ -70,7 +75,19 @@ class BuscadorNoConfigurado(Exception):
 
 
 class BuscadorError(Exception):
-    """OpenAI failed or took too long: the router answers 502 with this message."""
+    """OpenAI failed or took too long: the router answers 502 with ``codigo`` and this message."""
+
+    def __init__(self, mensaje: str, codigo: str = "ERROR_BUSQUEDA"):
+        super().__init__(mensaje)
+        self.codigo = codigo
+
+
+# Errors of OpenAI, by kind (the code goes to the screen, the technical detail to the server log)
+MSG_TIEMPO = "La búsqueda tardó más de un minuto y se cortó. Probá de nuevo."
+MSG_CLAVE = "La clave de OpenAI del servidor no es válida: hay que cambiarla en Render."
+MSG_CREDITO = "Se terminó el crédito de OpenAI o hay demasiados pedidos: probá más tarde."
+MSG_MODELO = "El modelo configurado para el buscador no está disponible."
+MSG_OTRO = "No se pudo buscar en internet en este momento. Probá de nuevo en unos minutos."
 
 
 # ── Pedido al modelo ─────────────────────────────────────────────────────────
@@ -356,8 +373,26 @@ def _cliente():  # type: ignore[no-untyped-def]
     return get_settings().openai_client
 
 
-async def _llamar(client, model: str, pedido: str):  # type: ignore[no-untyped-def]
-    kwargs = {
+def estado() -> dict:
+    """Whether the search can run (OpenAI client or FAKE_BUSCADOR_ARCHIVO) and the model. Never the key."""
+    configurado = bool(os.environ.get("FAKE_BUSCADOR_ARCHIVO")) or _cliente() is not None
+    return {"configurado": configurado, "modelo": get_settings().OPENAI_MODEL_PRECIOS}
+
+
+def _es(exc: BaseException, nombre: str) -> bool:
+    """``exc`` is the openai SDK error ``nombre`` (or a class with that name: the tests' fakes)."""
+    try:
+        import openai
+        cls = getattr(openai, nombre, None)
+    except ImportError:  # pragma: no cover - openai is in requirements.txt
+        cls = None
+    if cls is not None and isinstance(exc, cls):
+        return True
+    return any(c.__name__ == nombre for c in type(exc).__mro__)
+
+
+def _pedido_inicial(model: str, pedido: str) -> dict:
+    return {
         "model": model,
         "instructions": INSTRUCCIONES,
         "input": pedido,
@@ -369,14 +404,68 @@ async def _llamar(client, model: str, pedido: str):  # type: ignore[no-untyped-d
                             "strict": True}},
         "timeout": TIMEOUT_S,
     }
-    try:
-        return await client.responses.create(**kwargs)
-    except Exception as exc:
-        # Older API versions reject "include" for the search sources: once more without it
-        if "include" in str(exc) and exc.__class__.__name__ == "BadRequestError":
-            kwargs.pop("include")
+
+
+def _sin_include(kwargs: dict) -> dict:
+    return {k: v for k, v in kwargs.items() if k != "include"}
+
+
+def _con_preview(kwargs: dict) -> dict:
+    tools = [{**t, "type": "web_search_preview"} if t.get("type") == "web_search" else t for t in kwargs["tools"]]
+    return {**kwargs, "tools": tools}
+
+
+def _sin_ubicacion(kwargs: dict) -> dict:
+    return {**kwargs, "tools": [{k: v for k, v in t.items() if k != "user_location"} for t in kwargs["tools"]]}
+
+
+def _sin_formato(kwargs: dict) -> dict:
+    # The answer is read as JSON from the text anyway (parsear)
+    return {k: v for k, v in kwargs.items() if k != "text"}
+
+
+# When OpenAI rejects the request as it goes (400), it is retried in this order, each step on top of
+# the previous one: without the detailed sources, with the older search tool (with and without the
+# location) and without the strict format.
+REINTENTOS = [
+    ("sin include (fuentes detalladas)", _sin_include),
+    ("con la herramienta web_search_preview", _con_preview),
+    ("web_search_preview sin user_location", _sin_ubicacion),
+    ("sin text.format (formato estricto)", _sin_formato),
+]
+
+
+async def _llamar(client, model: str, pedido: str):  # type: ignore[no-untyped-def]
+    kwargs = _pedido_inicial(model, pedido)
+    pasos = list(REINTENTOS)
+    while True:
+        try:
             return await client.responses.create(**kwargs)
-        raise
+        except Exception as exc:
+            if not _es(exc, "BadRequestError") or not pasos:
+                raise
+            motivo, cambio = pasos.pop(0)
+            logger.warning("Buscador de precios: OpenAI rechazó el pedido (%s). Reintento %s.", exc, motivo)
+            kwargs = cambio(kwargs)
+
+
+def error_de_openai(exc: BaseException) -> BuscadorError:
+    """The error to show for an OpenAI failure, by kind. The detail goes to the log."""
+    if isinstance(exc, (asyncio.TimeoutError, TimeoutError)) or _es(exc, "APITimeoutError") \
+            or "timeout" in exc.__class__.__name__.lower() or "timed out" in str(exc).lower():
+        return BuscadorError(MSG_TIEMPO, "TIEMPO")
+    if _es(exc, "AuthenticationError"):
+        logger.error("Buscador de precios: OpenAI rechazó la clave (OPENAI_API_KEY): %s", exc)
+        return BuscadorError(MSG_CLAVE, "CLAVE_INVALIDA")
+    if _es(exc, "RateLimitError"):  # also insufficient_quota (no credit left)
+        logger.error("Buscador de precios: sin crédito o demasiados pedidos a OpenAI: %s", exc)
+        return BuscadorError(MSG_CREDITO, "SIN_CREDITO")
+    if _es(exc, "PermissionDeniedError") or _es(exc, "NotFoundError"):
+        logger.error("Buscador de precios: el modelo %s no está disponible: %s",
+                     get_settings().OPENAI_MODEL_PRECIOS, exc)
+        return BuscadorError(MSG_MODELO, "MODELO")
+    logger.warning("El buscador de precios falló: %s", exc, exc_info=exc)
+    return BuscadorError(MSG_OTRO)
 
 
 async def _buscar_openai(descripcion: str, unidad: str | None, tipo: str | None, codigo: str | None) -> dict:
@@ -389,13 +478,8 @@ async def _buscar_openai(descripcion: str, unidad: str | None, tipo: str | None,
             _llamar(client, get_settings().OPENAI_MODEL_PRECIOS, _pedido(descripcion, unidad, tipo, codigo)),
             timeout=TIMEOUT_S + 5,
         )
-    except (asyncio.TimeoutError, TimeoutError) as exc:
-        raise BuscadorError("La búsqueda tardó más de un minuto y se cortó. Probá de nuevo.") from exc
     except Exception as exc:
-        if "timeout" in exc.__class__.__name__.lower() or "timed out" in str(exc).lower():
-            raise BuscadorError("La búsqueda tardó más de un minuto y se cortó. Probá de nuevo.") from exc
-        logger.warning("El buscador de precios falló: %s", exc, exc_info=True)
-        raise BuscadorError("No se pudo buscar en internet en este momento. Probá de nuevo en unos minutos.") from exc
+        raise error_de_openai(exc) from exc
 
     data = parsear(texto_de(response))
     fuentes = fuentes_de(response)
