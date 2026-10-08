@@ -171,3 +171,18 @@ class TestImportExcelPriceList:
                                             "source_file": "Las Heras.xlsx"})
         data = upload(client, workbook(V1_MAT))
         assert data["catalog_reused"] is False and data["catalog_id"] != "cat-x"
+
+
+def test_without_the_computo_says_so_and_creates_nothing(client, db):
+    """Carlos, 07/10: the app's simple sheet answered "Excel importado" with an empty budget."""
+    wb = openpyxl.Workbook()
+    wb.active.title = "Presupuesto"
+    wb.active.append(["Codigo", "Descripcion", "Unidad", "Cantidad", "Precio sin IVA"])
+    buf = io.BytesIO()
+    wb.save(buf)
+    files = {"file": ("Ginkgo_terrac.xlsx", buf.getvalue(),
+                      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
+    r = client.post("/budgets/import-excel", files=files)
+    assert r.status_code == 400
+    assert "Cargar obra" in r.json()["detail"]
+    assert db.tables["budgets"] == [] and db.tables["price_catalogs"] == []

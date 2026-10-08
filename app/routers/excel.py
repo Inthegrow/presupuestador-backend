@@ -426,6 +426,16 @@ async def import_excel(
 
     contents = await file.read()
     df_dict = pd.read_excel(BytesIO(contents), sheet_name=None, header=None)
+    # The app's own simple sheet is not a budget to copy: it is loaded in Cargar obra (it used to create an
+    # empty budget and answer "Excel importado")
+    if "01_C&P" not in df_dict and "Presupuesto" in df_dict:
+        primera = [str(v).strip() for v in df_dict["Presupuesto"].iloc[0].tolist()] if len(df_dict["Presupuesto"]) else []
+        if "Codigo" in primera and ("Precio sin IVA" in primera or "Neto Total" in primera):
+            raise HTTPException(
+                400,
+                "Este Excel es la planilla simple que baja la app (Exportar). Para volver a armar el presupuesto "
+                "con ella, subila en Cargar obra.",
+            )
 
     db = get_data_db()
     org_id = user["org_id"]

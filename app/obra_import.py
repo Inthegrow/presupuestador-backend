@@ -421,6 +421,109 @@ def parse_obra(wb, sheet: str = SHEET) -> dict:  # type: ignore[no-untyped-def]
     return {"titulo": str(ws.cell(1, 1).value or "").strip(), "filas": filas, "problemas": problemas}
 
 
+# ── La planilla simple que baja la app (Exportar → Planilla simple) ───────────────────
+
+SIMPLE_SHEET = "Presupuesto"
+SECCION_NOTAS = ("seccion", "seccion generada por ia")
+# Column names of the simple sheet, old and new (the names changed with the app's words)
+_SIMPLE_COLS = {
+    "codigo": ("codigo",),
+    "descripcion": ("descripcion",),
+    "unidad": ("unidad",),
+    "cantidad": ("cantidad",),
+    "mat_unit": ("mat unitario", "mat unit.", "materiales por unidad"),
+    "mo_unit": ("mo unitario", "mo unit.", "mano de obra por unidad"),
+    "directo": ("directo total", "costo directo"),
+    "neto": ("precio sin iva", "neto total"),
+    "notas": ("notas",),
+}
+
+
+def _simple_columns(wb) -> dict[str, int] | None:  # type: ignore[no-untyped-def]
+    """Column index (0-based) of each field of the app's simple sheet, or None if it is not one."""
+    if SIMPLE_SHEET not in wb.sheetnames:
+        return None
+    first = next(wb[SIMPLE_SHEET].iter_rows(max_row=1, values_only=True), ())
+    names = [plain(c).lower() for c in first]
+    cols: dict[str, int] = {}
+    for key, aliases in _SIMPLE_COLS.items():
+        found = next((i for i, n in enumerate(names) if n in aliases), None)
+        if found is not None:
+            cols[key] = found
+    needed = ("codigo", "descripcion", "unidad", "cantidad", "neto")
+    return cols if all(k in cols for k in needed) else None
+
+
+def is_simple_sheet(wb) -> bool:  # type: ignore[no-untyped-def]
+    return _simple_columns(wb) is not None
+
+
+def parse_simple(wb) -> dict:  # type: ignore[no-untyped-def]
+    """The app's simple sheet read as a cómputo: same result as parse_obra.
+
+    Sections (Notas = "Seccion") are rubros ("3") and pisos ("3.1"); each work keeps its code, description, unit
+    and quantity, and its prices go where parse_obra puts the Excel's (materials and labour per unit, direct
+    cost and price without VAT), so a work without formula keeps its price.
+    """
+    cols = _simple_columns(wb)
+    if cols is None:
+        raise ValueError("No es la planilla simple de la app")
+    ws = wb[SIMPLE_SHEET]
+    filas: list[dict] = []
+    problemas: list[str] = []
+    rubro = subrubro = None
+
+    def cell(row: tuple, key: str) -> object:
+        i = cols.get(key)
+        return row[i] if i is not None and i < len(row) else None
+
+    for r, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+        desc = " ".join(str(cell(row, "descripcion") or "").split())
+        raw_code = cell(row, "codigo")
+        code = _code(raw_code) if raw_code not in (None, "") else ""
+        if not desc or plain(raw_code).upper() == "TOTAL":
+            continue
+        notas_app = plain(cell(row, "notas")).lower()
+        if notas_app in SECCION_NOTAS:
+            nivel = "subrubro" if "." in code else "rubro"
+            fila = {"orden": len(filas), "nivel": nivel, "codigo": code or None, "descripcion": desc,
+                    "unidad": None, "cantidad": None, "excel": None, "fila": r, "notas": []}
+            if nivel == "rubro" or rubro is None:
+                fila["parent"] = None
+                rubro, subrubro = fila, None
+            else:
+                fila["parent"] = rubro["orden"]
+                subrubro = fila
+            filas.append(fila)
+            continue
+        cantidad = _num(cell(row, "cantidad"))
+        if cantidad is None:
+            problemas.append(f"Fila {r}: '{desc[:50]}' sin cantidad, se cargó con 0.")
+            cantidad = 0.0
+        parent = subrubro or rubro
+        unidad = " ".join(str(cell(row, "unidad") or "").split()) or None
+        filas.append({
+            "orden": len(filas), "nivel": "item", "codigo": code or None,
+            "parent": parent["orden"] if parent else None,
+            "descripcion": desc, "unidad": unidad, "cantidad": cantidad,
+            "excel": {
+                "mat_unit": _num(cell(row, "mat_unit")) or 0.0,
+                "mo_unit": _num(cell(row, "mo_unit")) or 0.0,
+                "directo": _num(cell(row, "directo")) or 0.0,
+                "neto": _num(cell(row, "neto")) or 0.0,
+            },
+            "fila": r, "notas": [],
+        })
+
+    _fill_units(filas, problemas)
+    return {"titulo": "", "filas": filas, "problemas": problemas}
+
+
+def parse_any(wb) -> dict:  # type: ignore[no-untyped-def]
+    """The cómputo of the obra (01_C&P) or, if it is not there, the app's simple sheet."""
+    return parse_obra(wb) if SHEET in wb.sheetnames else parse_simple(wb)
+
+
 def _fill_units(filas: list[dict], problemas: list[str]) -> None:
     """Items without unit take the unit of the same item on another floor."""
     units: dict[str, set[str]] = {}

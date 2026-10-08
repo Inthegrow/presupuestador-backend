@@ -581,6 +581,8 @@ export interface ObraAnalisis {
   catalogo_oficial: boolean
   // false when no item of the Excel has a cost (it came only with quantities)
   excel_con_precios: boolean
+  // true when the file is the app's own simple sheet (Exportar), not the obra's cómputo (01_C&P)
+  planilla_simple?: boolean
   resumen: {
     rubros: number
     pisos: number

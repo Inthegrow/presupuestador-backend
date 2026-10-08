@@ -55,7 +55,8 @@ from app.obra_import import (
     item_notes,
     match_recipe,
     obra_usa,
-    parse_obra,
+    is_simple_sheet,
+    parse_any,
     plain,
     rule_for,
     suggest_recipes,
@@ -88,7 +89,8 @@ async def _read_workbook(file: UploadFile):  # type: ignore[no-untyped-def]
             wb = openpyxl.load_workbook(BytesIO(content), data_only=True)
     except Exception as exc:
         raise HTTPException(400, "No se pudo abrir el Excel") from exc
-    if SHEET not in wb.sheetnames:
+    # The obra's cómputo (01_C&P) or the simple sheet the app itself exports
+    if SHEET not in wb.sheetnames and not is_simple_sheet(wb):
         raise HTTPException(400, _missing_sheet_message(wb))
     return wb
 
@@ -615,10 +617,10 @@ async def analizar_obra(
     templates = _templates(db, org_id)
     if not templates:
         raise HTTPException(409, "No hay fórmulas cargadas en la app: primero hay que importar el Maestro")
-    result = analyze(parse_obra(wb), templates, PriceBook(db, org_id, today()), _asignaciones(asignaciones),
+    result = analyze(parse_any(wb), templates, PriceBook(db, org_id, today()), _asignaciones(asignaciones),
                      _memoria(db, org_id), excel_prices(wb))
     return {"archivo": file.filename, "titulo_dudoso": titulo_dudoso(result["titulo"], file.filename),
-            **_public(result)}
+            "planilla_simple": SHEET not in wb.sheetnames, **_public(result)}
 
 
 # ── Carga ────────────────────────────────────────────────────────────────────
@@ -753,7 +755,7 @@ async def cargar_obra(
     elegidas = _asignaciones(asignaciones)
     memoria = _memoria(db, org_id)
     t0 = time.perf_counter()
-    result = analyze(parse_obra(wb), templates, book, elegidas, memoria, excel_prices(wb))
+    result = analyze(parse_any(wb), templates, book, elegidas, memoria, excel_prices(wb))
     tiempos = {"analisis_s": time.perf_counter() - t0}
 
     rojos = [t for t in result["tareas"] if t["estado"] == "rojo"]
