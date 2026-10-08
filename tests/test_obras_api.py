@@ -102,6 +102,34 @@ CONTRAPISO = "CONTRAPISO | m2"
 BALCONES = "TELGOPOR 50 MM + CONTRAPISO/CARPETA EN AZOTEA INACCESIBLE (BALCONES) E=4CM | m2"
 
 
+def _simple_workbook(neto: str = "Precio sin IVA") -> openpyxl.Workbook:
+    """The obra of _workbook() as the app's simple export (Exportar → Planilla simple), with a TOTAL row."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Presupuesto"
+    ws.append(["Codigo", "Descripcion", "Unidad", "Cantidad", "MAT Unitario", "MO Unitario", "MAT Total",
+               "MO Total", "Directo Total", "Indirecto Total", "Beneficio Total", "Impuestos Total", neto, "IVA",
+               "Precio con IVA", "Notas"])
+    sec = lambda c, d: ws.append([c, d] + [None] * 13 + ["Seccion"])  # noqa: E731
+    item = lambda c, d, u, q, dir_, net: ws.append(  # noqa: E731
+        [c, d, u, q, 0, dir_ / q, 0, dir_, dir_, 0, 0, 0, net, 0, net, ""])
+    sec("1", "TAREAS PRELIMINARES")
+    item("1.1", "OBRADOR", "gl", 1, 1000, 1500)
+    sec("3", "ESTRUCTURA")
+    sec("3.1", "FUNDACIONES")
+    item("3.1.3", "TENSORES 20 cm x 40 cm.", "ml", 100, 1, 1)
+    sec("4", "ALBAÑILERIA")
+    sec("4.2", "PRIMER PISO")
+    item("4.2.1", "MURO DE MAMPOSTERIA EN LADRILLO HUECO DEL 18. h 3m", "m²", 30, 9000, 12000)
+    item("4.2.2", "ARISTAS DE YESO EN PAREDES", "m", 10, 100, 150)
+    item("4.2.3", "TELGOPOR 50 mm + CONTRAPISO EN AZOTEA ACCESIBLE e: 8cm", "m²", 50, 100, 100)
+    item("4.2.4", "COLOCACION DE REVESTIMIENTOS EN PISOS PORCELANATO. NO INCLUYE EL PORCELANATO", "m²", 20, 40, 50)
+    sec("4.3", "SEGUNDO PISO")
+    item("4.3.5", "COLOCACION DE REVESTIMIENTOS EN PISOS PORCELANATO. NO INCLUYE EL PORCELANATO", "m²", 20, 40, 50)
+    ws.append(["TOTAL", None, None, None, None, None, None, None, 9280, None, None, None, 13850])
+    return wb
+
+
 def _workbook_contrapisos():
     """The obra plus three contrapisos (Ginkgo's names): thickness in the name, or not."""
     wb = _workbook()
@@ -125,7 +153,7 @@ class TestAnalizar:
         res = analizar(client)
         assert res.status_code == 200, res.text
         body = res.json()
-        assert set(body) == {"archivo", "titulo_dudoso", "catalogo_oficial", "excel_con_precios", "titulo",
+        assert set(body) == {"archivo", "titulo_dudoso", "planilla_simple", "catalogo_oficial", "excel_con_precios", "titulo",
                              "fecha_precios", "resumen", "tareas", "precios", "recetas", "correcciones_excel",
                              "listo"}
         assert body["catalogo_oficial"] is False
@@ -364,17 +392,29 @@ class TestAnalizar:
                           files={"file": ("Edificio Las Heras - cómputo.xlsx", _excel(wb), XLSX)})
         assert res.json()["titulo_dudoso"] is False
 
-    def test_the_apps_own_simple_export_says_what_it_is(self, client, db):
-        """Carlos, 06/10: the old "Excel Formato Terrac" downloaded the simple sheet; uploading it
-        must say what it is and what to upload instead, not just "no tiene la hoja"."""
-        wb = openpyxl.Workbook()
-        ws = wb.active
-        ws.title = "Presupuesto"
-        ws.append(["Codigo", "Descripcion", "Unidad", "Cantidad", "Directo Total", "Neto Total"])
-        res = client.post("/obras/analizar", files={"file": ("Ginkgo_terrac.xlsx", _excel(wb), XLSX)})
-        assert res.status_code == 400
-        assert "planilla simple que baja la app" in res.json()["detail"]
-        assert "Planilla Terrac" in res.json()["detail"]
+    def test_the_apps_own_simple_export_loads(self, client, db):
+        """Carlos, 07/10: the simple sheet the app exports (Exportar) is loaded like the obra's cómputo:
+        the same works, quantities, rubros and floors as the original Excel."""
+        original = analizar(client).json()
+        for neto in ("Precio sin IVA", "Neto Total"):  # today's column name and the old one
+            res = client.post("/obras/analizar",
+                              files={"file": ("EDIFICIO_GINKGO_V2_terrac.xlsx", _excel(_simple_workbook(neto)), XLSX)})
+            assert res.status_code == 200, res.text
+            body = res.json()
+            assert body["planilla_simple"] is True
+            for k in ("rubros", "pisos", "trabajos"):
+                assert body["resumen"][k] == original["resumen"][k], (neto, k)
+        assert original["planilla_simple"] is False
+
+    def test_the_simple_export_loads_the_same_works(self, client, db):
+        res = cargar(client, permitir=True, wb=_simple_workbook())
+        assert res.status_code == 200, res.text
+        items = [i for i in db.tables["budget_items"] if i["budget_id"] == res.json()["budget_id"]]
+        trabajos = {(i["code"], i["description"], float(i["cantidad"] or 0)) for i in items
+                    if i.get("notas") not in ("Seccion", "Sección generada por IA")}
+        assert ("4.2.1", "MURO DE MAMPOSTERIA EN LADRILLO HUECO DEL 18. h 3m", 30.0) in trabajos
+        assert ("1.1", "OBRADOR", 1.0) in trabajos
+        assert len(trabajos) == 7
 
     def test_missing_sheet_lists_the_sheets_it_has(self, client, db):
         wb = openpyxl.Workbook()

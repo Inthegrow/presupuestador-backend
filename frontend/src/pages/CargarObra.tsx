@@ -778,7 +778,7 @@ export default function CargarObra() {
             <FileUpload
               accept=".xlsx"
               label="Arrastrá el Excel de la obra acá"
-              hint="El cómputo de la obra que hacés siempre, el que tiene la hoja 01_C&P. No hay que agregarle nada."
+              hint="El cómputo de la obra que hacés siempre, el que tiene la hoja 01_C&P, o una planilla que bajaste de la app (Exportar). No hay que agregarle nada."
               onFile={elegirArchivo}
               value={file}
               onClear={quitarArchivo}
@@ -831,6 +831,12 @@ export default function CargarObra() {
               <div className="text-[11px] text-gray-500 mt-0.5">
                 Lo que elijas acá queda guardado para la próxima obra.
               </div>
+              {analisis.planilla_simple && (
+                <div data-testid="aviso-planilla-simple" className="mt-2 text-xs text-sky-800 bg-sky-50 border border-sky-200 rounded-lg px-3 py-2">
+                  Es la planilla simple que bajó la app (Exportar): se cargan los trabajos con sus cantidades, rubros y
+                  pisos, y la comparación es contra los precios de esa planilla, no contra el Excel original de la obra.
+                </div>
+              )}
               {!analisis.excel_con_precios && (
                 <div className="mt-2 text-xs text-sky-800 bg-sky-50 border border-sky-200 rounded-lg px-3 py-2">
                   Este Excel no trae precios: la app calcula todo con las fórmulas y la lista de precios.
