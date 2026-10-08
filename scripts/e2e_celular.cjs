@@ -430,7 +430,11 @@ const solapan = (a, b) => a && b && a.x < b.x + b.width - 0.5 && b.x < a.x + a.w
     check(!(await page.getByTestId('abrir-menu').isVisible()), '1100: sin ☰ (el menú queda fijo)')
     const linksAngosto = await aside.getByRole('link').evaluateAll((ls) => ls.map((l) => l.getAttribute('aria-label')))
     check(linksAngosto.length === 13 && linksAngosto.includes('Lista de precios') && linksAngosto.includes('Exportar'), `1100: el menú angosto tiene las mismas ${linksAngosto.length} entradas`)
+    // en 720 px de alto, con el proyecto abierto, el medio del menú se desliza: primero se lo trae a la vista
+    await aside.getByRole('link', { name: 'Lista de precios' }).scrollIntoViewIfNeeded()
+    await page.waitForTimeout(200)
     await aside.getByRole('link', { name: 'Lista de precios' }).hover()
+    await page.waitForTimeout(100)
     const pista = page.getByRole('tooltip')
     check(await pista.isVisible().catch(() => false) && (await pista.innerText()).trim() === 'Lista de precios', '1100: al pasar el mouse se ve el nombre ("Lista de precios")')
     await captura(page, '1100_menu_angosto')
