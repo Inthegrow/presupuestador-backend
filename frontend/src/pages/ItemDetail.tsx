@@ -18,12 +18,13 @@ import {
   ArrowLeft,
   Library,
   AlertTriangle,
+  MoreHorizontal,
 } from 'lucide-react'
 import { budgetApi, templateApi, esFaltaConversion, esConfirmarReemplazo, esFalloAplicar, mensajeDeError } from '../lib/api'
 import type { FaltaConversion, PrecioFaltante, TemplateSugerencias } from '../lib/api'
 import { useAuth } from '../contexts/AuthContext'
 import { escaleraDe, fmtPct, indirectosCompletos, pctsEscalera } from '../lib/cascada'
-import { fmtCurrency, fmtNumber, fmtPercent, unidadEnPalabras } from '../lib/format'
+import { fmtNumber, fmtPercent, unidadEnPalabras } from '../lib/format'
 import { ESTILO, estadoDeTrabajo, precioPorUnidad } from '../lib/semaforo'
 import BuscadorFormulas from '../components/ui/BuscadorFormulas'
 import BuscarPrecio, { IconoBuscarInternet, normalizarCodigo } from '../components/BuscarPrecio'
@@ -31,6 +32,8 @@ import type { PrecioGuardado } from '../components/BuscarPrecio'
 import OrigenPrecio from '../components/OrigenPrecio'
 import PreguntaConversion, { factorComoTexto, leerFactor } from '../components/ui/PreguntaConversion'
 import { nombreParametro } from '../lib/textos'
+import { usePantalla } from '../lib/pantalla'
+import HojaInferior from '../components/editor/HojaInferior'
 import type { ItemResource, BudgetItem, Budget, ItemAudit, IndirectConfig } from '../types'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -141,12 +144,12 @@ function SinPrecio({ resource, onBuscar }: { resource: ItemResource; onBuscar?: 
   const { puedeEditar } = useAuth()
   return (
     <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1" data-testid="recurso-sin-precio">
-      <span className="text-[10px] font-semibold text-red-600">Sin precio</span>
+      <span className="text-[10px] max-md:text-[12px] font-semibold text-red-600">Sin precio</span>
       {puedeEditar && onBuscar && (
         <button
           onClick={() => onBuscar(resource)}
           data-testid="buscar-en-internet"
-          className="inline-flex items-center gap-1 text-[10px] font-semibold text-sky-700 bg-white border border-sky-200 hover:bg-sky-50 rounded-full px-2 py-0.5"
+          className="inline-flex items-center gap-1 text-[10px] max-md:text-[13px] max-md:min-h-10 max-md:px-3.5 font-semibold text-sky-700 bg-white border border-sky-200 hover:bg-sky-50 rounded-full px-2 py-0.5"
         >
           <IconoBuscarInternet size={11} /> Buscar en internet
         </button>
@@ -393,6 +396,167 @@ function ResourceRow({ resource, tipo, onSave, onDelete, startEditing, onEditDon
   )
 }
 
+// ─── Recursos en el celular ───────────────────────────────────────────────────
+
+const fmtCant = (v: number | null | undefined) => new Intl.NumberFormat('es-AR', { maximumFractionDigits: 2 }).format(v ?? 0)
+
+/** Un recurso como tarjeta (celular): descripción, código chico, la cuenta y el desperdicio en una línea chica. */
+function RecursoTarjeta({ resource, tipo, verCuenta, sinPrecio, onBuscar, onMenu }: {
+  resource: ItemResource
+  tipo: Tipo
+  verCuenta: boolean
+  sinPrecio: boolean
+  onBuscar: (r: ItemResource) => void
+  onMenu?: () => void
+}) {
+  const r = resource
+  const chico: string[] = []
+  if (tipo === 'mano_obra') {
+    chico.push(`${fmtCant(r.trabajadores)} ${r.trabajadores === 1 ? 'trabajador' : 'trabajadores'} × ${fmtCant(r.dias)} ${r.dias === 1 ? 'día' : 'días'}`)
+    chico.push(`cargas sociales ${fmtPercent(r.cargas_sociales_pct)}`)
+    if (verCuenta && r.rendimiento) chico.push(`días = Q / ${r.rendimiento}`)
+  } else {
+    chico.push(`${fmtCant(r.cantidad)} ${r.unidad ?? ''} + desperdicio ${fmtPercent(r.desperdicio_pct)}${r.desperdicio_origen && r.desperdicio_origen !== 'recurso' ? ` (hereda ${ORIGEN_LABEL[r.desperdicio_origen]})` : ''}`.replace(/\s+/g, ' '))
+    if (r.lo_compra_cliente) chico.push('Lo compra el cliente')
+    if (verCuenta && r.redondear) chico.push(`redondeo${r.cantidad_redondeo ? ` +${fmtNumber(r.cantidad_redondeo, 2)}` : ''}`)
+  }
+  // La cuenta con la cantidad que se compra (con desperdicio y redondeo): así cierra con el subtotal
+  const cantidad = r.cantidad_efectiva ?? r.cantidad
+  const unidad = tipo === 'mano_obra' ? 'jornales' : (r.unidad ?? '')
+  return (
+    <li data-testid="recurso-tarjeta" className={`relative px-4 py-3 ${sinPrecio ? 'bg-red-50/70' : ''}`}>
+      <div className={`pr-10 text-[15px] font-medium leading-snug ${sinPrecio ? 'text-red-700' : 'text-gray-900'}`}>{r.descripcion ?? '—'}</div>
+      <div className={`font-mono text-[11px] mt-0.5 ${sinPrecio ? 'text-red-500' : 'text-gray-400'}`}>{r.codigo ?? 'sin código'}</div>
+      {verCuenta && r.formula && <div className="font-mono text-[11px] text-gray-400 mt-0.5">= {r.formula}</div>}
+      <div className="mt-1.5 text-[14px] text-gray-700 tabular-nums flex flex-wrap items-baseline gap-x-1">
+        <span>{fmtCant(cantidad)} {unidad}</span>
+        <span className="text-gray-400">×</span>
+        <span>{fmtARS(r.precio_unitario)}</span>
+        <span className="text-gray-400">=</span>
+        <b className="font-bold text-gray-900">{fmtARS(r.subtotal)}</b>
+      </div>
+      <div className="mt-0.5 text-[12px] text-gray-500">{chico.join(' · ')}</div>
+      {sinPrecio && <SinPrecio resource={r} onBuscar={onBuscar} />}
+      {onMenu && (
+        <button
+          type="button"
+          onClick={onMenu}
+          aria-label={`Opciones de ${r.descripcion ?? r.codigo ?? 'el recurso'}`}
+          className="absolute top-2 right-2 w-10 h-10 flex items-center justify-center rounded-full text-gray-400 active:bg-gray-100"
+        >
+          <MoreHorizontal size={20} />
+        </button>
+      )}
+    </li>
+  )
+}
+
+/** Editar (o agregar) un recurso en el celular: una hoja con los campos grandes y los botones fijos abajo. */
+function HojaRecurso({ inicial, tipo, titulo, onGuardar, onCerrar }: {
+  inicial: Partial<ItemResource>
+  tipo: Tipo
+  titulo: string
+  onGuardar: (data: Partial<ItemResource>) => Promise<void>
+  onCerrar: () => void
+}) {
+  const [draft, setDraft] = useState<Partial<ItemResource>>({ ...inicial })
+  const [guardando, setGuardando] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const set = (field: keyof ItemResource, value: string | number | boolean | null) => setDraft((prev) => ({ ...prev, [field]: value }))
+  const num = (v: string) => { const n = parseFloat(v.replace(',', '.')); return Number.isFinite(n) ? n : 0 }
+  const campo = 'w-full h-11 px-3 text-base border border-gray-300 rounded-xl bg-white outline-none focus:border-[#2D8D68] focus:ring-2 focus:ring-[#2D8D68]/20'
+  const etiqueta = 'block text-[13px] font-medium text-gray-600 mb-1'
+  const guardar = async () => {
+    setGuardando(true)
+    setError(null)
+    try {
+      await onGuardar(draft)
+      onCerrar()
+    } catch (err) {
+      setError(`No se guardó: ${mensajeDeError(err)}`)
+    } finally {
+      setGuardando(false)
+    }
+  }
+  const numero = (field: keyof ItemResource, label: string) => (
+    <label className="block">
+      <span className={etiqueta}>{label}</span>
+      <input
+        className={`${campo} text-right tabular-nums`}
+        type="text"
+        inputMode="decimal"
+        defaultValue={String(draft[field] ?? 0).replace('.', ',')}
+        onChange={(e) => set(field, num(e.target.value))}
+      />
+    </label>
+  )
+  return (
+    <HojaInferior
+      titulo={titulo}
+      onCerrar={onCerrar}
+      testId="hoja-recurso"
+      pie={
+        <div className="grid grid-cols-2 gap-2">
+          <button type="button" onClick={onCerrar} disabled={guardando} className="h-12 rounded-xl border border-gray-200 text-[15px] font-semibold text-gray-700 active:bg-gray-100">
+            Cancelar
+          </button>
+          <button type="button" onClick={guardar} disabled={guardando} className="h-12 rounded-xl bg-gradient-to-r from-[#2D8D68] to-[#1B5E4B] text-white text-[15px] font-semibold disabled:opacity-60 flex items-center justify-center gap-1.5">
+            <Save size={16} /> {guardando ? 'Guardando…' : 'Guardar'}
+          </button>
+        </div>
+      }
+    >
+      <div className="px-5 py-4 space-y-3">
+        <label className="block">
+          <span className={etiqueta}>Descripción</span>
+          <input className={campo} value={draft.descripcion ?? ''} onChange={(e) => set('descripcion', e.target.value || null)} />
+        </label>
+        <div className="grid grid-cols-2 gap-3">
+          <label className="block">
+            <span className={etiqueta}>Código</span>
+            <input className={campo} value={draft.codigo ?? ''} onChange={(e) => set('codigo', e.target.value || null)} />
+          </label>
+          {tipo === 'mano_obra' ? numero('precio_unitario', 'Jornal') : (
+            <label className="block">
+              <span className={etiqueta}>Unidad</span>
+              <input className={campo} value={draft.unidad ?? ''} onChange={(e) => set('unidad', e.target.value || null)} placeholder="m2" />
+            </label>
+          )}
+        </div>
+        {tipo === 'mano_obra' ? (
+          <div className="grid grid-cols-3 gap-3">
+            {numero('trabajadores', 'Trabajadores')}
+            {/* textos-ok: 'dias' es el nombre del campo */}
+            {numero('dias', 'Días')}
+            {numero('cargas_sociales_pct', 'Cargas %')}
+          </div>
+        ) : (
+          <>
+            <div className="grid grid-cols-3 gap-3">
+              {numero('cantidad', 'Cantidad')}
+              {numero('desperdicio_pct', 'Desperdicio %')}
+              {numero('precio_unitario', 'Precio')}
+            </div>
+            <label className="flex items-center gap-3 min-h-11 text-[15px] text-gray-700">
+              <input
+                type="checkbox"
+                className="w-5 h-5 accent-[#2D8D68]"
+                checked={!!draft.lo_compra_cliente}
+                onChange={(e) => set('lo_compra_cliente', e.target.checked)}
+              />
+              <span>
+                Lo compra el cliente
+                <span className="block text-[12px] text-gray-500">Se ve, pero no suma al costo</span>
+              </span>
+            </label>
+          </>
+        )}
+        {error && <p role="alert" className="text-[13px] text-red-600">{error}</p>}
+      </div>
+    </HojaInferior>
+  )
+}
+
 // ─── ResourceSection ──────────────────────────────────────────────────────────
 
 interface SectionProps {
@@ -410,6 +574,12 @@ interface SectionProps {
 
 function ResourceSection({ tipo, recursos, itemQty, budgetId, itemId, onReload, verCuenta, faltantes, onBuscar }: SectionProps) {
   const { puedeEditar } = useAuth()
+  const { celular } = usePantalla()
+  // Celular: opciones de un recurso (⋯), editar o agregar en una hoja
+  const [menuRecurso, setMenuRecurso] = useState<ItemResource | null>(null)
+  const [confirmarBorrar, setConfirmarBorrar] = useState(false)
+  const [borrando, setBorrando] = useState(false)
+  const [hojaRecurso, setHojaRecurso] = useState<{ recurso: ItemResource | null } | null>(null)
   const [open, setOpen] = useState(true)
   const [adding, setAdding] = useState(false)
   const [newResource, setNewResource] = useState<Partial<ItemResource> | null>(null)
@@ -455,6 +625,9 @@ function ResourceSection({ tipo, recursos, itemQty, budgetId, itemId, onReload, 
     : ['Código', 'Descripción', 'Unidad', 'Cantidad', 'Desperdicio %', 'Precio por unidad', 'Subtotal', '']
   const headers = tipo === 'mano_obra' ? moHeaders : matHeaders
 
+  const esSinPrecio = (r: ItemResource) =>
+    !!r.codigo && faltantes.has(normalizarCodigo(r.codigo)) && !r.lo_compra_cliente && !(r.precio_unitario > 0)
+
   const tipoUnitLabel =
     tipo === 'material' ? 'Materiales por unidad'
     : tipo === 'mano_obra' ? 'Mano de obra por unidad'
@@ -467,7 +640,7 @@ function ResourceSection({ tipo, recursos, itemQty, budgetId, itemId, onReload, 
       {/* Section header */}
       <button
         onClick={() => setOpen(!open)}
-        className="w-full bg-[#E8F5EE]/30 px-4 py-2.5 flex items-center gap-2 border-b hover:bg-[#E8F5EE]/60 transition-colors"
+        className="w-full bg-[#E8F5EE]/30 px-4 py-2.5 max-md:min-h-12 flex items-center gap-2 border-b hover:bg-[#E8F5EE]/60 transition-colors"
       >
         {open
           ? <ChevronDown size={14} className="text-[#2D8D68] flex-shrink-0" />
@@ -481,7 +654,40 @@ function ResourceSection({ tipo, recursos, itemQty, budgetId, itemId, onReload, 
 
       {open && (
         <>
-          {filtered.length === 0 && !adding ? (
+          {celular ? (
+            filtered.length === 0 ? (
+              <div className="px-4 py-5 text-center text-gray-400 text-[13px] italic">
+                No hay recursos cargados. Agregá recursos para calcular el precio unitario.
+              </div>
+            ) : (
+              <>
+                <ul className="divide-y divide-gray-100">
+                  {filtered.map((r) => (
+                    <RecursoTarjeta
+                      key={r.id}
+                      resource={r}
+                      tipo={tipo}
+                      verCuenta={verCuenta}
+                      sinPrecio={esSinPrecio(r)}
+                      onBuscar={onBuscar}
+                      onMenu={puedeEditar ? () => { setConfirmarBorrar(false); setMenuRecurso(r) } : undefined}
+                    />
+                  ))}
+                </ul>
+                <div className="bg-[#E8F5EE] px-4 py-2.5 text-[13px] text-[#1B5E4B]">
+                  <div className="flex items-baseline justify-between gap-3">
+                    <span className="font-bold uppercase text-[11px] tracking-wide">Total {TIPO_LABELS[tipo]}</span>
+                    <b className="text-[15px] text-[#2D8D68] tabular-nums">{fmtARS(total)}</b>
+                  </div>
+                  {itemQty > 0 && (
+                    <div className="text-[12px] mt-0.5">
+                      {fmtARS(total)} ÷ {fmtNumber(itemQty, 2)} = <strong>{tipoUnitLabel}: {fmtARS(unitPrice)}</strong>
+                    </div>
+                  )}
+                </div>
+              </>
+            )
+          ) : filtered.length === 0 && !adding ? (
             <div className="p-6 text-center text-gray-400 text-sm italic">
               No hay recursos cargados. Agregá recursos para calcular el precio unitario.
             </div>
@@ -551,15 +757,15 @@ function ResourceSection({ tipo, recursos, itemQty, budgetId, itemId, onReload, 
                 </tfoot>
               </table>
             </div>
-          )}
-
+          )
+          }
           {/* Add resource button */}
           {puedeEditar && (
           <div className="px-4 py-2 border-t">
             <button
-              onClick={handleAddNew}
+              onClick={celular ? () => setHojaRecurso({ recurso: null }) : handleAddNew}
               disabled={adding}
-              className="flex items-center gap-1.5 text-xs bg-[#2D8D68] hover:bg-[#1E6B4E] text-white px-3 py-1.5 rounded-lg font-medium transition-colors disabled:opacity-50"
+              className="flex items-center gap-1.5 text-xs max-md:text-[14px] max-md:min-h-10 max-md:px-4 max-md:rounded-xl bg-[#2D8D68] hover:bg-[#1E6B4E] text-white px-3 py-1.5 rounded-lg font-medium transition-colors disabled:opacity-50"
             >
               <Plus size={12} />
               Agregar recurso
@@ -567,6 +773,71 @@ function ResourceSection({ tipo, recursos, itemQty, budgetId, itemId, onReload, 
           </div>
           )}
         </>
+      )}
+
+      {menuRecurso && (
+        <HojaInferior
+          titulo={menuRecurso.descripcion ?? menuRecurso.codigo ?? 'Recurso'}
+          onCerrar={() => setMenuRecurso(null)}
+          alto="max-h-[80dvh]"
+        >
+          {confirmarBorrar ? (
+            <div className="px-5 py-4">
+              <p className="text-[15px] text-gray-800">¿Borrar este recurso?</p>
+              <p className="text-[13px] text-gray-500 mt-1">El trabajo se recalcula sin él.</p>
+              <div className="grid grid-cols-2 gap-2 mt-4">
+                <button type="button" onClick={() => setConfirmarBorrar(false)} disabled={borrando} className="h-12 rounded-xl border border-gray-200 text-[15px] font-semibold text-gray-700 active:bg-gray-100">
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  disabled={borrando}
+                  onClick={async () => {
+                    setBorrando(true)
+                    try { await handleDelete(menuRecurso.id) } finally { setBorrando(false); setMenuRecurso(null) }
+                  }}
+                  className="h-12 rounded-xl bg-red-500 text-white text-[15px] font-semibold active:bg-red-600 disabled:opacity-60"
+                >
+                  {borrando ? 'Borrando…' : 'Borrar'}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div role="menu" className="px-3 py-2">
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => { const r = menuRecurso; setMenuRecurso(null); setHojaRecurso({ recurso: r }) }}
+                className="w-full text-left px-3 min-h-[52px] rounded-xl text-[15px] font-medium text-gray-800 flex items-center gap-3 active:bg-gray-100"
+              >
+                <span className="w-9 h-9 rounded-full bg-[#E8F5EE] text-[#2D8D68] flex items-center justify-center"><Pencil size={17} /></span>
+                Editar
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => setConfirmarBorrar(true)}
+                className="w-full text-left px-3 min-h-[52px] rounded-xl text-[15px] font-medium text-red-600 flex items-center gap-3 active:bg-gray-100"
+              >
+                <span className="w-9 h-9 rounded-full bg-red-50 text-red-500 flex items-center justify-center"><Trash2 size={17} /></span>
+                Borrar
+              </button>
+            </div>
+          )}
+        </HojaInferior>
+      )}
+
+      {hojaRecurso && (
+        <HojaRecurso
+          tipo={tipo}
+          titulo={hojaRecurso.recurso ? 'Editar el recurso' : `Agregar a ${TIPO_LABELS[tipo]}`}
+          inicial={hojaRecurso.recurso ?? emptyResource(tipo, itemId)}
+          onGuardar={async (data) => {
+            if (hojaRecurso.recurso) await handleSave(hojaRecurso.recurso.id, data)
+            else { await budgetApi.createResource(budgetId, itemId, { ...data, tipo }); onReload() }
+          }}
+          onCerrar={() => setHojaRecurso(null)}
+        />
       )}
     </div>
   )
@@ -768,7 +1039,7 @@ function ItemParams({
                 value={draft[k]}
                 onChange={(e) => setDraft({ ...draft, [k]: e.target.value })}
                 aria-label={nombreParametro(k)}
-                className="w-20 text-right px-2 py-1 text-xs border border-gray-200 rounded-md focus:outline-none focus:border-[#2D8D68]"
+                className="w-20 max-md:w-24 max-md:h-10 text-right px-2 py-1 text-xs border border-gray-200 rounded-md focus:outline-none focus:border-[#2D8D68]"
               />
             ) : (
               <span className="font-semibold text-gray-800">{draft[k]}</span>
@@ -779,7 +1050,7 @@ function ItemParams({
           <button
             onClick={handleSave}
             disabled={saving}
-            className="text-xs bg-[#2D8D68] hover:bg-[#1B5E4B] disabled:opacity-60 text-white px-3 py-1 rounded-lg font-medium"
+            className="text-xs max-md:text-[14px] max-md:h-10 max-md:px-4 bg-[#2D8D68] hover:bg-[#1B5E4B] disabled:opacity-60 text-white px-3 py-1 rounded-lg font-medium"
           >
             {saving ? 'Recalculando...' : 'Guardar y recalcular'}
           </button>
@@ -913,7 +1184,7 @@ function TemplateModal({ budgetId, itemId, reemplaza, recursosCargados, descripc
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg mx-4 overflow-hidden flex flex-col max-h-[85vh]">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg mx-4 overflow-hidden flex flex-col max-h-[85vh] max-md:mx-0 max-md:max-w-none max-md:rounded-none max-md:h-[100dvh] max-md:max-h-none">
         {/* Modal header */}
         <div className="bg-[#E8F5EE] px-5 py-4 flex items-center justify-between border-b border-[#C3E5D3] flex-shrink-0">
           <div className="flex items-center gap-2">
@@ -922,7 +1193,8 @@ function TemplateModal({ budgetId, itemId, reemplaza, recursosCargados, descripc
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 rounded-lg hover:bg-[#C3E5D3] text-[#2D8D68] transition-colors"
+            aria-label="Cerrar"
+            className="p-1.5 max-md:w-10 max-md:h-10 max-md:flex max-md:items-center max-md:justify-center rounded-lg hover:bg-[#C3E5D3] text-[#2D8D68] transition-colors"
           >
             <X size={16} />
           </button>
@@ -995,7 +1267,7 @@ function TemplateModal({ budgetId, itemId, reemplaza, recursosCargados, descripc
                   parecidas: sugerencias.parecidas,
                   onElegir: elegirSugerida,
                 } : undefined}
-                className="flex-1 min-h-0 flex flex-col"
+                className="flex-1 min-h-0 flex flex-col max-md:[&_button]:min-h-11 max-md:[&_input]:min-h-8"
                 listaClassName="flex-1 overflow-y-auto min-h-[10rem]"
               />
             )}
@@ -1215,14 +1487,14 @@ export default function ItemDetail() {
   }
 
   return (
-    <div className="p-6 fade-in max-w-6xl mx-auto">
+    <div className="p-4 md:p-6 pb-10 fade-in max-w-6xl mx-auto">
       {!puedeEditar && (
         <div className="mb-3 rounded-lg bg-gray-100 border border-gray-200 px-3 py-1.5 text-xs text-gray-600">
           Tu usuario solo puede mirar. Los cambios los hace quien carga y edita.
         </div>
       )}
-      {/* Breadcrumb */}
-      <div className="flex items-center gap-1.5 text-xs mb-2">
+      {/* Breadcrumb (en el celular alcanza con "Volver al editor") */}
+      <div className="hidden md:flex items-center gap-1.5 text-xs mb-2">
         <span className="text-gray-400 cursor-pointer hover:text-[#2D8D68]" onClick={() => navigate('/app/dashboard')}>Mis presupuestos</span>
         <ChevronRight size={12} className="text-gray-300" />
         <span className="text-gray-400 cursor-pointer hover:text-[#2D8D68]" onClick={() => navigate(`/app/budgets/${id ?? '1'}/editor`)}>{budget?.name ?? 'Presupuesto'}</span>
@@ -1231,11 +1503,11 @@ export default function ItemDetail() {
       </div>
 
       {/* Back button + section label */}
-      <div className="flex items-center justify-between mb-1">
-        <div className="flex items-center gap-3">
+      <div className="flex items-center justify-between gap-2 mb-1 max-md:mb-3">
+        <div className="flex items-center gap-3 max-md:w-full max-md:justify-between">
           <button
             onClick={() => navigate(`/app/budgets/${id ?? '1'}/editor`)}
-            className="flex items-center gap-1 text-xs text-[#2D8D68] hover:text-[#1B5E4B] font-medium transition-colors"
+            className="flex items-center gap-1 text-xs max-md:text-[14px] max-md:min-h-10 text-[#2D8D68] hover:text-[#1B5E4B] font-medium transition-colors"
           >
             <ArrowLeft size={13} />
             Volver al editor
@@ -1243,14 +1515,14 @@ export default function ItemDetail() {
           {puedeEditar && (
           <button
             onClick={() => setTemplateModalOpen(true)}
-            className="flex items-center gap-1.5 text-xs bg-[#2D8D68] hover:bg-[#1E6B4E] text-white px-3 py-1.5 rounded-lg font-medium transition-colors"
+            className="flex items-center gap-1.5 text-xs max-md:text-[14px] max-md:h-10 max-md:px-4 max-md:rounded-xl bg-[#2D8D68] hover:bg-[#1E6B4E] text-white px-3 py-1.5 rounded-lg font-medium transition-colors"
           >
             <Library size={13} />
             {item?.template_id ? 'Cambiar fórmula' : 'Cargar fórmula'}
           </button>
           )}
         </div>
-        <div className="flex items-center gap-2 text-[#2D8D68] text-[11px] font-bold tracking-wider">
+        <div className="hidden md:flex items-center gap-2 text-[#2D8D68] text-[11px] font-bold tracking-wider">
           <ClipboardList size={14} /> DETALLE DE RECURSOS
         </div>
       </div>
@@ -1275,7 +1547,7 @@ export default function ItemDetail() {
           <div className="w-1 h-8 bg-[#2D8D68] rounded-full flex-shrink-0 mt-0.5" />
           <div className="flex-1">
             <div className="flex items-start gap-x-3 gap-y-1 flex-wrap">
-              <h1 className="text-xl font-extrabold text-[#143D34] min-w-0 break-words">
+              <h1 className="text-xl max-md:text-[19px] max-md:leading-snug font-extrabold text-[#143D34] min-w-0 break-words [overflow-wrap:anywhere]">
                 {item ? `${item.code ?? ''} ${item.description ?? ''}`.trim().toUpperCase() : 'DETALLE DEL TRABAJO'}
               </h1>
               {item && faltantesEstado !== 'cargando' && (
@@ -1283,11 +1555,11 @@ export default function ItemDetail() {
                   <span className={`inline-block text-[10px] font-bold rounded px-1.5 py-0.5 ${ESTILO[estado.estado].chip}`}>
                     {ESTILO[estado.estado].texto}
                   </span>
-                  <span className="text-xs text-gray-700">{estado.frase}</span>
+                  <span className="text-xs max-md:text-[13px] text-gray-700">{estado.frase}</span>
                   {faltantesEstado === 'error' && (
                     <button
                       onClick={() => refrescarFaltantes()}
-                      className="text-xs font-semibold text-[#2D8D68] underline hover:text-[#143D34]"
+                      className="text-xs font-semibold text-[#2D8D68] underline hover:text-[#143D34] max-md:min-h-10 max-md:text-[13px]"
                     >
                       Reintentar
                     </button>
@@ -1315,7 +1587,7 @@ export default function ItemDetail() {
         </div>
 
         {/* Summary bar: 5 mini cards */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 max-sm:[&>*:last-child]:col-span-2">
           {[
             { label: 'Materiales', value: matUnit },
             { label: 'Mano de obra', value: moUnit },
@@ -1324,8 +1596,8 @@ export default function ItemDetail() {
             { label: 'Subcontratos', value: subUnit },
           ].map(({ label, value }) => (
             <div key={label} className="bg-white rounded-lg p-2 text-center border border-[#C3E5D3] min-w-0">
-              <div className="text-[10px] leading-tight text-[#2D8D68] font-semibold mb-0.5 break-words">{label} por {porUnidad}</div>
-              <div className="font-bold text-[#143D34] text-xs">{fmtARS(value)}</div>
+              <div className="text-[10px] max-md:text-[11px] leading-tight text-[#2D8D68] font-semibold mb-0.5 break-words">{label} por {porUnidad}</div>
+              <div className="font-bold text-[#143D34] text-xs max-md:text-[15px] tabular-nums">{fmtARS(value)}</div>
             </div>
           ))}
         </div>
@@ -1402,7 +1674,7 @@ export default function ItemDetail() {
       <div className="mb-2 text-right">
         <button
           onClick={alternarVerCuenta}
-          className="text-xs text-[#2D8D68] hover:text-[#1B5E4B] hover:underline font-medium"
+          className="text-xs max-md:text-[14px] max-md:min-h-10 text-[#2D8D68] hover:text-[#1B5E4B] hover:underline font-medium"
         >
           {verCuenta ? 'Ocultar cómo se calcula' : 'Ver cómo se calcula'}
         </button>
@@ -1444,7 +1716,7 @@ export default function ItemDetail() {
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden mb-6">
         <button
           onClick={() => setMemoriaOpen(!memoriaOpen)}
-          className="w-full bg-[#E8F5EE]/30 px-4 py-2.5 flex items-center gap-2 border-b hover:bg-[#E8F5EE]/60 transition-colors"
+          className="w-full bg-[#E8F5EE]/30 px-4 py-2.5 max-md:min-h-12 flex items-center gap-2 border-b hover:bg-[#E8F5EE]/60 transition-colors"
         >
           <Calculator size={14} className="text-[#2D8D68]" />
           <span className="font-bold text-sm text-[#2D8D68]">Memoria de cálculo</span>
@@ -1492,7 +1764,7 @@ export default function ItemDetail() {
                         setMemoriaSaving(false)
                       }
                     }}
-                    className="flex items-center gap-1 bg-[#2D8D68] hover:bg-[#1B5E4B] text-white text-xs px-3 py-1.5 rounded-lg font-medium transition-colors disabled:opacity-50"
+                    className="flex items-center gap-1 bg-[#2D8D68] hover:bg-[#1B5E4B] text-white text-xs max-md:text-[14px] max-md:h-10 max-md:px-4 px-3 py-1.5 rounded-lg font-medium transition-colors disabled:opacity-50"
                   >
                     <Check size={12} />
                     {memoriaSaving ? 'Guardando...' : 'Guardar'}
@@ -1500,7 +1772,7 @@ export default function ItemDetail() {
                   <button
                     disabled={memoriaSaving}
                     onClick={() => setEditingMemoria(false)}
-                    className="flex items-center gap-1 bg-gray-200 hover:bg-gray-300 text-gray-700 text-xs px-3 py-1.5 rounded-lg font-medium transition-colors"
+                    className="flex items-center gap-1 bg-gray-200 hover:bg-gray-300 text-gray-700 text-xs max-md:text-[14px] max-md:h-10 max-md:px-4 px-3 py-1.5 rounded-lg font-medium transition-colors"
                   >
                     <X size={12} />
                     Cancelar
@@ -1521,7 +1793,7 @@ export default function ItemDetail() {
                     setMemoriaDraft(item?.notas_calculo ?? '')
                     setEditingMemoria(true)
                   }}
-                  className="flex items-center gap-1 text-xs text-[#2D8D68] hover:text-[#1B5E4B] font-medium transition-colors"
+                  className="flex items-center gap-1 text-xs max-md:text-[14px] max-md:min-h-10 text-[#2D8D68] hover:text-[#1B5E4B] font-medium transition-colors"
                 >
                   <Pencil size={12} />
                   {item?.notas_calculo ? 'Editar memoria' : 'Agregar memoria de cálculo'}

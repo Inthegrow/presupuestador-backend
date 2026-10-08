@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent, ReactNode } from 'react'
-import { Loader2, Plus, X } from 'lucide-react'
+import { HelpCircle, Loader2, Plus, X } from 'lucide-react'
 import { ApiError, budgetApi, templateApi, esFaltaConversion, mensajeDeError } from '../../lib/api'
 import type { AgregarTrabajoPayload, AgregarTrabajoResult, FaltaConversion, TemplateSugerencias, TemplateSugerida } from '../../lib/api'
 import BuscadorFormulas from './BuscadorFormulas'
@@ -32,6 +32,10 @@ interface Props {
   onVerTrabajo?: (itemId: string) => void
   // Lo que va debajo del renglón (el formulario sin fórmula)
   pie?: ReactNode
+  // 'compacta': notebook baja, todo en un renglón con la ayuda en "?". 'celular': uno debajo del otro, a lo ancho.
+  variante?: 'normal' | 'compacta' | 'celular'
+  // Lo que va al final del renglón (solo en la compacta)
+  enRenglon?: ReactNode
 }
 
 function normUnidad(u?: string | null): string {
@@ -51,7 +55,16 @@ function enLista(nombres: string[]): string {
 
 const MAX_NOMBRES = 4
 
-export default function AgregarTrabajo({ budgetId, rubroElegido, onSoltarRubro, onAgregado, onVerTrabajo, pie }: Props) {
+export default function AgregarTrabajo({ budgetId, rubroElegido, onSoltarRubro, onAgregado, onVerTrabajo, pie, variante = 'normal', enRenglon }: Props) {
+  const [verAyuda, setVerAyuda] = useState(false)
+  // Celular: arranca plegado como un botón; se despliega al tocarlo y se vuelve a plegar después de agregar
+  const [desplegado, setDesplegado] = useState(false)
+  useEffect(() => {
+    if (!verAyuda) return
+    const tecla = (e: globalThis.KeyboardEvent) => { if (e.key === 'Escape') setVerAyuda(false) }
+    document.addEventListener('keydown', tecla)
+    return () => document.removeEventListener('keydown', tecla)
+  }, [verAyuda])
   const [recetas, setRecetas] = useState<Formula[]>([])
   const [recetasError, setRecetasError] = useState(false)
   const [texto, setTexto] = useState('')
@@ -200,6 +213,7 @@ export default function AgregarTrabajo({ budgetId, rubroElegido, onSoltarRubro, 
         itemId: res?.item?.id,
       })
       limpiar()
+      if (variante === 'celular') setDesplegado(false)
       // Refrescar el árbol y la tabla no debe tapar que el trabajo ya quedó guardado
       try { await onAgregado(res) } catch { /* la pantalla se pone al día en el próximo cambio */ }
     } catch (err) {
@@ -241,7 +255,7 @@ export default function AgregarTrabajo({ budgetId, rubroElegido, onSoltarRubro, 
   const destino = rubroElegido ? (
     <>
       Va a <b className="font-semibold text-gray-700">{rubroElegido.nombre}</b>, el rubro elegido en el árbol.{' '}
-      <button onClick={onSoltarRubro} className="text-[#2D8D68] font-medium hover:underline">
+      <button onClick={onSoltarRubro} className="text-[#2D8D68] font-medium hover:underline max-md:min-h-10 max-md:inline-flex max-md:items-center">
         Que vaya al rubro de su fórmula
       </button>
     </>
@@ -251,81 +265,198 @@ export default function AgregarTrabajo({ budgetId, rubroElegido, onSoltarRubro, 
     <>Cada trabajo va al rubro de su fórmula (si no está, se crea). Si elegís un rubro en el árbol, va a ese.</>
   )
 
-  return (
-    <section aria-label="Agregá un trabajo" className="border-b px-4 py-3 bg-[#F8FBF9] flex-shrink-0">
-      <div className="text-xs font-bold text-[#143D34] mb-1.5">
-        Agregá un trabajo: <span className="font-normal text-gray-600">escribí como hablás</span>
-      </div>
-      <div className="flex flex-wrap items-start gap-2">
-        <div className="flex-1 min-w-[15rem]">
-          {elegida ? (
-            <div className="flex items-center gap-2 border border-[#2D8D68]/40 rounded-xl bg-white px-3 py-2 min-h-[38px]">
-              <span className="flex-1 min-w-0 text-sm">
-                <span className="font-medium text-[#143D34]">{elegida.formula.nombre}</span>
-                {elegida.formula.unidad && <span className="text-xs text-gray-500"> ({elegida.formula.unidad})</span>}
-                {elegida.desdePropuesta && texto.trim() && (
-                  <span className="block text-[11px] text-gray-500">Se va a llamar «{oracion(texto)}»</span>
-                )}
-              </span>
-              <button
-                onClick={cambiarFormula}
-                disabled={enviando}
-                title="Elegir otra fórmula"
-                className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-800 disabled:opacity-50"
-              >
-                <X size={12} /> Cambiar
-              </button>
-            </div>
-          ) : (
-            <BuscadorFormulas<Formula, TemplateSugerida>
-              recetas={recetas}
-              texto={texto}
-              onTexto={(t) => { setTexto(t); setError(null) }}
-              inputRef={buscadorRef}
-              autoFocus={false}
-              soloConTexto
-              placeholder="hueco 18, contrapiso, pintura…"
-              onElegir={(r) => elegir(r)}
-              onEnter={enterEnBuscador}
-              deshabilitado={enviando}
-              quizas={sug ? { propuesta: sug.r.propuesta, parecidas: sug.r.parecidas, onElegir: elegirSugerida } : undefined}
-              className="border rounded-xl bg-white focus-within:border-[#2D8D68] focus-within:ring-2 focus-within:ring-[#2D8D68]/20"
-              listaClassName="max-h-60 overflow-y-auto"
-            />
-          )}
-        </div>
-        <input
-          ref={cantidadRef}
-          type="text"
-          inputMode="decimal"
-          aria-label="Cantidad"
-          placeholder="Cantidad"
-          value={cantidad}
-          onChange={(e) => { setCantidad(e.target.value); setConversion(null) }}
-          onKeyDown={onEnterCampo}
-          className="w-24 border rounded-xl px-3 py-2 text-sm bg-white focus:outline-none focus:border-[#2D8D68] focus:ring-2 focus:ring-[#2D8D68]/20"
-        />
-        <input
-          type="text"
-          aria-label="Unidad"
-          placeholder="Unidad"
-          title="La de la fórmula. Si ponés otra, te pregunto la conversión."
-          value={unidad}
-          onChange={(e) => { setUnidad(e.target.value); setConversion(null) }}
-          onKeyDown={onEnterCampo}
-          className="w-20 border rounded-xl px-3 py-2 text-sm bg-white focus:outline-none focus:border-[#2D8D68] focus:ring-2 focus:ring-[#2D8D68]/20"
-        />
-        <button
-          onClick={enviar}
-          disabled={enviando || buscando}
-          className="flex items-center gap-1 px-4 py-2 rounded-xl text-sm font-semibold text-white bg-gradient-to-r from-[#2D8D68] to-[#1B5E4B] hover:from-[#1B5E4B] hover:to-[#143D34] disabled:opacity-60 transition-all"
-        >
-          {enviando || buscando ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
-          {enviando ? 'Agregando…' : 'Agregar'}
-        </button>
-      </div>
+  const compacta = variante === 'compacta'
+  const celular = variante === 'celular'
+  const campo = celular
+    ? 'h-11 border rounded-xl px-3 text-base bg-white focus:outline-none focus:border-[#2D8D68] focus:ring-2 focus:ring-[#2D8D68]/20'
+    : 'border rounded-xl px-3 py-2 text-sm bg-white focus:outline-none focus:border-[#2D8D68] focus:ring-2 focus:ring-[#2D8D68]/20'
 
-      <p className="text-[11px] text-gray-500 mt-1.5">{destino}</p>
+  const buscador = elegida ? (
+    <div className={`flex items-center gap-2 border border-[#2D8D68]/40 rounded-xl bg-white px-3 ${celular ? 'py-1.5 min-h-[44px]' : 'py-2 min-h-[38px]'}`}>
+      <span className={`flex-1 min-w-0 ${celular ? 'text-[15px]' : 'text-sm'}`}>
+        <span className="font-medium text-[#143D34]">{elegida.formula.nombre}</span>
+        {elegida.formula.unidad && <span className="text-xs text-gray-500"> ({elegida.formula.unidad})</span>}
+        {elegida.desdePropuesta && texto.trim() && (
+          <span className="block text-[11px] text-gray-500">Se va a llamar «{oracion(texto)}»</span>
+        )}
+      </span>
+      <button
+        onClick={cambiarFormula}
+        disabled={enviando}
+        title="Elegir otra fórmula"
+        className={`flex items-center gap-1 text-xs text-gray-500 hover:text-gray-800 disabled:opacity-50 ${celular ? 'min-h-10 px-2 -mr-2' : ''}`}
+      >
+        <X size={12} /> Cambiar
+      </button>
+    </div>
+  ) : (
+    <BuscadorFormulas<Formula, TemplateSugerida>
+      recetas={recetas}
+      texto={texto}
+      onTexto={(t) => { setTexto(t); setError(null) }}
+      inputRef={buscadorRef}
+      autoFocus={false}
+      soloConTexto
+      placeholder="hueco 18, contrapiso, pintura…"
+      onElegir={(r) => elegir(r)}
+      onEnter={enterEnBuscador}
+      deshabilitado={enviando}
+      quizas={sug ? { propuesta: sug.r.propuesta, parecidas: sug.r.parecidas, onElegir: elegirSugerida } : undefined}
+      className={`border rounded-xl bg-white focus-within:border-[#2D8D68] focus-within:ring-2 focus-within:ring-[#2D8D68]/20 ${celular ? '[&>div:first-child]:py-0.5 [&_input]:min-h-10 [&_button]:min-h-10' : ''}`}
+      listaClassName={celular ? 'max-h-72 overflow-y-auto' : 'max-h-60 overflow-y-auto'}
+    />
+  )
+
+  const campoCantidad = (
+    <input
+      ref={cantidadRef}
+      type="text"
+      inputMode="decimal"
+      aria-label="Cantidad"
+      placeholder="Cantidad"
+      value={cantidad}
+      onChange={(e) => { setCantidad(e.target.value); setConversion(null) }}
+      onKeyDown={onEnterCampo}
+      className={`${campo} ${celular ? 'w-full min-w-0' : compacta ? 'w-[5.5rem] !px-2.5' : 'w-24'}`}
+    />
+  )
+  const campoUnidad = (
+    <input
+      type="text"
+      aria-label="Unidad"
+      placeholder="Unidad"
+      title="La de la fórmula. Si ponés otra, te pregunto la conversión."
+      value={unidad}
+      onChange={(e) => { setUnidad(e.target.value); setConversion(null) }}
+      onKeyDown={onEnterCampo}
+      className={`${campo} ${celular ? 'w-full min-w-0' : compacta ? 'w-[4.75rem] !px-2.5' : 'w-20'}`}
+    />
+  )
+  const botonAgregar = (
+    <button
+      onClick={enviar}
+      disabled={enviando || buscando}
+      className={`flex items-center justify-center gap-1 rounded-xl font-semibold text-white bg-gradient-to-r from-[#2D8D68] to-[#1B5E4B] hover:from-[#1B5E4B] hover:to-[#143D34] disabled:opacity-60 transition-all ${
+        celular ? 'w-full h-11 text-[15px]' : 'px-4 py-2 text-sm flex-shrink-0'}`}
+    >
+      {enviando || buscando ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+      {enviando ? 'Agregando…' : 'Agregar'}
+    </button>
+  )
+
+  const avisoAgregado = aviso && !error && (
+    <p
+      role="status"
+      className={`mt-2 text-xs max-md:text-[13px] font-medium ${aviso.faltan ? 'text-red-600' : 'text-[#1B5E4B]'}`}
+    >
+      {aviso.texto}
+      {aviso.faltan && aviso.itemId && onVerTrabajo && (
+        <>
+          {' '}
+          <button onClick={() => onVerTrabajo(aviso.itemId)} className="underline text-[#2D8D68] font-medium max-md:min-h-10 max-md:inline-flex max-md:items-center">
+            Ver el trabajo
+          </button>
+        </>
+      )}
+    </p>
+  )
+
+  if (celular && !desplegado) {
+    return (
+      <section aria-label="Agregá un trabajo">
+        <button
+          type="button"
+          onClick={() => { setDesplegado(true); setFoco('buscador') }}
+          aria-expanded={false}
+          data-testid="desplegar-agregar"
+          className="w-full h-12 flex items-center justify-center gap-1.5 rounded-2xl border-2 border-dashed border-[#2D8D68]/40 bg-white text-[15px] font-semibold text-[#1B5E4B] active:bg-[#E8F5EE]"
+        >
+          <Plus size={18} /> Agregar un trabajo
+        </button>
+        {avisoAgregado}
+      </section>
+    )
+  }
+
+  return (
+    <section
+      aria-label="Agregá un trabajo"
+      className={celular
+        ? 'px-4 py-3.5 bg-[#F8FBF9] border border-[#2D8D68]/15 rounded-2xl'
+        : `border-b bg-[#F8FBF9] flex-shrink-0 ${compacta ? 'px-4 py-2' : 'px-4 py-3'}`}
+    >
+      {compacta ? (
+        <div className="flex items-start gap-2">
+          <div className="flex items-center gap-1 h-[38px] flex-shrink-0 relative">
+            <span className="text-xs font-bold text-[#143D34] whitespace-nowrap">Agregá un trabajo</span>
+            <button
+              type="button"
+              onClick={() => setVerAyuda((v) => !v)}
+              aria-label="Cómo se agrega un trabajo"
+              title="Cómo se agrega un trabajo"
+              aria-expanded={verAyuda}
+              className="relative z-30 w-7 h-7 flex items-center justify-center rounded-full text-gray-400 hover:text-[#2D8D68] hover:bg-white"
+            >
+              <HelpCircle size={15} />
+            </button>
+            {verAyuda && (
+              <>
+                <div className="fixed inset-0 z-20" onClick={() => setVerAyuda(false)} aria-hidden />
+                <div role="note" className="absolute left-0 top-full mt-1 z-30 w-80 bg-white rounded-xl shadow-lg border border-gray-200 p-3.5 text-xs text-gray-600 leading-relaxed">
+                  <p className="font-semibold text-[#143D34] mb-1">Escribí como hablás</p>
+                  <p>Por ejemplo «hueco 18» o «contrapiso», elegí la fórmula, poné la cantidad y Enter.</p>
+                  <p className="mt-1.5">{destino}</p>
+                </div>
+              </>
+            )}
+          </div>
+          <div className="flex-1 min-w-[10rem]">{buscador}</div>
+          {campoCantidad}
+          {campoUnidad}
+          {botonAgregar}
+          {enRenglon}
+        </div>
+      ) : celular ? (
+        <>
+          <div className="flex items-center gap-2 -mt-1.5 -mr-2 mb-1">
+            <div className="flex-1 text-[14px] font-bold text-[#143D34]">
+              Agregá un trabajo: <span className="font-normal text-gray-600">escribí como hablás</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => { setDesplegado(false); setError(null) }}
+              aria-label="Plegar"
+              title="Plegar"
+              className="w-10 h-10 flex-shrink-0 flex items-center justify-center rounded-full text-gray-400 active:bg-gray-100"
+            >
+              <X size={18} />
+            </button>
+          </div>
+          {buscador}
+          <div className="grid grid-cols-[minmax(0,1fr)_7.5rem] gap-2 mt-2">
+            {campoCantidad}
+            {campoUnidad}
+          </div>
+          <div className="mt-2">{botonAgregar}</div>
+        </>
+      ) : (
+        <>
+          <div className="text-xs font-bold text-[#143D34] mb-1.5">
+            Agregá un trabajo: <span className="font-normal text-gray-600">escribí como hablás</span>
+          </div>
+          <div className="flex flex-wrap items-start gap-2">
+            <div className="flex-1 min-w-[15rem]">{buscador}</div>
+            {campoCantidad}
+            {campoUnidad}
+            {botonAgregar}
+          </div>
+        </>
+      )}
+
+      {/* En la compacta el destino va en el "?", salvo que haya un rubro elegido (hay que poder soltarlo) */}
+      {(!compacta || rubroElegido) && (
+        <p className={`text-gray-500 ${celular ? 'text-[13px] mt-2 leading-snug' : 'text-[11px] mt-1.5'}`}>{destino}</p>
+      )}
       {recetasError && (
         <p className="text-[11px] text-amber-700 mt-1">No pude traer la lista de fórmulas; igual podés escribir y elegir de «Quizás sea».</p>
       )}
@@ -352,22 +483,7 @@ export default function AgregarTrabajo({ budgetId, rubroElegido, onSoltarRubro, 
         </div>
       )}
 
-      {aviso && !error && (
-        <p
-          role="status"
-          className={`mt-2 text-xs font-medium ${aviso.faltan ? 'text-red-600' : 'text-[#1B5E4B]'}`}
-        >
-          {aviso.texto}
-          {aviso.faltan && aviso.itemId && onVerTrabajo && (
-            <>
-              {' '}
-              <button onClick={() => onVerTrabajo(aviso.itemId)} className="underline text-[#2D8D68] font-medium">
-                Ver el trabajo
-              </button>
-            </>
-          )}
-        </p>
-      )}
+      {avisoAgregado}
 
       {pie}
     </section>

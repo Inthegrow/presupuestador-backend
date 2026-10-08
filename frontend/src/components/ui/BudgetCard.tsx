@@ -82,7 +82,7 @@ export default function BudgetCard({ budget, directTotal, netoTotal, subtitle, t
       className="bg-white rounded-xl border border-gray-100 shadow-sm hover:shadow-md transition cursor-pointer overflow-hidden"
     >
       <div className={`h-1 ${BAR_COLORS[status] ?? 'bg-gray-300'}`} />
-      <div className="p-5">
+      <div className="p-4 md:p-5">
         <div className="flex justify-between items-start mb-2">
           <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${STATUS_STYLES[status] ?? 'bg-gray-100 text-gray-500'}`}>
             {STATUS_LABELS[status] || budget.status || 'Borrador'}
@@ -94,8 +94,9 @@ export default function BudgetCard({ budget, directTotal, netoTotal, subtitle, t
             {esAdmin && (
               <button
                 onClick={handleTrashClick}
-                className="text-gray-300 hover:text-red-400 transition-colors p-0.5"
+                className="text-gray-300 hover:text-red-400 transition-colors w-10 h-10 -m-3 md:w-auto md:h-auto md:m-0 md:p-0.5 flex items-center justify-center"
                 title="Eliminar presupuesto"
+                aria-label="Eliminar presupuesto"
               >
                 <Trash2 size={13} />
               </button>
@@ -113,13 +114,13 @@ export default function BudgetCard({ budget, directTotal, netoTotal, subtitle, t
             <div className="flex gap-2">
               <button
                 onClick={handleFirstConfirm}
-                className="flex-1 bg-red-500 hover:bg-red-600 text-white text-xs font-semibold py-1.5 rounded transition-colors"
+                className="flex-1 bg-red-500 hover:bg-red-600 text-white text-xs font-semibold min-h-10 md:min-h-0 py-1.5 rounded transition-colors"
               >
                 Sí, eliminar
               </button>
               <button
                 onClick={handleCancel}
-                className="flex-1 bg-white border border-gray-200 text-gray-600 text-xs font-medium py-1.5 rounded hover:bg-gray-50 transition-colors"
+                className="flex-1 bg-white border border-gray-200 text-gray-600 text-xs font-medium min-h-10 md:min-h-0 py-1.5 rounded hover:bg-gray-50 transition-colors"
               >
                 Cancelar
               </button>
@@ -141,13 +142,13 @@ export default function BudgetCard({ budget, directTotal, netoTotal, subtitle, t
             <div className="flex gap-2">
               <button
                 onClick={handleConfirmDelete}
-                className="flex-1 bg-red-600 hover:bg-red-700 text-white text-xs font-bold py-1.5 rounded transition-colors"
+                className="flex-1 bg-red-600 hover:bg-red-700 text-white text-xs font-bold min-h-10 md:min-h-0 py-1.5 rounded transition-colors"
               >
                 Eliminar para siempre
               </button>
               <button
                 onClick={handleCancel}
-                className="flex-1 bg-white border border-gray-200 text-gray-600 text-xs font-medium py-1.5 rounded hover:bg-gray-50 transition-colors"
+                className="flex-1 bg-white border border-gray-200 text-gray-600 text-xs font-medium min-h-10 md:min-h-0 py-1.5 rounded hover:bg-gray-50 transition-colors"
               >
                 Cancelar
               </button>
@@ -166,7 +167,7 @@ export default function BudgetCard({ budget, directTotal, netoTotal, subtitle, t
           </div>
         )}
 
-        <h3 className="font-bold text-gray-900">{budget.name}</h3>
+        <h3 className="font-bold text-gray-900 break-words">{budget.name}</h3>
         {subtitle && <p className="text-gray-500 text-xs mt-1">{subtitle}</p>}
         {tags && tags.length > 0 && (
           <div className="mt-3 flex flex-wrap gap-1.5 text-[10px]">

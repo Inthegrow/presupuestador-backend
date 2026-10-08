@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { AlertTriangle, CheckCircle, ChevronDown, ChevronUp, ClipboardCheck, Trash2 } from 'lucide-react'
+import { AlertTriangle, Check, CheckCircle, ChevronDown, ChevronUp, ClipboardCheck, RotateCcw, Trash2 } from 'lucide-react'
 import FileUpload from '../components/ui/FileUpload'
 import BuscadorFormulas from '../components/ui/BuscadorFormulas'
 import { catalogApi, obraApi, textoDeError } from '../lib/api'
@@ -42,6 +42,10 @@ function fraseSinConfirmar(sc: { total: number; con_receta: number; sin_receta: 
 
 type Pendiente = { codigo: string; nombre: string; unidad: string }
 type Filtro = 'revisar' | 'rojo' | 'amarillo' | 'verde' | 'todos'
+type Semaforo = ObraTarea['estado']
+
+// Cuánto se espera después del último cambio para pedirle al servidor que revise de nuevo (un solo pedido)
+const ESPERA_REVISION = 700
 
 // ─── Paso 2a: un código sin precio, repetido o que no está ─────────────────────
 
@@ -145,19 +149,19 @@ function PrecioRow({
       disabled={busy || bloqueado || (p.problema === 'no_esta' && !catalogId)}
       onClick={vaEnCero}
       title="Este material no se cotiza: queda en $0 con fecha de hoy"
-      className="bg-white border text-gray-700 text-xs font-semibold px-3 py-1 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+      className="min-h-10 md:min-h-0 bg-white border text-gray-700 text-xs font-semibold px-3 py-1 rounded-lg hover:bg-gray-50 disabled:opacity-50"
     >
       Va en $0
     </button>
   )
 
   return (
-    <tr className="border-t align-top">
-      <td className="py-2 pr-3">
+    <tr className="border-t align-top block md:table-row py-2 md:py-0">
+      <td className="block md:table-cell md:py-2 md:pr-3">
         <div className="font-mono text-xs font-semibold">{p.codigo}</div>
         <div className="text-[11px] text-gray-500">{p.descripcion}</div>
       </td>
-      <td className="py-2 pr-3 text-xs">
+      <td className="block md:table-cell py-1.5 md:py-2 md:pr-3 text-xs">
         <span className="inline-block bg-amber-50 text-amber-700 border border-amber-200 rounded px-2 py-0.5">
           {p.motivo}
         </span>
@@ -165,7 +169,7 @@ function PrecioRow({
           Afecta a {p.items.length} {p.items.length === 1 ? 'trabajo' : 'trabajos'}
         </div>
       </td>
-      <td className="py-2">
+      <td className="block md:table-cell md:py-2">
         {!sinSelector && propuesta && (
           <div className="text-[11px] text-gray-600 mb-1.5">
             <span className="font-semibold text-[#143D34]">En tu Excel usaste {fmtCurrency(propuesta.precio)}</span>{' '}
@@ -198,7 +202,7 @@ function PrecioRow({
                     unidad: ref.unidad,
                     catalogId,
                   }))}
-                  className="bg-white border text-[#143D34] text-[11px] font-semibold px-2 py-0.5 rounded-lg hover:bg-[#E8F5EE] disabled:opacity-50"
+                  className="min-h-10 md:min-h-0 bg-white border text-[#143D34] text-[11px] font-semibold px-3 md:px-2 py-0.5 rounded-lg hover:bg-[#E8F5EE] disabled:opacity-50"
                 >
                   Usar este
                 </button>
@@ -208,18 +212,19 @@ function PrecioRow({
         )}
 
         {p.problema === 'sin_precio' && p.entradas[0] && (
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <input
               value={precio}
               onChange={(e) => setPrecio(e.target.value)}
+              inputMode="decimal"
               placeholder={`Precio sin IVA por ${unidadEnPalabras(p.unidad)}`}
-              className="border rounded-lg px-2 py-1 text-xs w-44"
+              className="border rounded-lg px-2 py-1 min-h-10 md:min-h-0 text-xs w-full md:w-44"
             />
             {botonCero}
             <button
               disabled={busy || bloqueado || !valido}
               onClick={guardar}
-              className="bg-[#2D8D68] disabled:opacity-50 text-white text-xs font-semibold px-3 py-1 rounded-lg"
+              className="flex-1 md:flex-none min-h-10 md:min-h-0 bg-[#2D8D68] disabled:opacity-50 text-white text-xs font-semibold px-3 py-1 rounded-lg"
             >
               {textoGuardar}
             </button>
@@ -231,7 +236,7 @@ function PrecioRow({
             <div className="text-[11px] text-gray-500">Dejá uno solo: borrá el que no va.</div>
             {p.entradas.map((e) => (
               <div key={e.id} className="flex items-center gap-2 text-xs bg-gray-50 rounded px-2 py-1">
-                <div className="flex-1">
+                <div className="flex-1 min-w-0 break-words">
                   <span className="font-mono">{e.codigo}</span> · {e.descripcion} ·{' '}
                   <strong>{e.precio_sin_iva ? fmtCurrency(e.precio_sin_iva) : 'sin precio'}</strong>
                   {e.fecha_precio && <span className="text-gray-400"> · {fmtDate(e.fecha_precio)}</span>}
@@ -245,7 +250,8 @@ function PrecioRow({
                       run(() => catalogApi.deleteEntry(e.catalog_id, e.id))
                     }
                   }}
-                  className="text-red-500 hover:text-red-700 disabled:opacity-50"
+                  aria-label="Borrar este"
+                  className="w-10 h-10 md:w-auto md:h-auto flex items-center justify-center text-red-500 hover:text-red-700 disabled:opacity-50"
                 >
                   <Trash2 size={14} />
                 </button>
@@ -256,20 +262,21 @@ function PrecioRow({
 
         {p.problema === 'no_esta' && (
           <div className="flex flex-wrap items-center gap-2">
-            <select value={catalogId} onChange={(e) => setCatalogElegido(e.target.value)} className="border rounded-lg px-2 py-1 text-xs">
+            <select value={catalogId} onChange={(e) => setCatalogElegido(e.target.value)} className="border rounded-lg px-2 py-1 min-h-10 md:min-h-0 text-xs w-full md:w-auto">
               {elegibles.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
             <input
               value={precio}
               onChange={(e) => setPrecio(e.target.value)}
+              inputMode="decimal"
               placeholder={`Precio sin IVA por ${unidadEnPalabras(p.unidad)}`}
-              className="border rounded-lg px-2 py-1 text-xs w-44"
+              className="border rounded-lg px-2 py-1 min-h-10 md:min-h-0 text-xs w-full md:w-44"
             />
             {botonCero}
             <button
               disabled={busy || bloqueado || !valido || !catalogId}
               onClick={guardar}
-              className="bg-[#2D8D68] disabled:opacity-50 text-white text-xs font-semibold px-3 py-1 rounded-lg"
+              className="flex-1 md:flex-none min-h-10 md:min-h-0 bg-[#2D8D68] disabled:opacity-50 text-white text-xs font-semibold px-3 py-1 rounded-lg"
             >
               {textoGuardar}
             </button>
@@ -284,14 +291,21 @@ function PrecioRow({
 // ─── Tarjeta de un trabajo ─────────────────────────────────────────────────────
 
 function TareaCard({
-  t, recetas, excelConPrecios, pendiente, bloqueada, onConfirmar, onElegir, onSinReceta, onValor, onCorregirPrecios,
+  t, estadoLocal, recienConfirmada, actualizando, recetas, excelConPrecios, pendiente,
+  onConfirmar, onDeshacer, onElegir, onSinReceta, onValor, onCorregirPrecios,
 }: {
   t: ObraTarea
+  // El estado con lo que Sol ya hizo en esta pantalla (lo confirma el servidor al revisar)
+  estadoLocal: Semaforo
+  // Confirmada recién, en esta lista: se queda en su lugar con "Deshacer" hasta cambiar de filtro
+  recienConfirmada: boolean
+  // Sol la cambió y el servidor todavía no la revisó
+  actualizando: boolean
   recetas: ObraRecetaCatalogo[]
   excelConPrecios: boolean
   pendiente?: Pendiente
-  bloqueada: boolean
   onConfirmar: () => void
+  onDeshacer: () => void
   onElegir: (r: ObraRecetaCatalogo) => void
   onSinReceta: () => void
   onValor: (codigo: string, valor: number) => void
@@ -309,7 +323,7 @@ function TareaCard({
   const [editando, setEditando] = useState(false)
   useEffect(() => { setEditando(false) }, [pregunta?.receta, pregunta?.dato])
 
-  const estado = pendiente || (pregunta && pregunta.valor == null) ? 'rojo' : t.estado
+  const estado = pendiente || (pregunta && pregunta.valor == null) ? 'rojo' : estadoLocal
   const est = ESTILO[estado]
   const receta = t.receta
   // Red because it has no recipe and no price in the Excel: it can only be solved by picking a recipe
@@ -331,8 +345,13 @@ function TareaCard({
   }
 
   return (
-    <div className={`bg-white border border-l-4 ${est.borde} rounded-xl p-4`}>
-      <div className="flex flex-wrap gap-4 items-start">
+    <div
+      className={`bg-white border border-l-4 ${est.borde} rounded-xl p-4 transition-colors`}
+      data-testid="tarea-obra"
+      data-estado={estado}
+      data-clave={t.clave}
+    >
+      <div className="flex flex-wrap gap-x-4 gap-y-3 items-start">
         <div className="flex-1 min-w-[220px]">
           <div className="text-sm font-medium text-gray-900">{t.descripcion}</div>
           <div className="text-[11px] text-gray-500 mt-0.5">
@@ -340,7 +359,21 @@ function TareaCard({
           </div>
         </div>
         <div className="flex-1 min-w-[220px]">
-          <span className={`inline-block text-[10px] font-bold rounded px-1.5 py-0.5 mb-1 ${est.chip}`}>{est.texto}</span>
+          <div className="flex items-center gap-2 mb-1">
+            {recienConfirmada && estado === 'verde' ? (
+              <span className={`inline-flex items-center gap-1 text-[10px] font-bold rounded px-1.5 py-0.5 ${est.chip}`} data-testid="confirmado">
+                Confirmado <Check size={11} strokeWidth={3} />
+              </span>
+            ) : (
+              <span className={`inline-block text-[10px] font-bold rounded px-1.5 py-0.5 ${est.chip}`}>{est.texto}</span>
+            )}
+            {actualizando && (
+              <span className="inline-flex items-center gap-1 text-[10px] text-gray-400">
+                <span className="w-2.5 h-2.5 border-[1.5px] border-gray-300 border-t-transparent rounded-full animate-spin" />
+                Actualizando…
+              </span>
+            )}
+          </div>
           <div className="text-sm text-gray-800">{nombreReceta}</div>
           {!pendiente && receta?.porque && <div className="text-[11px] text-gray-500">porque: {receta.porque.charAt(0).toLowerCase() + receta.porque.slice(1)}</div>}
           {!pendiente && !receta && t.sugerencias.length > 0 && (
@@ -350,7 +383,10 @@ function TareaCard({
                 <span key={s.codigo}>
                   {i > 0 && ' · '}
                   <button
-                    className="text-[#2D8D68] hover:underline"
+                    className="text-[#2D8D68] hover:underline py-1.5 md:py-0"
+                    data-testid="sugerencia"
+                    data-codigo={s.codigo}
+                    data-misma-unidad={String(normUnidad(s.unidad) === normUnidad(t.unidad))}
                     title={s.porque}
                     onClick={() => onElegir({ codigo: s.codigo, nombre: s.nombre, unidad: s.unidad })}
                   >
@@ -361,15 +397,26 @@ function TareaCard({
             </div>
           )}
         </div>
-        <div className="flex items-center gap-2 shrink-0">
-          {t.estado === 'amarillo' && !pendiente && !bloqueada && (
-            <button onClick={onConfirmar} className="bg-[#2D8D68] hover:bg-[#1B5E4B] text-white text-xs font-semibold px-3 py-1.5 rounded-lg">
+        <div className="flex items-center gap-2 w-full md:w-auto shrink-0">
+          {estado === 'amarillo' && !pendiente && (
+            <button
+              onClick={onConfirmar}
+              className="flex-1 md:flex-none min-h-10 md:min-h-0 bg-[#2D8D68] hover:bg-[#1B5E4B] text-white text-sm md:text-xs font-semibold px-3 py-1.5 rounded-lg"
+            >
               Confirmar
+            </button>
+          )}
+          {recienConfirmada && estado === 'verde' && (
+            <button
+              onClick={onDeshacer}
+              className="flex-1 md:flex-none min-h-10 md:min-h-0 inline-flex items-center justify-center gap-1.5 bg-white border border-[#2D8D68]/40 text-[#1B5E4B] text-sm md:text-xs font-semibold px-3 py-1.5 rounded-lg hover:bg-[#E8F5EE]"
+            >
+              <RotateCcw size={13} /> Deshacer
             </button>
           )}
           <button
             onClick={() => setBuscando(!buscando)}
-            className="bg-white border text-gray-700 text-xs font-semibold px-3 py-1.5 rounded-lg hover:bg-gray-50"
+            className="flex-1 md:flex-none min-h-10 md:min-h-0 bg-white border text-gray-700 text-sm md:text-xs font-semibold px-3 py-1.5 rounded-lg hover:bg-gray-50"
           >
             {receta || pendiente ? 'Cambiar' : 'Elegir fórmula'}
           </button>
@@ -385,7 +432,7 @@ function TareaCard({
       {pregunta && pregunta.dato && !editando && (
         <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-gray-500 bg-gray-50 rounded-lg px-3 py-2">
           <span>{pregunta.dato}</span>
-          <button onClick={() => setEditando(true)} className="text-[#2D8D68] hover:underline font-semibold">
+          <button onClick={() => setEditando(true)} className="text-[#2D8D68] hover:underline font-semibold min-h-10 md:min-h-0 px-1">
             cambiar
           </button>
         </div>
@@ -403,7 +450,7 @@ function TareaCard({
             onChange={(e) => setValor(e.target.value)}
             onBlur={enviarValor}
             onKeyDown={(e) => { if (e.key === 'Enter') enviarValor() }}
-            className="border rounded-lg px-2 py-1 w-24 bg-white"
+            className="border rounded-lg px-2 py-1 min-h-10 md:min-h-0 w-28 md:w-24 bg-white"
           />
           <span className="text-gray-500">{pregunta.unidad_receta}</span>
         </div>
@@ -412,13 +459,21 @@ function TareaCard({
       {t.precios_faltantes.length > 0 && (
         <div className="mt-3 text-xs text-red-600">
           Faltan precios: {t.precios_faltantes.join(', ')}{' '}
-          <button onClick={onCorregirPrecios} className="underline font-semibold">corregir</button>
+          <button onClick={onCorregirPrecios} className="underline font-semibold min-h-10 md:min-h-0 px-1">corregir</button>
         </div>
       )}
 
       {buscando && (
+        // En el celular el buscador ocupa toda la pantalla, con el trabajo arriba para no perder de vista cuál es
+        <div className="fixed inset-0 z-[70] bg-white flex flex-col md:static md:z-auto md:bg-transparent md:block" role="dialog" aria-label="Elegir fórmula">
+        <div className="md:hidden px-4 pt-3 pb-2 border-b bg-[#F5F6F8]">
+          <div className="text-[10px] font-bold text-gray-400 tracking-wider">ELEGIR FÓRMULA</div>
+          <div className="text-sm font-semibold text-gray-900 line-clamp-2">{t.descripcion}</div>
+        </div>
         <BuscadorFormulas
           recetas={recetas}
+          className="flex-1 min-h-0 flex flex-col md:block md:mt-3 md:border md:rounded-xl md:bg-white md:shadow-sm"
+          listaClassName="flex-1 min-h-0 overflow-y-auto overscroll-contain md:flex-none md:max-h-64"
           onCerrar={() => setBuscando(false)}
           onElegir={(r) => { setBuscando(false); onElegir(r) }}
           ayuda={`Elegí la fórmula correcta para este trabajo.${!excelConPrecios ? '' : t.total_excel <= 0 ? ' Si no lo cotizás, dejalo en $0.' : ' Si ninguna sirve, usá el precio del Excel.'}`}
@@ -438,6 +493,7 @@ function TareaCard({
             </button>
           )}
         />
+        </div>
       )}
     </div>
   )
@@ -472,6 +528,24 @@ export default function CargarObra() {
   const [borrador, setBorrador] = useState<Borrador | null>(null)
   const pedido = useRef(0)
   const lote = useRef(0)
+  // Revisión agrupada: cada cambio suma 1; una respuesta vale solo si no hubo cambios después de pedirla
+  const cambios = useRef(0)
+  const timerRevision = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [revisionPendiente, setRevisionPendiente] = useState(false)
+  const [errorRevision, setErrorRevision] = useState('')
+  // Lo que Sol ya decidió y el servidor todavía no revisó: el estado que se muestra mientras tanto
+  const [optimista, setOptimista] = useState<Record<string, Semaforo>>({})
+  // Trabajos que Sol cambió y esperan la revisión (para avisar en la tarjeta)
+  const [cambiadas, setCambiadas] = useState<Record<string, true>>({})
+  // Confirmadas en esta lista: se quedan en su lugar (con "Deshacer") hasta que Sol cambie de filtro
+  const [fijas, setFijas] = useState<Record<string, true>>({})
+  // Lo que había antes de confirmar, para "Deshacer"
+  const previas = useRef<Record<string, ObraAsignaciones[string] | undefined>>({})
+  const [confirmandoTodos, setConfirmandoTodos] = useState(false)
+  // "Cargar presupuesto" tocado con una revisión en camino: carga apenas termina
+  const [cargarAlTerminar, setCargarAlTerminar] = useState(false)
+  const analisisRef = useRef<ObraAnalisis | null>(null)
+  analisisRef.current = analisis
 
   useEffect(() => { catalogApi.list().then(setCatalogs).catch(() => setCatalogs([])) }, [])
   useEffect(() => {
@@ -504,23 +578,69 @@ export default function CargarObra() {
     return () => clearTimeout(t)
   }, [dueno, file, analisis, carga, nombre, asignaciones, pendientes, permitir])
 
+  function cancelarRevisionProgramada() {
+    if (timerRevision.current) clearTimeout(timerRevision.current)
+    timerRevision.current = null
+  }
+
+  // Le pide al servidor que revise ya. Si mientras tanto Sol cambió algo, la respuesta no se usa:
+  // ya hay otra revisión programada con lo último.
   async function revisar(f: File | null = file, asig: ObraAsignaciones = asignaciones) {
     if (!f) return
+    cancelarRevisionProgramada()
     const mio = ++pedido.current
+    const version = cambios.current
+    const primera = !analisisRef.current
     setRevisando(true)
+    setRevisionPendiente(false)
     setError('')
+    setErrorRevision('')
     try {
       const res = await obraApi.analizar(f, asig)
-      if (mio === pedido.current) setAnalisis(res)
+      if (mio === pedido.current && version === cambios.current) {
+        // Manda lo del servidor: lo optimista se descarta
+        setAnalisis(res)
+        setOptimista({})
+        setCambiadas({})
+      }
     } catch (e) {
-      if (mio === pedido.current) setError(errorText(e))
+      if (mio === pedido.current) {
+        // Lo confirmado acá no se pierde: sigue en las asignaciones (y en el borrador)
+        if (primera) setError(errorText(e))
+        else setErrorRevision(errorText(e))
+        setCargarAlTerminar(false)
+      }
     }
     if (mio === pedido.current) setRevisando(false)
   }
 
+  // Un cambio de Sol: se revisa una sola vez, un rato después del último
+  function programarRevision(asig: ObraAsignaciones, espera = ESPERA_REVISION) {
+    cambios.current++
+    cancelarRevisionProgramada()
+    setRevisionPendiente(true)
+    setErrorRevision('')
+    const f = file
+    timerRevision.current = setTimeout(() => {
+      timerRevision.current = null
+      void revisar(f, asig)
+    }, espera)
+  }
+  useEffect(() => () => cancelarRevisionProgramada(), [])
+
   function reiniciar() {
     pedido.current++
     lote.current++
+    cambios.current++
+    cancelarRevisionProgramada()
+    setRevisionPendiente(false)
+    setErrorRevision('')
+    setOptimista({})
+    setCambiadas({})
+    setFijas({})
+    previas.current = {}
+    setConfirmandoTodos(false)
+    setCargarAlTerminar(false)
     setFile(null)
     setAnalisis(null)
     setCarga(null)
@@ -574,7 +694,13 @@ export default function CargarObra() {
     const next = { ...asignaciones, [clave]: { plantillas, confirmada } }
     setAsignaciones(next)
     setPendientes((p) => { const { [clave]: _quitada, ...resto } = p; return resto })
-    revisar(file, next)
+    setCambiadas((c) => ({ ...c, [clave]: true }))
+    programarRevision(next)
+  }
+
+  // Lo que se manda al confirmar un amarillo: la fórmula propuesta, o sin fórmula (el precio del Excel)
+  function asignacionPropuesta(t: ObraTarea): [string, number][] {
+    return t.receta ? t.receta.partes.map((p) => [p.codigo, p.factor] as [string, number]) : []
   }
 
   // La conversión que escribió Sol vale solo para esa parte: las otras partes de una
@@ -588,9 +714,46 @@ export default function CargarObra() {
     asignar(t.clave, partes)
   }
 
+  // Confirmar: la tarjeta queda verde enseguida, sin esperar al servidor; los contadores también
+  function confirmarVarias(lista: ObraTarea[], espera = ESPERA_REVISION) {
+    if (lista.length === 0) return
+    const next = { ...asignaciones }
+    const verdes: Record<string, Semaforo> = {}
+    const marcadas: Record<string, true> = {}
+    for (const t of lista) {
+      if (!(t.clave in previas.current)) previas.current[t.clave] = asignaciones[t.clave]
+      // Lo último que decidió Sol manda: si eligió otra fórmula o escribió una conversión y la revisión todavía
+      // no volvió, la tarjeta muestra el análisis anterior, pero se confirma lo que eligió (no la propuesta vieja)
+      const decidida = asignaciones[t.clave]
+      next[t.clave] = { plantillas: decidida ? decidida.plantillas : asignacionPropuesta(t), confirmada: true }
+      verdes[t.clave] = 'verde'
+      marcadas[t.clave] = true
+    }
+    setAsignaciones(next)
+    setOptimista((o) => ({ ...o, ...verdes }))
+    setFijas((f) => ({ ...f, ...marcadas }))
+    programarRevision(next, espera)
+  }
+
   function confirmar(t: ObraTarea) {
-    if (!t.receta) return asignar(t.clave, [])
-    asignar(t.clave, t.receta.partes.map((p) => [p.codigo, p.factor] as [string, number]))
+    confirmarVarias([t])
+  }
+
+  // Deshacer: vuelve a como estaba antes de confirmar (amarillo, para confirmar)
+  function deshacer(t: ObraTarea) {
+    const previa = previas.current[t.clave]
+    delete previas.current[t.clave]
+    const next = { ...asignaciones }
+    if (previa) next[t.clave] = previa
+    else delete next[t.clave]
+    setAsignaciones(next)
+    setOptimista((o) => ({ ...o, [t.clave]: 'amarillo' }))
+    programarRevision(next)
+  }
+
+  function cambiarFiltro(f: Filtro) {
+    setFiltro(f)
+    setFijas({})
   }
 
   function elegir(t: ObraTarea, r: ObraRecetaCatalogo) {
@@ -604,6 +767,12 @@ export default function CargarObra() {
 
   async function cargar() {
     if (!file || !analisis) return
+    // Nunca con un análisis viejo: si hay una revisión en camino (o programada), se espera y después se carga
+    if (revisionPendiente || revisando) {
+      setCargarAlTerminar(true)
+      if (timerRevision.current) void revisar(file, asignaciones)
+      return
+    }
     setCargando(true)
     setError('')
     try {
@@ -658,7 +827,9 @@ export default function CargarObra() {
   const r = analisis?.resumen
   const tareas = analisis?.tareas || []
   const hayPendiente = (t: ObraTarea) => !!pendientes[t.clave]
-  const esRojo = (t: ObraTarea) => hayPendiente(t) || t.estado === 'rojo'
+  // El estado con lo optimista encima (lo que Sol confirmó o deshizo y el servidor todavía no revisó)
+  const estadoDe = (t: ObraTarea): Semaforo => optimista[t.clave] ?? t.estado
+  const esRojo = (t: ObraTarea) => hayPendiente(t) || estadoDe(t) === 'rojo'
   const bloqueaPregunta = (t: ObraTarea) => !!t.pregunta && t.pregunta.valor == null
   // Rojo solo por precios: se puede cargar igual si Sol lo acepta
   const rojoSoloPrecio = (t: ObraTarea) =>
@@ -669,11 +840,13 @@ export default function CargarObra() {
   const rojosSinReceta = tareas.filter((t) => !hayPendiente(t) && t.estado === 'rojo' && t.motivo_rojo === 'sin_receta').length
   const rojosPregunta = rojosOtros - rojosSinReceta
   const rojos = rojosPrecio + rojosOtros
-  const amarillos = tareas.filter((t) => !esRojo(t) && t.estado === 'amarillo').length
-  const verdes = tareas.filter((t) => !esRojo(t) && t.estado === 'verde').length
+  const listasParaConfirmar = tareas.filter((t) => !esRojo(t) && estadoDe(t) === 'amarillo')
+  const amarillos = listasParaConfirmar.length
+  const verdes = tareas.filter((t) => !esRojo(t) && estadoDe(t) === 'verde').length
 
   const visibles = tareas.filter((t) => {
-    const e = esRojo(t) ? 'rojo' : t.estado
+    if (fijas[t.clave]) return true
+    const e = esRojo(t) ? 'rojo' : estadoDe(t)
     if (filtro === 'todos') return true
     if (filtro === 'revisar') return e !== 'verde'
     return e === filtro
@@ -708,10 +881,19 @@ export default function CargarObra() {
       : ''
 
   const paso = carga ? 3 : analisis ? 2 : 1
+  const enRevision = revisando || revisionPendiente
+
+  // "Cargar presupuesto" esperando la revisión: apenas llega, carga (si sigue todo listo)
+  useEffect(() => {
+    if (!cargarAlTerminar || revisando || revisionPendiente) return
+    setCargarAlTerminar(false)
+    if (puedeCargar && !errorRevision) void cargar()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cargarAlTerminar, revisando, revisionPendiente])
 
   if (!puedeEditar) {
     return (
-      <div className="p-6 fade-in">
+      <div className="p-4 md:p-6 fade-in">
         <div className="flex items-center gap-2 text-[#2D8D68] text-[11px] font-bold tracking-wider mb-1">
           <ClipboardCheck size={14} /> CARGAR OBRA
         </div>
@@ -723,7 +905,7 @@ export default function CargarObra() {
   }
 
   return (
-    <div className="p-6 fade-in">
+    <div className="p-4 md:p-6 fade-in">
       <div className="flex items-center gap-2 text-[#2D8D68] text-[11px] font-bold tracking-wider mb-1">
         <ClipboardCheck size={14} /> CARGAR OBRA
       </div>
@@ -736,11 +918,11 @@ export default function CargarObra() {
       </p>
 
       <div className="max-w-5xl space-y-5">
-        <div className="flex gap-2 text-xs font-bold">
+        <div className="flex gap-1.5 sm:gap-2 text-xs font-bold">
           {[['1', 'Subir'], ['2', 'Revisar'], ['3', 'Cargar']].map(([n, txt]) => (
             <div
               key={n}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-full ${Number(n) === paso ? 'bg-[#2D8D68] text-white' : Number(n) < paso ? 'bg-[#E8F5EE] text-[#143D34]' : 'bg-gray-100 text-gray-500'}`}
+              className={`flex items-center gap-1.5 sm:gap-2 px-3 py-1.5 rounded-full whitespace-nowrap ${Number(n) === paso ? 'bg-[#2D8D68] text-white' : Number(n) < paso ? 'bg-[#E8F5EE] text-[#143D34]' : 'bg-gray-100 text-gray-500'}`}
             >
               <span>{n}</span><span>{txt}</span>
             </div>
@@ -759,13 +941,13 @@ export default function CargarObra() {
             </div>
             <button
               onClick={seguirBorrador}
-              className="bg-[#2D8D68] hover:bg-[#1B5E4B] text-white font-semibold px-4 py-1.5 rounded-lg text-sm"
+              className="flex-1 sm:flex-none min-h-10 sm:min-h-0 bg-[#2D8D68] hover:bg-[#1B5E4B] text-white font-semibold px-4 py-1.5 rounded-lg text-sm"
             >
               Seguir
             </button>
             <button
               onClick={descartarBorrador}
-              className="bg-white border text-gray-600 font-semibold px-4 py-1.5 rounded-lg text-sm hover:bg-gray-50"
+              className="flex-1 sm:flex-none min-h-10 sm:min-h-0 bg-white border text-gray-600 font-semibold px-4 py-1.5 rounded-lg text-sm hover:bg-gray-50"
             >
               Descartar
             </button>
@@ -778,6 +960,7 @@ export default function CargarObra() {
             <FileUpload
               accept=".xlsx"
               label="Arrastrá el Excel de la obra acá"
+              labelCelular="Elegí el Excel de la obra"
               hint="El cómputo de la obra que hacés siempre, el que tiene la hoja 01_C&P, o una planilla que bajaste de la app (Exportar). No hay que agregarle nada."
               onFile={elegirArchivo}
               value={file}
@@ -802,14 +985,14 @@ export default function CargarObra() {
             <div>
               <div className="flex items-center justify-between mb-2">
                 <div className="text-xs font-bold text-gray-500">2. REVISÁ LOS TRABAJOS</div>
-                {revisando && (
-                  <div className="flex items-center gap-2 text-xs text-gray-500">
+                {enRevision && (
+                  <div className="flex items-center gap-2 text-xs text-gray-500" role="status" data-testid="revisando">
                     <div className="w-3 h-3 border-2 border-[#2D8D68] border-t-transparent rounded-full animate-spin" />
                     Revisando…
                   </div>
                 )}
               </div>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
                 <div className="bg-white border rounded-xl p-3">
                   <div className="text-xl font-bold text-gray-900">{r.grupos}</div>
                   <div className="text-[11px] text-gray-500">trabajos distintos ({r.trabajos} en total, {r.pisos} pisos)</div>
@@ -819,7 +1002,7 @@ export default function CargarObra() {
                   <div className="text-[11px] text-gray-500">listos</div>
                 </div>
                 <div className="bg-amber-50 rounded-xl p-3">
-                  <div className="text-xl font-bold text-amber-600">{amarillos}</div>
+                  <div className="text-xl font-bold text-amber-600" data-testid="contador-para-confirmar">{amarillos}</div>
                   <div className="text-[11px] text-gray-500">para confirmar</div>
                 </div>
                 <div className={`${rojos ? 'bg-red-50' : 'bg-[#E8F5EE]'} rounded-xl p-3`}>
@@ -849,6 +1032,20 @@ export default function CargarObra() {
               )}
             </div>
 
+            {errorRevision && (
+              <div role="alert" data-testid="error-revision" className="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-lg flex flex-wrap items-center gap-x-3 gap-y-2">
+                <span className="flex-1 min-w-[200px] whitespace-pre-line">
+                  No se pudo revisar con el servidor: {errorRevision} Lo que confirmaste sigue guardado.
+                </span>
+                <button
+                  onClick={() => void revisar(file, asignaciones)}
+                  className="min-h-10 sm:min-h-0 bg-white border border-red-200 text-red-700 font-semibold px-3 py-1.5 rounded-lg text-sm hover:bg-red-100"
+                >
+                  Probar de nuevo
+                </button>
+              </div>
+            )}
+
             <div className="flex flex-wrap gap-2">
               {([
                 ['revisar', 'Para revisar', rojos + amarillos],
@@ -859,8 +1056,8 @@ export default function CargarObra() {
               ] as [Filtro, string, number][]).map(([k, txt, n]) => (
                 <button
                   key={k}
-                  onClick={() => setFiltro(k)}
-                  className={`text-xs font-semibold px-3 py-1.5 rounded-full border ${filtro === k ? 'bg-[#143D34] text-white border-[#143D34]' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+                  onClick={() => cambiarFiltro(k)}
+                  className={`min-h-10 sm:min-h-0 text-[13px] sm:text-xs font-semibold px-3.5 sm:px-3 py-1.5 rounded-full border ${filtro === k ? 'bg-[#143D34] text-white border-[#143D34]' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
                 >
                   {txt} ({n})
                 </button>
@@ -870,7 +1067,7 @@ export default function CargarObra() {
             <div ref={panelRef} className="bg-white border rounded-xl p-4">
               <button
                 onClick={() => setPanelPrecios(!panelAbierto)}
-                className="w-full flex items-center justify-between"
+                className="w-full min-h-10 sm:min-h-0 flex items-center justify-between gap-2 text-left"
               >
                 <div className="flex items-center gap-2 font-semibold text-sm text-gray-900">
                   <AlertTriangle size={16} className={faltanPrecios ? 'text-amber-500' : 'text-[#2D8D68]'} />
@@ -898,7 +1095,7 @@ export default function CargarObra() {
                       <button
                         onClick={guardarTodosExcel}
                         disabled={!!guardandoExcel || revisando}
-                        className="bg-[#2D8D68] hover:bg-[#1B5E4B] disabled:opacity-50 text-white text-xs font-semibold px-3 py-1.5 rounded-lg flex items-center gap-2"
+                        className="w-full sm:w-auto justify-center min-h-10 sm:min-h-0 bg-[#2D8D68] hover:bg-[#1B5E4B] disabled:opacity-50 text-white text-xs font-semibold px-3 py-1.5 rounded-lg flex items-center gap-2"
                       >
                         {guardandoExcel && <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />}
                         Guardar los {propuestas.length} precios que trae el Excel
@@ -910,8 +1107,8 @@ export default function CargarObra() {
                       No pude guardar {noGuardados.length === 1 ? 'este precio' : 'estos precios'}: {noGuardados.join(', ')}. Probá de a uno acá abajo.
                     </div>
                   )}
-                  <table className="w-full text-left">
-                    <tbody>
+                  <table className="w-full text-left block md:table">
+                    <tbody className="block md:table-row-group">
                       {analisis.precios.map((p) => (
                         <PrecioRow key={p.codigo} p={p} elegibles={elegibles} bloqueado={!!guardandoExcel} onFixed={() => revisar()} />
                       ))}
@@ -921,16 +1118,62 @@ export default function CargarObra() {
               )}
             </div>
 
+            {amarillos > 0 && (
+              <div className="bg-amber-50/60 border border-amber-200 rounded-xl px-4 py-3" data-testid="confirmar-todos">
+                {!confirmandoTodos ? (
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                    <span className="flex-1 min-w-[200px] text-xs text-amber-800">
+                      {amarillos === 1
+                        ? 'Queda 1 trabajo para confirmar.'
+                        : `Quedan ${amarillos} trabajos para confirmar.`}{' '}
+                      Si te sirve lo que propone la app, confirmalos de una vez.
+                    </span>
+                    <button
+                      onClick={() => setConfirmandoTodos(true)}
+                      className="w-full sm:w-auto min-h-10 sm:min-h-0 bg-white border border-amber-300 text-amber-800 font-semibold px-3 py-1.5 rounded-lg text-sm sm:text-xs hover:bg-amber-100"
+                    >
+                      {amarillos === 1 ? 'Confirmar el que queda' : `Confirmar los ${amarillos} para confirmar`}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-2.5" role="group" aria-label="Confirmar todos">
+                    <p className="text-sm text-amber-900">
+                      Se {amarillos === 1 ? 'confirma 1 trabajo' : `confirman ${amarillos} trabajos`} tal como los propone la app:
+                      los que tienen fórmula, con esa fórmula; los que no, con el precio del Excel. Podés cambiar
+                      cualquiera después.
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        onClick={() => { setConfirmandoTodos(false); confirmarVarias(listasParaConfirmar, 0) }}
+                        className="flex-1 sm:flex-none min-h-10 sm:min-h-0 bg-[#2D8D68] hover:bg-[#1B5E4B] text-white font-semibold px-4 py-1.5 rounded-lg text-sm"
+                      >
+                        {amarillos === 1 ? 'Sí, confirmarlo' : `Sí, confirmar los ${amarillos}`}
+                      </button>
+                      <button
+                        onClick={() => setConfirmandoTodos(false)}
+                        className="flex-1 sm:flex-none min-h-10 sm:min-h-0 bg-white border text-gray-600 font-semibold px-4 py-1.5 rounded-lg text-sm hover:bg-gray-50"
+                      >
+                        Cancelar
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="space-y-3">
               {visibles.map((t) => (
                 <TareaCard
                   key={t.clave}
                   t={t}
+                  estadoLocal={esRojo(t) ? 'rojo' : estadoDe(t)}
+                  recienConfirmada={!!fijas[t.clave] && !!asignaciones[t.clave]?.confirmada}
+                  actualizando={!!cambiadas[t.clave] && enRevision}
                   recetas={analisis.recetas}
                   excelConPrecios={analisis.excel_con_precios}
                   pendiente={pendientes[t.clave]}
-                  bloqueada={revisando}
                   onConfirmar={() => confirmar(t)}
+                  onDeshacer={() => deshacer(t)}
                   onElegir={(rec) => elegir(t, rec)}
                   onSinReceta={() => asignar(t.clave, [])}
                   onValor={(codigo, v) => responder(t, codigo, v)}
@@ -961,17 +1204,18 @@ export default function CargarObra() {
                   value={nombre}
                   onChange={(e) => setNombre(e.target.value)}
                   placeholder="Nombre del presupuesto"
-                  className="border rounded-lg px-3 py-2 text-sm w-80 max-w-full"
+                  aria-label="Nombre del presupuesto"
+                  className="border rounded-lg px-3 py-2 min-h-10 text-sm w-full sm:w-80 max-w-full"
                 />
                 <button
                   onClick={cargar}
-                  disabled={!puedeCargar || cargando || revisando}
-                  className="bg-[#2D8D68] hover:bg-[#1B5E4B] disabled:opacity-50 text-white font-semibold px-5 py-2 rounded-lg text-sm flex items-center gap-2"
+                  disabled={!puedeCargar || cargando || cargarAlTerminar}
+                  className="w-full sm:w-auto justify-center min-h-11 sm:min-h-0 bg-[#2D8D68] hover:bg-[#1B5E4B] disabled:opacity-50 text-white font-semibold px-5 py-2 rounded-lg text-sm flex items-center gap-2"
                 >
-                  {cargando && <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+                  {(cargando || cargarAlTerminar) && <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
                   {cargando
                     ? `Calculando ${r.trabajos} ${r.trabajos === 1 ? 'trabajo' : 'trabajos'}… ${segundos} s`
-                    : 'Cargar presupuesto'}
+                    : cargarAlTerminar ? 'Revisando antes de cargar…' : 'Cargar presupuesto'}
                 </button>
               </div>
               {cargando && (
@@ -983,7 +1227,7 @@ export default function CargarObra() {
                 <p className={`text-xs mt-2 ${rojosOtros > 0 ? 'text-red-600' : 'text-gray-600'}`}>{fraseFalta}</p>
               )}
               {rojosPrecio > 0 && (
-                <label className={`flex items-center gap-2 text-xs mt-3 ${rojosOtros > 0 ? 'text-gray-400' : 'text-gray-600'}`}>
+                <label className={`flex items-start sm:items-center gap-2 text-xs mt-3 min-h-10 sm:min-h-0 ${rojosOtros > 0 ? 'text-gray-400' : 'text-gray-600'}`}>
                   <input
                     type="checkbox"
                     checked={permitir && rojosOtros === 0}

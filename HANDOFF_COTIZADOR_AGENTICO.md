@@ -77,11 +77,13 @@ los materiales, faltantes en $0 sin marca) y "Vista Cliente" bajaba el PDF inter
 trabajo es su directo pasado por el Coeficiente de pase, calculado en un solo lugar; cada presupuesto guarda sus
 porcentajes) · 6 ✅ exportar sin sorpresas (`PLAN_EXPORTAR.md`, PR #43: Planilla Terrac real que se puede volver a subir con
 los porcentajes de la obra; vista Piso por el piso del rubro; redondeo de compra siempre en el mismo orden) · 7 ✅ palabras y tildes en toda la app (`PLAN_PALABRAS.md`, PR #44: trabajos/rubros, menú NUEVO con las tres formas,
-asistente con pastillas y borrador, `scripts/check_textos.cjs` que falla si vuelve una palabra sin tilde) · 8 Ginkgo con
-respuestas supuestas (`PLAN_AJUSTE_GINKGO.md`, en revisión: Fórmulas → Correcciones aplica las 14 correcciones de la
+asistente con pastillas y borrador, `scripts/check_textos.cjs` que falla si vuelve una palabra sin tilde) · 8 ✅ Ginkgo con
+respuestas supuestas (`PLAN_AJUSTE_GINKGO.md`, PR #45; PR #46: Cargar obra acepta la planilla simple que baja la app: Fórmulas → Correcciones aplica las 14 correcciones de la
 revisión de Ginkgo con un botón y las deshace, `app/data/correcciones_ginkgo.json`; cada precio guarda de dónde salió
 (migración 012); buscador de precios en internet con OpenAI y búsqueda web, solo opciones con link; contrapiso celular y
-revoque con silleta según la obra) · 9 celular. La guía de Ayuda de este camino,
+revoque con silleta según la obra) · 9 celular y notebook chica (`PLAN_CELULAR.md`, en revisión: cajón ☰ bajo 1024 px,
+menú angosto 1024–1279, editor con escalera compacta y tarjetas en el celular, `lib/pantalla.ts`; Cargar obra confirma
+sin bloquear y "Confirmar los N"; e2e_celular y e2e_celular_editor). La guía de Ayuda de este camino,
 después de la 5.
 
 *Ginkgo, diferencias (06/10):* página de seguimiento para Sol https://claude.ai/artifact/2aCjCgazrgST4HfvSbfeT5 (grupos A:

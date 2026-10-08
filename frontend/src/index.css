@@ -81,3 +81,37 @@ body {
 .tabular-nums {
   font-variant-numeric: tabular-nums;
 }
+
+/* Celular y tablet: el menú se abre como un cajón desde la izquierda */
+.cajon-panel {
+  animation: cajonEntra 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.cajon-fondo {
+  animation: cajonFondo 0.22s ease-out;
+}
+@keyframes cajonEntra {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(0); }
+}
+@keyframes cajonFondo {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* Pestañas y filas que se deslizan de costado: sin barra a la vista */
+.sin-barra {
+  scrollbar-width: none;
+}
+.sin-barra::-webkit-scrollbar {
+  display: none;
+}
+
+/* En el celular los campos van con letra de 16 px: así el iPhone no agranda la pantalla al escribir.
+   Va fuera de las capas de Tailwind, así gana sobre text-xs / text-sm de cada campo. */
+@media (max-width: 767.98px) {
+  input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):not([type='color']),
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}

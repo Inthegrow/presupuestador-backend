@@ -16,8 +16,6 @@ interface Props {
 
 type EditableField = 'cantidad' | 'mat_unitario' | 'mo_unitario'
 
-const EDITABLE_FIELDS: EditableField[] = ['cantidad', 'mat_unitario', 'mo_unitario']
-
 interface CellState {
   saving: boolean
   justSaved: boolean
@@ -117,7 +115,7 @@ export default function DataTable({ items, onEditItem, onViewDetail, onDeleteIte
 
     if (isEditing) {
       return (
-        <td className="px-3 py-2">
+        <td className="px-3 py-2 min-w-[96px]">
           <input
             ref={inputRef}
             type="number"
@@ -136,7 +134,7 @@ export default function DataTable({ items, onEditItem, onViewDetail, onDeleteIte
     }
 
     // Determine cell visual state
-    let cellClass = 'px-3 py-2.5 cost-cell relative group'
+    let cellClass = 'px-3 py-2.5 cost-cell relative group whitespace-nowrap'
     let borderStyle = ''
 
     if (state.error) {
@@ -171,8 +169,15 @@ export default function DataTable({ items, onEditItem, onViewDetail, onDeleteIte
     )
   }
 
+  // Columnas fijas: Código y Trabajo a la izquierda, el precio y los botones a la derecha. Las del medio se deslizan.
+  const fijaCodigo = 'sticky left-0 w-[64px] min-w-[64px] max-w-[64px]'
+  const fijaTrabajo = 'sticky left-[64px] min-w-[200px] w-[260px] max-w-[300px] shadow-[6px_0_8px_-6px_rgba(20,61,52,0.22)]'
+  const fijaPrecio = 'sticky right-[64px] min-w-[124px] shadow-[-6px_0_8px_-6px_rgba(20,61,52,0.22)]'
+  const fijaBotones = 'sticky right-0 w-[64px] min-w-[64px]'
+  const th = 'px-3 py-2 font-semibold text-[11px] tracking-wide leading-tight align-bottom'
+
   return (
-    <div className="overflow-auto max-h-full">
+    <div className="overflow-auto max-h-full" data-testid="tabla-trabajos">
       {/* Save flash animation */}
       <style>{`
         @keyframes saveFlash {
@@ -184,41 +189,41 @@ export default function DataTable({ items, onEditItem, onViewDetail, onDeleteIte
           animation: saveFlash 1.5s ease-out;
         }
       `}</style>
-      <table className="w-full text-xs">
-        <thead className="sticky top-0 z-10">
+      <table className="w-full min-w-[1080px] text-xs border-separate border-spacing-0">
+        <thead className="sticky top-0 z-20">
           <tr className="bg-[#E8F5EE] text-[#143D34]">
-            <th className="px-3 py-2 text-left font-semibold text-[11px] tracking-wide">Código</th>
-            <th className="px-3 py-2 text-left font-semibold text-[11px] tracking-wide">Trabajo</th>
-            <th className="px-3 py-2 text-left font-semibold text-[11px] tracking-wide">Unidad</th>
-            <th className="px-3 py-2 text-right font-semibold text-[11px] tracking-wide">
+            <th className={`${th} text-left bg-[#E8F5EE] z-10 ${fijaCodigo}`}>Código</th>
+            <th className={`${th} text-left bg-[#E8F5EE] z-10 ${fijaTrabajo}`}>Trabajo</th>
+            <th className={`${th} text-left min-w-[64px]`}>Unidad</th>
+            <th className={`${th} text-right min-w-[84px]`}>
               Cant.
               {onEditItem ? <Pencil size={8} className="inline ml-1 text-[#2D8D68]/50" /> : null}
             </th>
-            <th className="px-3 py-2 text-right font-semibold text-[11px] tracking-wide">
+            <th className={`${th} text-right min-w-[118px]`}>
               Materiales por unidad
               {onEditItem ? <Pencil size={8} className="inline ml-1 text-[#2D8D68]/50" /> : null}
             </th>
-            <th className="px-3 py-2 text-right font-semibold text-[11px] tracking-wide">
+            <th className={`${th} text-right min-w-[118px]`}>
               Mano de obra por unidad
               {onEditItem ? <Pencil size={8} className="inline ml-1 text-[#2D8D68]/50" /> : null}
             </th>
-            <th className="px-3 py-2 text-right font-semibold text-[11px] tracking-wide">Directo</th>
-            <th className="px-3 py-2 text-right font-semibold text-[11px] tracking-wide">Indirecto</th>
-            <th className="px-3 py-2 text-right font-semibold text-[11px] tracking-wide">Beneficio</th>
-            <th className="px-3 py-2 text-right font-bold text-[11px] tracking-wide" title="Sin IVA. Incluye indirectos, beneficio e impuestos (Ingresos Brutos y cheque): por eso es más que Directo + Indirecto + Beneficio.">Precio sin IVA</th>
-            <th className="px-3 py-2 w-16" />
+            <th className={`${th} text-right min-w-[118px]`}>Directo</th>
+            <th className={`${th} text-right min-w-[118px]`}>Indirecto</th>
+            <th className={`${th} text-right min-w-[118px]`}>Beneficio</th>
+            <th className={`${th} text-right font-bold bg-[#E8F5EE] z-10 ${fijaPrecio}`} title="Sin IVA. Incluye indirectos, beneficio e impuestos (Ingresos Brutos y cheque): por eso es más que Directo + Indirecto + Beneficio.">Precio sin IVA</th>
+            <th className={`px-3 py-2 bg-[#E8F5EE] z-10 ${fijaBotones}`}><span className="sr-only">Acciones</span></th>
           </tr>
         </thead>
         <tbody>
           {items.map((item, idx) => (
             <tr
               key={item.id}
-              className={`hover:bg-[#E8F5EE]/20 transition-colors duration-150 ${
-                idx % 2 === 1 ? 'bg-gray-50/30' : 'bg-white'
-              }`}
+              className={`group/fila transition-colors duration-150 [&>td]:border-b [&>td]:border-gray-50 ${
+                idx % 2 === 1 ? 'bg-[#FBFCFC]' : 'bg-white'
+              } hover:bg-[#F2F9F5]`}
             >
-              <td className="px-3 py-2.5 font-mono text-[10px] text-gray-400">{item.code}</td>
-              <td className="px-3 py-2.5">
+              <td className={`px-3 py-2.5 font-mono text-[10px] text-gray-400 bg-inherit z-[2] ${fijaCodigo}`}>{item.code}</td>
+              <td className={`px-3 py-2.5 bg-inherit z-[2] ${fijaTrabajo}`}>
                 <span className="inline-flex items-center gap-1.5">
                   {(() => {
                     const s = semaforo?.(item)
@@ -232,27 +237,27 @@ export default function DataTable({ items, onEditItem, onViewDetail, onDeleteIte
                       />
                     ) : null
                   })()}
-                  <span className="font-medium text-gray-800">{item.description}</span>
+                  <span className="font-medium text-gray-800 line-clamp-2" title={item.description ?? undefined}>{item.description}</span>
                 </span>
               </td>
-              <td className="px-3 py-2.5 text-gray-400 text-[10px] uppercase">{item.unidad}</td>
+              <td className="px-3 py-2.5 text-gray-400 text-[10px] uppercase whitespace-nowrap">{item.unidad}</td>
               {renderEditableCell(item, 'cantidad', (v) => fmtNumber(v, 0))}
               {renderEditableCell(item, 'mat_unitario', fmtCurrency)}
               {renderEditableCell(item, 'mo_unitario', fmtCurrency)}
               {/* Calculated columns — read-only */}
-              <td className="px-3 py-2.5 cost-cell font-semibold text-blue-700/80">
+              <td className="px-3 py-2.5 cost-cell whitespace-nowrap font-semibold text-blue-700/80">
                 {fmtCurrency(item.directo_total)}
               </td>
-              <td className="px-3 py-2.5 cost-cell text-gray-400">
+              <td className="px-3 py-2.5 cost-cell whitespace-nowrap text-gray-400">
                 {fmtCurrency(item.indirecto_total)}
               </td>
-              <td className="px-3 py-2.5 cost-cell text-gray-400">
+              <td className="px-3 py-2.5 cost-cell whitespace-nowrap text-gray-400">
                 {fmtCurrency(item.beneficio_total)}
               </td>
-              <td className="px-3 py-2.5 cost-cell font-bold text-[#143D34]">
+              <td className={`px-3 py-2.5 cost-cell whitespace-nowrap font-bold text-[#143D34] bg-inherit z-[2] ${fijaPrecio}`}>
                 {fmtCurrency(item.neto_total)}
               </td>
-              <td className="px-3 py-2.5">
+              <td className={`px-2 py-2.5 bg-inherit z-[2] ${fijaBotones}`}>
                 <div className="flex items-center justify-end gap-1">
                   {onViewDetail ? (
                     <button
@@ -295,14 +300,15 @@ export default function DataTable({ items, onEditItem, onViewDetail, onDeleteIte
           ))}
         </tbody>
         {items.length > 0 && (
-          <tfoot className="sticky bottom-0 z-10">
-            <tr className="bg-[#E8F5EE] font-semibold text-xs border-t border-[#2D8D68]/20">
-              <td colSpan={6} className="px-3 py-2.5 text-right text-[#2D8D68] uppercase text-[10px] tracking-wider font-bold">Total de lo elegido</td>
-              <td className="px-3 py-2.5 cost-cell text-blue-700 font-bold">{fmtCurrency(totals.directo)}</td>
-              <td className="px-3 py-2.5 cost-cell text-[#E8663C] font-bold">{fmtCurrency(totals.indirecto)}</td>
-              <td className="px-3 py-2.5 cost-cell text-gray-600 font-bold">{fmtCurrency(totals.beneficio)}</td>
-              <td className="px-3 py-2.5 cost-cell text-[#143D34] font-extrabold text-sm">{fmtCurrency(totals.neto)}</td>
-              <td />
+          <tfoot className="sticky bottom-0 z-20">
+            <tr className="bg-[#E8F5EE] font-semibold text-xs [&>td]:border-t [&>td]:border-[#2D8D68]/20">
+              <td colSpan={2} className={`px-3 py-2.5 text-right text-[#2D8D68] uppercase text-[10px] tracking-wider font-bold whitespace-nowrap bg-[#E8F5EE] z-10 sticky left-0 shadow-[6px_0_8px_-6px_rgba(20,61,52,0.22)]`}>Total de lo elegido</td>
+              <td colSpan={4} />
+              <td className="px-3 py-2.5 cost-cell whitespace-nowrap text-blue-700 font-bold">{fmtCurrency(totals.directo)}</td>
+              <td className="px-3 py-2.5 cost-cell whitespace-nowrap text-[#E8663C] font-bold">{fmtCurrency(totals.indirecto)}</td>
+              <td className="px-3 py-2.5 cost-cell whitespace-nowrap text-gray-600 font-bold">{fmtCurrency(totals.beneficio)}</td>
+              <td className={`px-3 py-2.5 cost-cell whitespace-nowrap text-[#143D34] font-extrabold text-sm bg-[#E8F5EE] z-10 ${fijaPrecio}`}>{fmtCurrency(totals.neto)}</td>
+              <td className={`bg-[#E8F5EE] z-10 ${fijaBotones}`} />
             </tr>
           </tfoot>
         )}

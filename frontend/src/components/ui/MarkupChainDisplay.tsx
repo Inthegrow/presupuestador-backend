@@ -55,7 +55,7 @@ export default function MarkupChainDisplay({ config, budgetId, fallo = false }: 
           onClick={() => setExpanded((v) => !v)}
           aria-expanded={expanded}
           disabled={!pcts}
-          className="flex items-center gap-2 flex-wrap text-left group disabled:cursor-default"
+          className="flex items-center gap-2 flex-wrap text-left group disabled:cursor-default max-md:min-h-10"
         >
           <ChevronRight
             size={14}
@@ -79,7 +79,7 @@ export default function MarkupChainDisplay({ config, budgetId, fallo = false }: 
         <button
           type="button"
           onClick={() => navigate(budgetId ? `/app/settings/markups?budget=${budgetId}` : '/app/settings/markups')}
-          className="flex items-center gap-1 text-[11px] text-gray-500 hover:text-[#2D8D68] font-medium transition-colors px-2 py-1 rounded-lg hover:bg-[#E8F5EE]/60"
+          className="flex items-center gap-1 text-[11px] max-md:text-[13px] max-md:min-h-10 max-md:-ml-2 text-gray-500 hover:text-[#2D8D68] font-medium transition-colors px-2 py-1 rounded-lg hover:bg-[#E8F5EE]/60"
         >
           <Settings2 size={12} />
           Editar porcentajes

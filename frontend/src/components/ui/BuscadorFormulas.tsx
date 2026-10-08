@@ -84,7 +84,7 @@ export default function BuscadorFormulas<R extends FormulaBuscable, Q extends Fo
         key={`${esPropuesta ? 'p' : 'q'}-${s.id ?? s.codigo}`}
         disabled={deshabilitado}
         onClick={() => quizas?.onElegir(s, esPropuesta)}
-        className="w-full text-left px-3 py-1.5 hover:bg-white disabled:opacity-60 block"
+        className="w-full text-left px-3 py-1.5 max-md:py-2.5 hover:bg-white disabled:opacity-60 block"
       >
         <span className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
           <span className="text-sm font-medium text-[#143D34]">{s.nombre}</span>
@@ -100,7 +100,7 @@ export default function BuscadorFormulas<R extends FormulaBuscable, Q extends Fo
 
   return (
     <div className={className}>
-      <div className={`flex items-center gap-2 px-3 py-2 ${mostrarAbajo || ayuda ? 'border-b' : ''}`}>
+      <div className={`flex items-center gap-2 px-3 py-2 max-md:py-1 ${mostrarAbajo || ayuda ? 'border-b' : ''}`}>
         <Search size={14} className="text-gray-400" />
         <input
           ref={inputRef}
@@ -114,9 +114,9 @@ export default function BuscadorFormulas<R extends FormulaBuscable, Q extends Fo
             }
           } : undefined}
           placeholder={placeholder}
-          className="flex-1 min-w-0 text-sm outline-none bg-transparent"
+          className="flex-1 min-w-0 max-md:min-h-10 text-sm outline-none bg-transparent"
         />
-        {onCerrar && <button onClick={onCerrar} className="text-xs text-gray-500 hover:text-gray-800">Cerrar</button>}
+        {onCerrar && <button onClick={onCerrar} className="max-md:min-h-10 max-md:px-2 max-md:-mr-2 max-md:text-sm text-xs text-gray-500 hover:text-gray-800">Cerrar</button>}
       </div>
       {ayuda && <p className="px-3 py-1.5 text-[11px] text-gray-500 border-b">{ayuda}</p>}
       {mostrarAbajo && hayQuizas && (
@@ -126,7 +126,7 @@ export default function BuscadorFormulas<R extends FormulaBuscable, Q extends Fo
           {parecidas.map((p) => filaQuizas(p, false))}
         </div>
       )}
-      {mostrarAbajo && <div className={listaClassName}>
+      {mostrarAbajo && <div className={listaClassName} data-testid="lista-formulas">
         {extra}
         {Object.entries(grupos).map(([cat, items]) => (
           <div key={cat}>
@@ -136,7 +136,7 @@ export default function BuscadorFormulas<R extends FormulaBuscable, Q extends Fo
                 key={r.id ?? r.codigo}
                 disabled={deshabilitado}
                 onClick={() => onElegir(r)}
-                className="w-full text-left px-3 py-1.5 text-sm hover:bg-gray-50 disabled:opacity-60 flex items-baseline gap-2"
+                className="w-full text-left px-3 py-1.5 max-md:py-2.5 text-sm hover:bg-gray-50 disabled:opacity-60 flex items-baseline gap-2"
               >
                 <span className="text-gray-800">{r.nombre}</span>
                 <span className="text-xs text-gray-500">({r.unidad || 's/u'})</span>

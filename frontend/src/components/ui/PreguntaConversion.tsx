@@ -44,18 +44,18 @@ export default function PreguntaConversion({
           value={valor}
           onChange={(e) => onValor(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') onEnviar() }}
-          className="border rounded-lg px-2 py-1 w-24 bg-white"
+          className="border rounded-lg px-2 py-1 max-md:min-h-10 w-28 md:w-24 bg-white"
         />
         <span className="text-gray-500">{det.unidad_formula}</span>
       </div>
       <p className="text-[11px] text-gray-500 mt-1.5">
         Para contrapisos y carpetas es el espesor en metros: 10 cm = 0,10
       </p>
-      <div className="flex items-center gap-2 mt-3">
+      <div className="flex items-center gap-2 mt-3 max-md:[&>button]:flex-1 max-md:[&>button]:justify-center">
         <button
           onClick={onEnviar}
           disabled={ocupado}
-          className="flex items-center gap-1.5 text-xs bg-[#2D8D68] hover:bg-[#1E6B4E] text-white px-3 py-1.5 rounded-lg font-medium transition-colors disabled:opacity-50"
+          className="max-md:min-h-11 max-md:text-sm flex items-center gap-1.5 text-xs bg-[#2D8D68] hover:bg-[#1E6B4E] text-white px-3 py-1.5 rounded-lg font-medium transition-colors disabled:opacity-50"
         >
           {ocupado ? (
             <>
@@ -72,7 +72,7 @@ export default function PreguntaConversion({
         <button
           onClick={onCancelar}
           disabled={ocupado}
-          className="text-xs bg-white border text-gray-700 px-3 py-1.5 rounded-lg font-semibold hover:bg-gray-100 disabled:opacity-50"
+          className="max-md:min-h-11 max-md:text-sm text-xs bg-white border text-gray-700 px-3 py-1.5 rounded-lg font-semibold hover:bg-gray-100 disabled:opacity-50"
         >
           Cancelar
         </button>

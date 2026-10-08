@@ -6,7 +6,7 @@
 // - Editor: un presupuesto hecho a mano no tiene "Diferencias con el Excel" (Ginkgo sí), la versión es la real
 //   ("Sin versiones" → "v1") y mientras carga no aparece un nombre inventado.
 // - Fórmulas: "Yeseria y durleria" del Maestro se ve "Yesería y durlería" y la búsqueda "yeseria" la encuentra.
-// - Los mensajes del servidor se leen enteros: la planilla simple subida a Cargar obra, y comillas, tildes y saltos
+// - Los mensajes del servidor se leen enteros: el aviso de la planilla simple en Cargar obra, y comillas, tildes y saltos
 //   de línea en "Diferencias con el Excel" y "Versiones" (sin \" ni cortes).
 // Corre contra vite (5179) + scripts/serve_fake.py (8000), con el servidor falso recién levantado (sin presupuestos).
 // Uso: EXCEL_DIR=<carpeta con ginkgo.xlsx> SHOTS_DIR=<carpeta> NODE_PATH=<node_modules con playwright> node scripts/e2e_palabras.cjs
@@ -266,20 +266,22 @@ async function cargarGinkgo() {
   await page.waitForTimeout(2500)
   check(page.url().endsWith(`/app/budgets/${ginkgo}/diferencias`) && !/no tiene guardados los totales/i.test(await page.locator('main').innerText()), 'Ginkgo: "Diferencias con el Excel" abre la comparación')
 
-  // 8. Cargar obra con la planilla simple que baja la app: el mensaje entero
+  // 8. Cargar obra con la planilla simple que baja la app: desde el PR #46 se acepta (antes era un error). Se analiza
+  //    y la pantalla avisa, con el texto entero, que se compara contra los precios de esa planilla.
   const simple = path.join(SHOTS, 'ginkgo_planilla_simple.xlsx')
   fs.writeFileSync(simple, Buffer.from(await (await fetch(`${API}/budgets/${ginkgo}/export/excel`)).arrayBuffer()))
   await page.goto(`${B}/app/cargar-obra`)
   await page.setInputFiles('input[type=file]', simple)
-  const err = page.getByTestId('error-cargar-obra')
-  await err.waitFor({ timeout: 60000 }).catch(() => {})
-  const msg = (await err.innerText().catch(() => '')).trim()
-  console.log('      mensaje: ' + JSON.stringify(msg))
-  check(msg.startsWith('Este Excel es la planilla simple que baja la app (Exportar), no el cómputo de la obra'), 'Cargar obra: dice que es la planilla simple que baja la app')
-  check(msg.includes('"Planilla Terrac"'), 'Cargar obra: el mensaje sigue después de la comilla ("Planilla Terrac")')
-  check(msg.endsWith('que sí se puede volver a cargar.'), 'Cargar obra: termina en "que sí se puede volver a cargar."')
+  const avisoSimple = page.getByTestId('aviso-planilla-simple')
+  await avisoSimple.waitFor({ timeout: 60000 }).catch(() => {})
+  const msg = (await avisoSimple.innerText().catch(() => '')).replace(/\s+/g, ' ').trim()
+  console.log('      aviso: ' + JSON.stringify(msg))
+  check(msg.startsWith('Es la planilla simple que bajó la app (Exportar)') && await page.getByTestId('error-cargar-obra').count() === 0,
+    'Cargar obra: la planilla simple se acepta y dice que es la que bajó la app (sin error)')
+  check(await page.getByText('trabajos distintos').isVisible(), 'Cargar obra: con la planilla simple muestra los trabajos para revisar')
+  check(msg.endsWith('no contra el Excel original de la obra.'), 'Cargar obra: el aviso sale entero (termina en "no contra el Excel original de la obra.")')
   check(!msg.includes('\\') && !msg.includes('{'), 'Cargar obra: sin \\" ni pedazos de JSON')
-  await shot('07_cargar_obra_error_entero', '[data-testid=error-cargar-obra]')
+  await shot('07_cargar_obra_planilla_simple', '[data-testid=aviso-planilla-simple]')
 
   // 9. Fórmulas: las categorías del Maestro con tildes y la búsqueda sin tildes
   await page.goto(`${B}/app/templates`)

@@ -75,7 +75,7 @@ const sinRevisando = (page) => page.waitForFunction(() => !document.body.innerTe
 
   // 5. The recipe search does not offer the Excel price
   await roja.getByRole('button', { name: 'Elegir fórmula' }).click()
-  const buscador = roja.locator('div.max-h-64')
+  const buscador = roja.getByTestId('lista-formulas')
   await buscador.waitFor()
   await shot(page, '02_buscador')
   check('el buscador no ofrece "Usar el precio del Excel"', (await roja.getByText('Usar el precio del Excel').count()) === 0)

@@ -145,8 +145,8 @@ function ExcelUploadForm({ onSuccess, onCancel }: { onSuccess: (count: number) =
         El archivo debe tener solapas llamadas: <strong>Materiales</strong>, <strong>Mano de obra</strong>, <strong>Equipos</strong>, <strong>Subcontratos</strong> (o variantes como Mat, MO, Eq, Sub).
         Cada solapa crea una lista separada.
       </p>
-      <div className="flex items-end gap-3">
-        <div className="flex-1">
+      <div className="flex flex-col sm:flex-row sm:items-end gap-3">
+        <div className="flex-1 min-w-0">
           <label className="block text-[11px] text-gray-500 mb-1 font-medium">Archivo Excel *</label>
           <input
             type="file"
@@ -265,7 +265,7 @@ function EntryForm({
     }
   }
 
-  const input = 'w-full text-xs border rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-[#2D8D68]/40 focus:border-[#2D8D68] bg-white'
+  const input = 'w-full max-md:min-h-10 text-xs border rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-[#2D8D68]/40 focus:border-[#2D8D68] bg-white'
   const etiqueta = 'block text-[10px] font-medium text-gray-500 mb-0.5'
 
   return (
@@ -564,7 +564,7 @@ function CatalogRow({
     }
   }
 
-  const accion = 'p-1.5 rounded-md text-gray-400 transition-colors disabled:opacity-40'
+  const accion = 'p-1.5 max-md:min-w-10 max-md:min-h-10 inline-flex items-center justify-center rounded-md text-gray-400 transition-colors disabled:opacity-40'
 
   return (
     <div className="@container bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden" data-testid="lista-precios" data-catalog-id={catalog.id}>
@@ -597,7 +597,7 @@ function CatalogRow({
             <button
               onClick={handleToggleOficial}
               disabled={changingOficial}
-              className="bg-white border text-gray-700 text-[11px] font-semibold px-2.5 py-1 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+              className="max-md:min-h-10 bg-white border text-gray-700 text-[11px] font-semibold px-2.5 py-1 rounded-lg hover:bg-gray-50 disabled:opacity-50"
             >
               {catalog.oficial ? 'Dejar solo para consulta' : 'Marcar como oficial'}
             </button>
@@ -605,14 +605,14 @@ function CatalogRow({
           {esAdmin && !confirmarBorrarLista && (
             <button
               onClick={() => setConfirmarBorrarLista(true)}
-              className="p-1.5 rounded-lg text-red-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+              className="p-1.5 max-md:min-w-10 max-md:min-h-10 inline-flex items-center justify-center rounded-lg text-red-400 hover:text-red-600 hover:bg-red-50 transition-colors"
               title="Eliminar la lista"
               aria-label="Eliminar la lista"
             >
               <Trash2 size={14} />
             </button>
           )}
-          <button onClick={toggle} aria-label={open ? 'Cerrar la lista' : 'Abrir la lista'} className="p-0.5">
+          <button onClick={toggle} aria-label={open ? 'Cerrar la lista' : 'Abrir la lista'} className="p-0.5 max-md:min-w-10 max-md:min-h-10 inline-flex items-center justify-center">
             {open ? <ChevronDown size={16} className="text-gray-400" /> : <ChevronRight size={16} className="text-gray-400" />}
           </button>
         </div>
@@ -623,12 +623,12 @@ function CatalogRow({
               <button
                 onClick={handleDeleteCatalog}
                 disabled={deletingCatalog}
-                className="inline-flex items-center gap-1 bg-red-600 hover:bg-red-700 text-white font-semibold px-3 py-1.5 rounded-lg disabled:opacity-50"
+                className="max-md:min-h-10 inline-flex items-center gap-1 bg-red-600 hover:bg-red-700 text-white font-semibold px-3 py-1.5 rounded-lg disabled:opacity-50"
               >
                 {deletingCatalog && <span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" aria-hidden />}
                 Sí, eliminarla
               </button>
-              <button onClick={() => setConfirmarBorrarLista(false)} className="bg-white border border-red-200 px-3 py-1.5 rounded-lg hover:bg-red-100">
+              <button onClick={() => setConfirmarBorrarLista(false)} className="max-md:min-h-10 bg-white border border-red-200 px-3 py-1.5 rounded-lg hover:bg-red-100">
                 Cancelar
               </button>
             </div>
@@ -664,13 +664,13 @@ function CatalogRow({
                     value={searchQ}
                     onChange={(e) => handleSearch(e.target.value)}
                     placeholder="Buscar por código o descripción..."
-                    className="w-full text-[11px] border rounded-lg pl-7 pr-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-[#2D8D68] bg-white"
+                    className="w-full max-md:min-h-10 text-[11px] border rounded-lg pl-7 pr-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-[#2D8D68] bg-white"
                   />
                   {searchQ && (
                     <button
                       onClick={() => handleSearch('')}
                       aria-label="Borrar la búsqueda"
-                      className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                      className="absolute right-0 md:right-2 top-1/2 -translate-y-1/2 max-md:w-10 max-md:h-10 inline-flex items-center justify-center text-gray-400 hover:text-gray-600"
                     >
                       <X size={11} />
                     </button>
@@ -817,7 +817,7 @@ function CatalogRow({
                     {!addingEntry && puedeEditar && (
                       <button
                         onClick={() => setAddingEntry(true)}
-                        className="flex items-center gap-1 text-[#2D8D68] hover:text-[#1B5E4B] font-semibold text-[11px]"
+                        className="max-md:min-h-10 flex items-center gap-1 text-[#2D8D68] hover:text-[#1B5E4B] font-semibold text-[11px]"
                       >
                         <Plus size={11} /> Agregar un precio
                       </button>
@@ -830,7 +830,7 @@ function CatalogRow({
                   {!searchQ && !addingEntry && puedeEditar && (
                     <button
                       onClick={() => setAddingEntry(true)}
-                      className="flex items-center gap-1 text-[#2D8D68] hover:text-[#1B5E4B] font-semibold text-[11px]"
+                      className="max-md:min-h-10 flex items-center gap-1 text-[#2D8D68] hover:text-[#1B5E4B] font-semibold text-[11px]"
                     >
                       <Plus size={11} /> Agregar un precio
                     </button>
@@ -1000,7 +1000,7 @@ export default function Catalogs() {
             setShowUpload(false)
             setShowExcelUpload(false)
           }}
-          className="text-xs text-[#2D8D68] hover:text-[#1B5E4B] underline underline-offset-2"
+          className="max-md:min-h-10 text-xs text-[#2D8D68] hover:text-[#1B5E4B] underline underline-offset-2"
         >
           {showUploads ? 'Ocultar' : 'Subir una lista nueva'}
         </button>

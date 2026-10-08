@@ -94,22 +94,22 @@ export default function Versions() {
   const current = versions[0]
 
   return (
-    <div className="p-6 fade-in">
+    <div className="p-4 md:p-6 fade-in">
       <div className="flex items-center gap-2 text-[#2D8D68] text-[11px] font-bold tracking-wider mb-1">
         <RefreshCw size={14} /> HISTORIAL
       </div>
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-3">
-          <div className="w-1 h-7 bg-[#2D8D68] rounded-full" />
-          <h1 className="text-xl font-extrabold text-gray-900">VERSIONES — {budgetName.toUpperCase()}</h1>
-          <span className="text-xs text-gray-500">Precios al {budget?.precios_al ? fmtDate(budget.precios_al) : 'sin fecha'}</span>
+      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 mb-5 md:mb-6">
+        <div className="flex items-center gap-x-3 gap-y-1 flex-wrap min-w-0">
+          <div className="w-1 h-7 bg-[#2D8D68] rounded-full flex-shrink-0" />
+          <h1 className="text-xl font-extrabold text-gray-900 min-w-0 break-words">VERSIONES — {budgetName.toUpperCase()}</h1>
+          <span className="text-xs text-gray-500 max-lg:basis-full max-lg:pl-4 whitespace-nowrap">Precios al {budget?.precios_al ? fmtDate(budget.precios_al) : 'sin fecha'}</span>
         </div>
         {puedeEditar && (
         <div className="flex gap-2">
         <button
           onClick={updatePrices}
           disabled={updating}
-          className="border border-[#2D8D68] text-[#2D8D68] hover:bg-[#E8F5EE] disabled:opacity-60 font-semibold px-4 py-2 rounded-lg text-xs flex items-center gap-1.5 transition-colors"
+          className="flex-1 lg:flex-none justify-center min-h-11 lg:min-h-0 border border-[#2D8D68] text-[#2D8D68] hover:bg-[#E8F5EE] disabled:opacity-60 font-semibold px-4 py-2 rounded-lg text-xs flex items-center gap-1.5 transition-colors"
         >
           {updating ? (
             <div className="w-4 h-4 border-2 border-[#2D8D68] border-t-transparent rounded-full animate-spin" />
@@ -121,7 +121,7 @@ export default function Versions() {
         <button
           onClick={createVersion}
           disabled={creating}
-          className="bg-[#2D8D68] hover:bg-[#1B5E4B] disabled:opacity-60 text-white font-semibold px-4 py-2 rounded-lg text-xs flex items-center gap-1.5 transition-colors"
+          className="flex-1 lg:flex-none justify-center min-h-11 lg:min-h-0 bg-[#2D8D68] hover:bg-[#1B5E4B] disabled:opacity-60 text-white font-semibold px-4 py-2 rounded-lg text-xs flex items-center gap-1.5 transition-colors"
         >
           {creating ? (
             <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
@@ -187,8 +187,8 @@ export default function Versions() {
                 key={v.id}
                 className={`bg-white rounded-xl border overflow-hidden ${isCurrent ? 'border-l-4 border-l-[#2D8D68]' : ''}`}
               >
-                <div className="p-4 flex justify-between items-center">
-                  <div>
+                <div className="p-4 flex flex-wrap justify-between items-center gap-3">
+                  <div className="min-w-0">
                     <div className="font-semibold text-sm text-gray-900">
                       v{v.version}{v.label ? ` — ${v.label}` : ''}
                     </div>
@@ -215,11 +215,11 @@ export default function Versions() {
                       Actual
                     </span>
                   ) : (
-                    <div className="flex gap-2">
-                      <button className="text-xs text-[#2D8D68] border border-[#2D8D68] px-2.5 py-1 rounded-lg font-medium hover:bg-[#E8F5EE] transition-colors flex items-center gap-1">
+                    <div className="flex gap-2 max-sm:w-full">
+                      <button className="max-sm:flex-1 justify-center max-md:min-h-10 text-xs text-[#2D8D68] border border-[#2D8D68] px-2.5 py-1 rounded-lg font-medium hover:bg-[#E8F5EE] transition-colors flex items-center gap-1">
                         <Eye size={12} /> Ver
                       </button>
-                      <button className="text-xs text-blue-600 border px-2.5 py-1 rounded-lg hover:bg-blue-50 transition-colors flex items-center gap-1">
+                      <button className="max-sm:flex-1 justify-center max-md:min-h-10 text-xs text-blue-600 border px-2.5 py-1 rounded-lg hover:bg-blue-50 transition-colors flex items-center gap-1">
                         <GitCompare size={12} /> Comparar
                       </button>
                     </div>

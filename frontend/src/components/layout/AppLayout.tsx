@@ -1,4 +1,6 @@
+import { useCallback, useState } from 'react'
 import { Navigate, Outlet, useLocation } from 'react-router-dom'
+import PestanasProyecto, { rutaConPestanas } from './PestanasProyecto'
 import Sidebar from './Sidebar'
 import TopBar from './TopBar'
 import { useAuth } from '../../contexts/AuthContext'
@@ -9,7 +11,11 @@ const AUTH_ENABLED = import.meta.env.VITE_AUTH_ENABLED === 'true'
 
 function AppLayoutContenido() {
   const { user, loading, org, needsOrgSelect, error, reload } = useAuth()
-  const { search } = useLocation()
+  const { search, pathname } = useLocation()
+  // Debajo de 1024 px el menú es un cajón que se abre con ☰ (lo cierra el mismo menú al elegir algo)
+  const [cajonAbierto, setCajonAbierto] = useState(false)
+  const cerrarCajon = useCallback(() => setCajonAbierto(false), [])
+  const proyectoId = rutaConPestanas(pathname)
 
   if (loading) {
     return (
@@ -55,11 +61,13 @@ function AppLayoutContenido() {
 
   return (
     <div className="flex flex-col h-screen overflow-hidden">
-      <TopBar />
+      <TopBar onAbrirMenu={() => setCajonAbierto(true)} />
       <div className="flex flex-1 overflow-hidden">
-        <Sidebar />
+        <Sidebar cajonAbierto={cajonAbierto} onCerrarCajon={cerrarCajon} />
         {/* Con otra empresa los datos son otros: se vuelve a armar la pantalla */}
-        <main key={org.id} className="flex-1 overflow-y-auto bg-[#F5F6F8]">
+        <main key={org.id} className="flex-1 min-w-0 overflow-y-auto bg-[#F5F6F8]">
+          {/* En el celular, las pantallas del proyecto llevan sus pestañas arriba (desde 768 px no se ven) */}
+          {proyectoId && <PestanasProyecto budgetId={proyectoId} />}
           <Outlet />
         </main>
       </div>

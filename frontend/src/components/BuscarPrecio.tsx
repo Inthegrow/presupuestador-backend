@@ -311,7 +311,7 @@ export default function BuscarPrecio({
         aria-modal="true"
         aria-labelledby={tituloId}
         data-testid="buscar-precio"
-        className="bg-white w-full sm:max-w-2xl sm:mx-4 sm:rounded-2xl shadow-xl overflow-hidden flex flex-col max-h-full sm:max-h-[92vh]"
+        className="bg-white w-full h-full sm:h-auto sm:max-w-2xl sm:mx-4 sm:rounded-2xl shadow-xl overflow-hidden flex flex-col max-h-full sm:max-h-[92vh]"
       >
         {/* Cabecera */}
         <div className="bg-[#E8F5EE] px-4 sm:px-5 py-3.5 flex items-start justify-between gap-3 border-b border-[#C3E5D3] flex-shrink-0">
@@ -326,9 +326,10 @@ export default function BuscarPrecio({
             onClick={onClose}
             disabled={guardando !== null}
             aria-label="Cerrar"
-            className="p-1.5 rounded-lg hover:bg-[#C3E5D3] text-[#2D8D68] flex-shrink-0 disabled:opacity-40"
+            className="w-10 h-10 -mr-2 -mt-1.5 sm:w-auto sm:h-auto sm:m-0 sm:p-1.5 flex items-center justify-center rounded-lg hover:bg-[#C3E5D3] text-[#2D8D68] flex-shrink-0 disabled:opacity-40"
           >
-            <X size={16} />
+            <X size={18} className="sm:hidden" />
+            <X size={16} className="hidden sm:block" />
           </button>
         </div>
 
@@ -343,7 +344,7 @@ export default function BuscarPrecio({
                   value={descripcion}
                   onChange={(e) => setDescripcion(e.target.value)}
                   placeholder="Ej: cemento Loma Negra 50 kg"
-                  className="mt-0.5 w-full text-sm border border-gray-200 rounded-lg px-2.5 py-2 focus:outline-none focus:border-[#2D8D68] focus:ring-2 focus:ring-[#2D8D68]/20"
+                  className="mt-0.5 w-full text-sm border border-gray-200 rounded-lg px-2.5 py-2 min-h-10 focus:outline-none focus:border-[#2D8D68] focus:ring-2 focus:ring-[#2D8D68]/20"
                 />
               </label>
               <label className="text-[11px] font-medium text-gray-500 min-w-0">
@@ -355,7 +356,7 @@ export default function BuscarPrecio({
                   aria-readonly={unidadFija !== null}
                   title={unidadFija !== null ? 'Es la unidad de la lista: el precio se guarda por esa unidad.' : undefined}
                   placeholder="bolsa"
-                  className="mt-0.5 w-full text-sm border border-gray-200 rounded-lg px-2.5 py-2 focus:outline-none focus:border-[#2D8D68] focus:ring-2 focus:ring-[#2D8D68]/20 read-only:bg-gray-50 read-only:text-gray-500"
+                  className="mt-0.5 w-full text-sm border border-gray-200 rounded-lg px-2.5 py-2 min-h-10 focus:outline-none focus:border-[#2D8D68] focus:ring-2 focus:ring-[#2D8D68]/20 read-only:bg-gray-50 read-only:text-gray-500"
                 />
               </label>
             </div>
@@ -368,7 +369,7 @@ export default function BuscarPrecio({
                     value={codigo}
                     onChange={(e) => setCodigo(e.target.value)}
                     placeholder="Ej: M-CEM50"
-                    className="mt-0.5 w-full text-sm font-mono border border-gray-200 rounded-lg px-2.5 py-2 focus:outline-none focus:border-[#2D8D68] focus:ring-2 focus:ring-[#2D8D68]/20"
+                    className="mt-0.5 w-full text-sm font-mono border border-gray-200 rounded-lg px-2.5 py-2 min-h-10 focus:outline-none focus:border-[#2D8D68] focus:ring-2 focus:ring-[#2D8D68]/20"
                   />
                 </label>
                 <label className="text-[11px] font-medium text-gray-500 min-w-0">
@@ -379,7 +380,7 @@ export default function BuscarPrecio({
                       setTipo(e.target.value)
                       if (oficiales) setListaId(listaParaTipo(oficiales, e.target.value)?.id ?? '')
                     }}
-                    className="mt-0.5 w-full text-sm border border-gray-200 rounded-lg px-2 py-2 bg-white focus:outline-none focus:border-[#2D8D68]"
+                    className="mt-0.5 w-full text-sm border border-gray-200 rounded-lg px-2 py-2 min-h-10 bg-white focus:outline-none focus:border-[#2D8D68]"
                   >
                     {TIPOS.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
                   </select>
@@ -390,7 +391,7 @@ export default function BuscarPrecio({
                     value={listaId}
                     onChange={(e) => setListaId(e.target.value)}
                     disabled={!oficiales || oficiales.length === 0}
-                    className="mt-0.5 w-full text-sm border border-gray-200 rounded-lg px-2 py-2 bg-white focus:outline-none focus:border-[#2D8D68] disabled:bg-gray-50"
+                    className="mt-0.5 w-full text-sm border border-gray-200 rounded-lg px-2 py-2 min-h-10 bg-white focus:outline-none focus:border-[#2D8D68] disabled:bg-gray-50"
                   >
                     {!oficiales && <option value="">Cargando…</option>}
                     {oficiales?.length === 0 && <option value="">Ninguna lista es oficial</option>}
@@ -403,7 +404,7 @@ export default function BuscarPrecio({
             <button
               type="submit"
               disabled={!descripcion.trim() || busqueda.tipo === 'buscando'}
-              className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 bg-[#2D8D68] hover:bg-[#1B5E4B] disabled:opacity-50 text-white text-sm font-semibold px-5 py-2 rounded-xl shadow-sm transition-colors"
+              className="w-full sm:w-auto min-h-11 sm:min-h-0 inline-flex items-center justify-center gap-1.5 bg-[#2D8D68] hover:bg-[#1B5E4B] disabled:opacity-50 text-white text-sm font-semibold px-5 py-2 rounded-xl shadow-sm transition-colors"
             >
               <Search size={15} /> {busqueda.tipo === 'resultados' || busqueda.tipo === 'error' ? 'Buscar de nuevo' : 'Buscar'}
             </button>
@@ -455,7 +456,7 @@ export default function BuscarPrecio({
                   <p className="mt-0.5 [overflow-wrap:anywhere]">{busqueda.mensaje}</p>
                   <button
                     onClick={() => void buscar()}
-                    className="mt-2 inline-flex items-center gap-1 font-semibold bg-white border border-red-200 rounded-lg px-3 py-1.5 hover:bg-red-100"
+                    className="mt-2 min-h-10 sm:min-h-0 inline-flex items-center gap-1 font-semibold bg-white border border-red-200 rounded-lg px-3 py-1.5 hover:bg-red-100"
                   >
                     <RefreshCw size={12} /> Probar de nuevo
                   </button>
@@ -471,7 +472,7 @@ export default function BuscarPrecio({
               <p className="mt-1">Buscá de nuevo para ver las cuentas por {unidadEnPalabras(unidad.trim() || inicial.unidad)}.</p>
               <button
                 onClick={() => void buscar()}
-                className="mt-2 inline-flex items-center gap-1 font-semibold bg-white border border-amber-300 rounded-lg px-3 py-1.5 hover:bg-amber-100"
+                className="mt-2 min-h-10 sm:min-h-0 inline-flex items-center gap-1 font-semibold bg-white border border-amber-300 rounded-lg px-3 py-1.5 hover:bg-amber-100"
               >
                 <RefreshCw size={12} /> Buscar de nuevo
               </button>
@@ -488,7 +489,7 @@ export default function BuscarPrecio({
                   <p className="mt-1">Probá con otras palabras (la marca, la medida o cómo se vende) y buscá de nuevo.</p>
                   <button
                     onClick={() => void buscar()}
-                    className="mt-2 inline-flex items-center gap-1 font-semibold bg-white border border-amber-300 rounded-lg px-3 py-1.5 hover:bg-amber-100"
+                    className="mt-2 min-h-10 sm:min-h-0 inline-flex items-center gap-1 font-semibold bg-white border border-amber-300 rounded-lg px-3 py-1.5 hover:bg-amber-100"
                   >
                     <RefreshCw size={12} /> Buscar de nuevo
                   </button>
@@ -571,7 +572,7 @@ function TarjetaOpcion({
           target="_blank"
           rel="noopener noreferrer"
           data-testid="ver-en-el-sitio"
-          className="inline-flex items-center gap-1 text-xs font-semibold text-sky-700 hover:text-sky-900 underline underline-offset-2 whitespace-nowrap"
+          className="min-h-10 sm:min-h-0 inline-flex items-center gap-1 text-xs font-semibold text-sky-700 hover:text-sky-900 underline underline-offset-2 whitespace-nowrap"
         >
           Ver en el sitio <ExternalLink size={11} aria-hidden />
         </a>
@@ -620,7 +621,7 @@ function TarjetaOpcion({
               inputMode="decimal"
               value={texto}
               onChange={(e) => setTexto(e.target.value)}
-              className="w-28 text-sm text-right tabular-nums outline-none"
+              className="w-28 min-h-8 text-sm text-right tabular-nums outline-none"
             />
           </div>
         </div>
@@ -630,7 +631,7 @@ function TarjetaOpcion({
         <button
           onClick={() => precio !== null && onUsar(precio)}
           disabled={!puedeGuardar || guardando || bloqueado || precio === null || !(precio > 0)}
-          className="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 bg-[#2D8D68] hover:bg-[#1B5E4B] disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-semibold px-4 py-2 rounded-xl transition-colors"
+          className="flex-1 sm:flex-none min-h-11 sm:min-h-0 inline-flex items-center justify-center gap-1.5 bg-[#2D8D68] hover:bg-[#1B5E4B] disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-semibold px-4 py-2 rounded-xl transition-colors"
         >
           {guardando ? (
             <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" aria-hidden /> Guardando…</>
@@ -642,7 +643,7 @@ function TarjetaOpcion({
           <button
             onClick={() => setCorrigiendo(true)}
             disabled={guardando}
-            className="inline-flex items-center gap-1 text-xs font-medium text-gray-600 hover:text-[#1B5E4B] px-2 py-2"
+            className="min-h-11 sm:min-h-0 inline-flex items-center gap-1 text-xs font-medium text-gray-600 hover:text-[#1B5E4B] px-2 py-2"
           >
             <Pencil size={12} /> Corregir el número
           </button>

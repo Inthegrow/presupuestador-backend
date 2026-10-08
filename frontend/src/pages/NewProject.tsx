@@ -800,24 +800,24 @@ export default function NewProject() {
   }
 
   return (
-    <div className="p-6 fade-in">
+    <div className="p-4 md:p-6 fade-in">
       {/* Page header */}
       <div className="flex items-center gap-2 text-[#2D8D68] text-[11px] font-bold tracking-wider mb-1">
         <Plus size={14} /> NUEVO PRESUPUESTO
       </div>
-      <div className="flex items-center gap-3 mb-6">
+      <div className="flex items-center gap-3 mb-5 md:mb-6">
         <div className="w-1 h-8 bg-[#2D8D68] rounded-full" />
-        <h1 className="text-2xl font-extrabold text-gray-900">CREAR PRESUPUESTO</h1>
+        <h1 className="text-xl md:text-2xl font-extrabold text-gray-900">CREAR PRESUPUESTO</h1>
       </div>
 
       {/* Steps, as pills (like Cargar obra) */}
       <div className="max-w-4xl mx-auto mb-6">
-        <ol className="flex flex-wrap gap-2 text-xs font-bold" data-testid="pasos" aria-label="Pasos">
+        <ol className="flex gap-1.5 sm:gap-2 text-xs font-bold" data-testid="pasos" aria-label="Pasos">
           {STEPS.map((label, i) => (
             <li
               key={label}
               aria-current={i === step ? 'step' : undefined}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-full ${i === step ? 'bg-[#2D8D68] text-white' : i < step ? 'bg-[#E8F5EE] text-[#143D34]' : 'bg-gray-100 text-gray-500'}`}
+              className={`flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1.5 rounded-full whitespace-nowrap ${i === step ? 'bg-[#2D8D68] text-white' : i < step ? 'bg-[#E8F5EE] text-[#143D34]' : 'bg-gray-100 text-gray-500'}`}
             >
               {i < step ? <Check size={12} aria-hidden="true" /> : <span>{i + 1}</span>}
               <span>{label}</span>
@@ -839,13 +839,13 @@ export default function NewProject() {
           </div>
           <button
             onClick={seguirBorrador}
-            className="bg-[#2D8D68] hover:bg-[#1B5E4B] text-white font-semibold px-4 py-1.5 rounded-lg text-sm"
+            className="flex-1 sm:flex-none min-h-10 sm:min-h-0 bg-[#2D8D68] hover:bg-[#1B5E4B] text-white font-semibold px-4 py-1.5 rounded-lg text-sm"
           >
             Seguir
           </button>
           <button
             onClick={descartarBorrador}
-            className="bg-white border border-amber-300 text-amber-800 font-semibold px-4 py-1.5 rounded-lg text-sm hover:bg-amber-100"
+            className="flex-1 sm:flex-none min-h-10 sm:min-h-0 bg-white border border-amber-300 text-amber-800 font-semibold px-4 py-1.5 rounded-lg text-sm hover:bg-amber-100"
           >
             Descartar
           </button>
@@ -917,18 +917,18 @@ export default function NewProject() {
 
         {/* Navigation buttons */}
         {step < PASO_RESULTADO && (
-          <div className={`flex items-center justify-between ${error ? 'mt-4' : 'mt-8'}`}>
+          <div className={`flex items-center justify-between gap-3 ${error ? 'mt-4' : 'mt-6 md:mt-8'}`}>
             <button
               onClick={prev}
               disabled={step === PASO_DATOS || creating}
-              className="flex items-center gap-1.5 text-sm font-medium text-gray-500 hover:text-gray-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              className="min-h-11 md:min-h-0 px-1 flex items-center gap-1.5 text-sm font-medium text-gray-500 hover:text-gray-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
             >
               <ChevronLeft size={16} /> Anterior
             </button>
             <button
               onClick={next}
               disabled={creating || cargandoIndirectos}
-              className="bg-[#2D8D68] hover:bg-[#1B5E4B] disabled:opacity-50 text-white font-semibold px-6 py-2.5 rounded-lg text-sm transition-colors flex items-center gap-2"
+              className="min-h-11 md:min-h-0 bg-[#2D8D68] hover:bg-[#1B5E4B] disabled:opacity-50 text-white font-semibold px-6 py-2.5 rounded-lg text-sm transition-colors flex items-center justify-center gap-2 text-center"
             >
               {creating && (
                 <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
@@ -1039,7 +1039,7 @@ function StepDatos({
   }
 
   return (
-    <div className="bg-white rounded-xl border p-6 fade-in">
+    <div className="bg-white rounded-xl border p-4 md:p-6 fade-in">
       <h2 className="text-lg font-bold text-gray-900 mb-1">Datos del presupuesto</h2>
       <p className="text-sm text-gray-500 mb-6">Información básica de la obra.</p>
 
@@ -1127,13 +1127,13 @@ function StepEstructura({
   const totalTrabajos = secciones.reduce((s, r) => s + r.items.length, 0)
   return (
     <div className="fade-in space-y-4">
-      <div className="bg-white rounded-xl border p-6">
+      <div className="bg-white rounded-xl border p-4 md:p-6">
         <h2 className="text-lg font-bold text-gray-900 mb-1">Rubros y trabajos</h2>
-        <p className="text-sm text-gray-500 mb-6">
+        <p className="text-sm text-gray-500 mb-4 md:mb-6">
           Definí los rubros y trabajos del presupuesto. Podés combinar varias fuentes.
         </p>
 
-        <div className="grid grid-cols-4 gap-3 mb-6">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-3 mb-5 md:mb-6">
           <OptionCard
             active={structureOption === 'template'}
             onClick={() => setStructureOption('template')}
@@ -1224,13 +1224,14 @@ function StepEstructura({
                 className="border border-gray-200 rounded-lg overflow-hidden"
               >
                 {/* Section header */}
-                <div className="bg-gray-50 px-4 py-3 flex items-center gap-3">
-                  <div className="flex flex-col gap-0.5">
+                <div className="bg-gray-50 px-2 md:px-4 py-2 md:py-3 flex items-center gap-1.5 md:gap-3">
+                  <div className="flex md:flex-col gap-0.5">
                     <button
                       onClick={() => moveSectionUp(si)}
                       disabled={si === 0}
                       title="Subir rubro"
-                      className="text-gray-400 hover:text-gray-600 disabled:opacity-20 transition-colors"
+                      aria-label="Subir rubro"
+                      className="w-8 h-10 md:w-auto md:h-auto flex items-center justify-center text-gray-400 hover:text-gray-600 disabled:opacity-20 transition-colors"
                     >
                       <GripVertical size={14} />
                     </button>
@@ -1238,33 +1239,35 @@ function StepEstructura({
                       onClick={() => moveSectionDown(si)}
                       disabled={si === sections.length - 1}
                       title="Bajar rubro"
-                      className="text-gray-400 hover:text-gray-600 disabled:opacity-20 transition-colors"
+                      aria-label="Bajar rubro"
+                      className="w-8 h-10 md:w-auto md:h-auto flex items-center justify-center text-gray-400 hover:text-gray-600 disabled:opacity-20 transition-colors"
                     >
                       <GripVertical size={14} />
                     </button>
                   </div>
-                  <span className="text-xs font-bold text-[#2D8D68] w-6">{si + 1}.</span>
+                  <span className="text-xs font-bold text-[#2D8D68] w-5 md:w-6 flex-shrink-0">{si + 1}.</span>
                   <input
                     type="text"
                     value={sec.nombre}
                     onChange={(e) => updateSectionName(sec.id, e.target.value)}
                     placeholder="Nombre del rubro (ej: Tareas preliminares)"
-                    className="flex-1 bg-transparent border-b border-gray-300 text-sm font-medium text-gray-800 focus:outline-none focus:border-[#2D8D68] px-1 py-0.5 transition-colors"
+                    className="flex-1 min-w-0 bg-transparent border-b border-gray-300 text-sm font-medium text-gray-800 focus:outline-none focus:border-[#2D8D68] px-1 py-1.5 md:py-0.5 transition-colors"
                   />
                   <button
                     onClick={() => removeSection(sec.id)}
-                    className="text-gray-400 hover:text-red-500 transition-colors p-1"
+                    className="w-10 h-10 md:w-auto md:h-auto flex items-center justify-center flex-shrink-0 text-gray-400 hover:text-red-500 transition-colors md:p-1"
                     title="Borrar rubro"
+                    aria-label="Borrar rubro"
                   >
                     <Trash2 size={14} />
                   </button>
                 </div>
 
                 {/* Items */}
-                <div className="p-4 space-y-2">
+                <div className="p-3 md:p-4 space-y-3 md:space-y-2">
                   {sec.items.map((it, ii) => (
-                    <div key={it.id} className="flex items-center gap-2">
-                      <span className="text-[10px] text-gray-400 w-8 text-right">
+                    <div key={it.id} className="flex flex-wrap md:flex-nowrap items-center gap-2 pb-3 md:pb-0 border-b md:border-0 border-gray-100">
+                      <span className="hidden md:block text-[10px] text-gray-400 w-8 text-right">
                         {si + 1}.{ii + 1}
                       </span>
                       <input
@@ -1272,12 +1275,13 @@ function StepEstructura({
                         value={it.descripcion}
                         onChange={(e) => updateItem(sec.id, it.id, 'descripcion', e.target.value)}
                         placeholder="Descripción del trabajo"
-                        className="flex-1 border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-[#2D8D68]/30 focus:border-[#2D8D68] transition-all"
+                        className="w-full md:w-auto md:flex-1 min-h-10 md:min-h-0 border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-[#2D8D68]/30 focus:border-[#2D8D68] transition-all"
                       />
                       <select
                         value={it.unidad}
                         onChange={(e) => updateItem(sec.id, it.id, 'unidad', e.target.value)}
-                        className="w-20 border border-gray-200 rounded px-2 py-1.5 text-sm bg-white focus:outline-none focus:ring-1 focus:ring-[#2D8D68]/30"
+                        aria-label="Unidad"
+                        className="flex-1 md:flex-none md:w-20 min-h-10 md:min-h-0 border border-gray-200 rounded px-2 py-1.5 text-sm bg-white focus:outline-none focus:ring-1 focus:ring-[#2D8D68]/30"
                       >
                         <option value="gl">gl</option>
                         <option value="m2">m2</option>
@@ -1293,12 +1297,15 @@ function StepEstructura({
                         value={it.cantidad}
                         onChange={(e) => updateItem(sec.id, it.id, 'cantidad', e.target.value)}
                         placeholder="Cant."
-                        className="w-20 border border-gray-200 rounded px-2 py-1.5 text-sm text-right focus:outline-none focus:ring-1 focus:ring-[#2D8D68]/30 focus:border-[#2D8D68] transition-all"
+                        inputMode="decimal"
+                        aria-label="Cantidad"
+                        className="flex-1 md:flex-none md:w-20 min-h-10 md:min-h-0 border border-gray-200 rounded px-2 py-1.5 text-sm text-right focus:outline-none focus:ring-1 focus:ring-[#2D8D68]/30 focus:border-[#2D8D68] transition-all"
                       />
                       <button
                         onClick={() => removeItem(sec.id, it.id)}
                         title="Borrar trabajo"
-                        className="text-gray-400 hover:text-red-500 transition-colors p-1"
+                        aria-label="Borrar trabajo"
+                        className="w-10 h-10 md:w-auto md:h-auto flex items-center justify-center text-gray-400 hover:text-red-500 transition-colors md:p-1"
                       >
                         <Trash2 size={12} />
                       </button>
@@ -1306,7 +1313,7 @@ function StepEstructura({
                   ))}
                   <button
                     onClick={() => addItem(sec.id)}
-                    className="flex items-center gap-1 text-xs text-[#2D8D68] font-medium hover:text-[#1B5E4B] mt-2 transition-colors"
+                    className="min-h-10 md:min-h-0 flex items-center gap-1 text-sm md:text-xs text-[#2D8D68] font-medium hover:text-[#1B5E4B] mt-1 md:mt-2 transition-colors"
                   >
                     <Plus size={12} /> Agregar trabajo
                   </button>
@@ -1376,7 +1383,7 @@ function StepIndirectos({
 }) {
   if (!indirectos) {
     return (
-      <div className="bg-white rounded-xl border p-6 fade-in">
+      <div className="bg-white rounded-xl border p-4 md:p-6 fade-in">
         <h2 className="text-lg font-bold text-gray-900 mb-1">Costos indirectos</h2>
         {error ? (
           <div className="mt-4 text-sm text-gray-700 space-y-3">
@@ -1386,7 +1393,7 @@ function StepIndirectos({
             </p>
             <button
               onClick={onReintentar}
-              className="flex items-center gap-1.5 text-xs font-semibold text-[#2D8D68] hover:text-[#1B5E4B]"
+              className="min-h-10 md:min-h-0 flex items-center gap-1.5 text-xs font-semibold text-[#2D8D68] hover:text-[#1B5E4B]"
             >
               <RotateCcw size={13} /> Volver a intentar
             </button>
@@ -1419,9 +1426,9 @@ function StepIndirectos({
 
   return (
     <div className="fade-in space-y-4">
-      <div className="bg-white rounded-xl border p-6">
+      <div className="bg-white rounded-xl border p-4 md:p-6">
         <h2 className="text-lg font-bold text-gray-900 mb-1">Costos indirectos</h2>
-        <p className="text-sm text-gray-500 mb-6">
+        <p className="text-sm text-gray-500 mb-5 md:mb-6">
           Arrancan con los de la empresa (Coeficiente de pase). Lo que cambies acá vale solo para este presupuesto.
         </p>
 
@@ -1429,7 +1436,7 @@ function StepIndirectos({
           <div>
             {GRUPOS_INDIRECTOS.map((g) => (
               <div key={g.titulo} className="mb-4">
-                <div className="flex items-baseline gap-2 mb-2 pb-1 border-b border-gray-100">
+                <div className="flex flex-wrap items-baseline gap-x-2 mb-2 pb-1 border-b border-gray-100">
                   <span className="text-[11px] font-bold tracking-widest text-gray-400 uppercase">{g.titulo}</span>
                   <span className="text-[11px] text-gray-400">({g.nota})</span>
                 </div>
@@ -1439,22 +1446,23 @@ function StepIndirectos({
                     const cambiado = general !== undefined && numero(indirectos[k]) !== general
                     return (
                       <div key={k} className="flex items-center justify-between gap-3">
-                        <label htmlFor={`ind-${k}`} className="text-sm text-gray-700">
+                        <label htmlFor={`ind-${k}`} className="text-sm text-gray-700 min-w-0">
                           {NOMBRE_INDIRECTO[k]}
                           {cambiado && (
                             <span className="ml-2 text-[11px] text-amber-600">(empresa: {general.toLocaleString('es-AR')} %)</span>
                           )}
                         </label>
-                        <div className="flex items-center gap-1">
+                        <div className="flex items-center gap-1 flex-shrink-0">
                           <input
                             id={`ind-${k}`}
+                            inputMode="decimal"
                             type="number"
                             min={0}
                             max={100}
                             step="0.1"
                             value={indirectos[k]}
                             onChange={(e) => update(k, e.target.value)}
-                            className="w-20 border border-gray-300 rounded px-2 py-1 text-sm text-right font-semibold text-[#2D8D68] tabular-nums focus:outline-none focus:ring-1 focus:ring-[#2D8D68]/30"
+                            className="w-20 min-h-10 md:min-h-0 border border-gray-300 rounded px-2 py-1 text-sm text-right font-semibold text-[#2D8D68] tabular-nums focus:outline-none focus:ring-1 focus:ring-[#2D8D68]/30"
                           />
                           <span className="text-sm text-gray-500">%</span>
                         </div>
@@ -1467,7 +1475,7 @@ function StepIndirectos({
             {generales && distintos.length > 0 && (
               <button
                 onClick={() => setIndirectos(aTexto(generales))}
-                className="flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-gray-700"
+                className="min-h-10 md:min-h-0 flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-gray-700"
               >
                 <RotateCcw size={12} /> Volver a los de la empresa
               </button>
@@ -1489,7 +1497,7 @@ function StepIndirectos({
           </div>
         </div>
 
-        <div className="mt-6 pt-4 border-t border-gray-100 flex items-center justify-between gap-4">
+        <div className="mt-5 md:mt-6 pt-4 border-t border-gray-100 flex items-center justify-between gap-4">
           <span className="text-sm text-gray-600">Precio final por cada $100 de costo directo</span>
           <span data-testid="precio-final-100" className="text-lg font-bold text-[#2D8D68] tabular-nums">
             {pesos(cascada.total_final)}
@@ -1511,7 +1519,7 @@ function StepResultado({
 }) {
   return (
     <div className="fade-in">
-      <div className="bg-white rounded-xl border p-8 text-center">
+      <div className="bg-white rounded-xl border p-5 md:p-8 text-center">
         <div className="w-20 h-20 bg-[#E8F5EE] rounded-full flex items-center justify-center mx-auto mb-4">
           <CheckCircle size={40} className="text-[#2D8D68]" />
         </div>
@@ -1539,16 +1547,16 @@ function StepResultado({
           </div>
         </div>
 
-        <div className="flex justify-center gap-3">
+        <div className="flex flex-col-reverse sm:flex-row justify-center gap-3">
           <button
             onClick={() => navigate(`/app/budgets/${result.budgetId}/editor`)}
-            className="bg-[#2D8D68] hover:bg-[#1B5E4B] text-white font-semibold px-6 py-2.5 rounded-lg text-sm transition-colors"
+            className="min-h-11 sm:min-h-0 bg-[#2D8D68] hover:bg-[#1B5E4B] text-white font-semibold px-6 py-2.5 rounded-lg text-sm transition-colors"
           >
             Abrir el presupuesto
           </button>
           <button
             onClick={() => navigate('/app/dashboard')}
-            className="bg-white border text-gray-600 px-6 py-2.5 rounded-lg text-sm hover:bg-gray-50 transition-colors"
+            className="min-h-11 sm:min-h-0 bg-white border text-gray-600 px-6 py-2.5 rounded-lg text-sm hover:bg-gray-50 transition-colors"
           >
             Volver a Mis presupuestos
           </button>
@@ -1590,10 +1598,10 @@ function AIReviewPanel({
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col">
+    <div className="fixed inset-0 z-[70] bg-black/40 flex items-center justify-center md:p-4">
+      <div className="bg-white md:rounded-2xl shadow-2xl w-full h-full md:h-auto max-w-3xl md:max-h-[90vh] flex flex-col" role="dialog" aria-modal="true" aria-label="Revisión de los trabajos que encontró la IA">
         {/* Header */}
-        <div className="bg-[#2D8D68] text-white rounded-t-2xl px-6 py-4 flex-shrink-0">
+        <div className="bg-[#2D8D68] text-white md:rounded-t-2xl px-4 md:px-6 py-4 flex-shrink-0">
           <div className="flex items-center gap-2 mb-1">
             <CheckCircle size={18} />
             <span className="font-bold text-base">REVISIÓN DE LOS TRABAJOS QUE ENCONTRÓ LA IA</span>
@@ -1610,18 +1618,18 @@ function AIReviewPanel({
         </div>
 
         {/* Toolbar */}
-        <div className="px-6 py-2.5 border-b bg-gray-50 flex items-center justify-between flex-shrink-0">
+        <div className="px-4 md:px-6 py-1 md:py-2.5 border-b bg-gray-50 flex items-center justify-between flex-shrink-0">
           <div className="flex items-center gap-3">
             <button
               onClick={() => setItems((prev) => prev.map((i) => ({ ...i, accepted: true })))}
-              className="text-[10px] font-medium text-[#2D8D68] hover:text-[#1B5E4B] transition-colors"
+              className="min-h-10 md:min-h-0 text-xs md:text-[10px] font-medium text-[#2D8D68] hover:text-[#1B5E4B] transition-colors"
             >
               Tildar todos
             </button>
             <span className="text-gray-300">|</span>
             <button
               onClick={() => setItems((prev) => prev.map((i) => ({ ...i, accepted: false })))}
-              className="text-[10px] font-medium text-gray-500 hover:text-gray-700 transition-colors"
+              className="min-h-10 md:min-h-0 text-xs md:text-[10px] font-medium text-gray-500 hover:text-gray-700 transition-colors"
             >
               Destildar todos
             </button>
@@ -1636,7 +1644,7 @@ function AIReviewPanel({
           {items.map((item) => (
             <div
               key={item._key}
-              className={`px-6 py-3 flex items-start gap-3 transition-colors ${
+              className={`px-4 md:px-6 py-3 flex items-start gap-3 transition-colors ${
                 item.accepted ? 'bg-white' : 'bg-gray-50 opacity-60'
               }`}
             >
@@ -1646,7 +1654,7 @@ function AIReviewPanel({
                 role="checkbox"
                 aria-checked={item.accepted}
                 aria-label={item.descripcion}
-                className={`mt-0.5 w-5 h-5 rounded border-2 flex-shrink-0 flex items-center justify-center transition-colors ${
+                className={`mt-0.5 w-6 h-6 md:w-5 md:h-5 rounded border-2 flex-shrink-0 flex items-center justify-center transition-colors ${
                   item.accepted
                     ? 'bg-[#2D8D68] border-[#2D8D68] text-white'
                     : 'border-gray-300 hover:border-[#2D8D68]'
@@ -1659,7 +1667,7 @@ function AIReviewPanel({
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-[10px] text-gray-400 font-mono">{item.codigo}</span>
-                  <span className="text-xs font-medium text-gray-800 flex-1 min-w-0 truncate">
+                  <span className="text-xs font-medium text-gray-800 basis-full md:basis-auto order-first md:order-none flex-1 min-w-0 md:truncate">
                     {item.descripcion}
                   </span>
                   <span className="text-[10px] text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded flex-shrink-0">
@@ -1673,7 +1681,7 @@ function AIReviewPanel({
                       onChange={(e) => updateCantidad(item._key, e.target.value)}
                       step="0.1"
                       min="0"
-                      className="w-16 text-xs text-right border border-gray-200 rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-[#2D8D68]/30 focus:border-[#2D8D68]"
+                      className="w-20 md:w-16 min-h-10 md:min-h-0 text-xs text-right border border-gray-200 rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-[#2D8D68]/30 focus:border-[#2D8D68]"
                     />
                   </div>
                 </div>
@@ -1699,24 +1707,24 @@ function AIReviewPanel({
 
         {/* Error: above the buttons */}
         {error && (
-          <div role="alert" className="bg-red-50 border-t border-red-200 text-red-700 text-xs px-6 py-2.5 flex-shrink-0">
+          <div role="alert" className="bg-red-50 border-t border-red-200 text-red-700 text-xs px-4 md:px-6 py-2.5 flex-shrink-0">
             {error}
           </div>
         )}
 
         {/* Footer */}
-        <div className="px-6 py-4 border-t bg-gray-50 rounded-b-2xl flex items-center justify-between flex-shrink-0">
+        <div className="px-4 md:px-6 py-3 md:py-4 border-t bg-gray-50 md:rounded-b-2xl flex flex-col-reverse sm:flex-row sm:items-center justify-between gap-2 flex-shrink-0" style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}>
           <button
             onClick={onCancel}
             disabled={confirming}
-            className="text-sm text-gray-500 hover:text-gray-700 disabled:opacity-40 transition-colors"
+            className="min-h-10 sm:min-h-0 text-sm text-gray-500 hover:text-gray-700 disabled:opacity-40 transition-colors"
           >
             Cancelar (no se crea nada)
           </button>
           <button
             onClick={onConfirm}
             disabled={confirming}
-            className="bg-[#2D8D68] hover:bg-[#1B5E4B] disabled:opacity-50 text-white font-semibold px-6 py-2.5 rounded-lg text-sm transition-colors flex items-center gap-2"
+            className="min-h-11 sm:min-h-0 justify-center bg-[#2D8D68] hover:bg-[#1B5E4B] disabled:opacity-50 text-white font-semibold px-6 py-2.5 rounded-lg text-sm transition-colors flex items-center gap-2"
           >
             {confirming && (
               <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
@@ -1752,7 +1760,7 @@ function OptionCard({
     <button
       onClick={onClick}
       aria-pressed={active}
-      className={`p-4 rounded-lg border-2 text-left transition-all ${
+      className={`p-3 md:p-4 rounded-lg border-2 text-left transition-all ${
         active
           ? 'border-[#2D8D68] bg-[#E8F5EE]'
           : 'border-gray-200 bg-white hover:border-gray-300'

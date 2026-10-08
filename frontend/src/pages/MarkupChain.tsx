@@ -52,22 +52,23 @@ function PctInput({
 }) {
   if (readOnly) {
     return (
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-1 flex-shrink-0">
         <span className="w-16 text-right px-2 py-1 text-sm font-semibold text-gray-800 tabular-nums">{value}</span>
         <span className="text-sm text-gray-500 font-medium">%</span>
       </div>
     )
   }
   return (
-    <div className="flex items-center gap-1">
+    <div className="flex items-center gap-1 flex-shrink-0">
       <input
         type="number"
+        inputMode="decimal"
         step="0.1"
         min="0"
         max="100"
         value={value}
         onChange={(e) => onChange(parseFloat(e.target.value) || 0)}
-        className="w-16 text-right px-2 py-1 text-sm font-semibold border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-[#2D8D68] focus:ring-2 focus:ring-[#2D8D68]/20 tabular-nums"
+        className="w-16 max-md:w-20 max-md:min-h-10 text-right px-2 py-1 text-sm font-semibold border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-[#2D8D68] focus:ring-2 focus:ring-[#2D8D68]/20 tabular-nums"
       />
       <span className="text-sm text-gray-500 font-medium">%</span>
     </div>
@@ -257,7 +258,7 @@ export default function MarkupChain() {
   const precioPor100 = cascadaIndirectos(100, indirectosCompletos(cfg)).neto
 
   return (
-    <div className="p-6 fade-in">
+    <div className="p-4 md:p-6 fade-in">
       <div className="flex items-center gap-2 text-[#2D8D68] text-[11px] font-bold tracking-wider mb-1">
         <Settings size={14} /> CONFIGURACIÓN
       </div>
@@ -286,7 +287,7 @@ export default function MarkupChain() {
               </p>
               <button
                 onClick={() => setIntento((n) => n + 1)}
-                className="mt-2 text-xs font-semibold bg-white border border-red-200 rounded-lg px-3 py-1.5 hover:bg-red-100"
+                className="mt-2 max-md:min-h-10 text-xs font-semibold bg-white border border-red-200 rounded-lg px-3 py-1.5 hover:bg-red-100"
               >
                 Probar de nuevo
               </button>
@@ -305,19 +306,19 @@ export default function MarkupChain() {
       <div className="max-w-lg">
         {!cargaFallo && <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
           {/* Header */}
-          <div className="bg-[#E8F5EE] px-6 py-4 border-b border-[#2D8D68]/20">
+          <div className="bg-[#E8F5EE] px-4 md:px-6 py-4 border-b border-[#2D8D68]/20">
             <h2 className="text-[#143D34] font-bold text-base">Parámetros de costos</h2>
             <p className="text-[#2D8D68] text-xs mt-0.5">
               Costo directo → + Indirectos → + Beneficio → + Impuestos = Precio sin IVA → + IVA = Precio con IVA
             </p>
           </div>
 
-          <div className="px-6 pb-6">
+          <div className="px-4 md:px-6 pb-5 md:pb-6">
             {/* ── COSTOS INDIRECTOS ── */}
             <SectionDivider label="Costos indirectos" />
             <div className="space-y-2">
               {INDIRECTO_FIELDS.map((f) => (
-                <div key={f.key} className="flex items-center justify-between">
+                <div key={f.key} className="flex items-center justify-between gap-3">
                   <span className="text-sm text-gray-700">
                     {f.label}
                     <GeneralHint general={general} field={f.key} value={cfg[f.key] as number} />
@@ -338,7 +339,7 @@ export default function MarkupChain() {
 
             {/* ── BENEFICIO ── */}
             <SectionDivider label="Beneficio" />
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-3">
               <div>
                 <span className="text-sm text-gray-700">Beneficio</span>
                 <span className="ml-2 text-[11px] text-gray-400">(sobre el subtotal con indirectos)</span>
@@ -354,7 +355,7 @@ export default function MarkupChain() {
             <SectionDivider label="Impuestos" />
             <div className="space-y-2">
               {IMPUESTO_FIELDS.map((f) => (
-                <div key={f.key} className="flex items-center justify-between">
+                <div key={f.key} className="flex items-center justify-between gap-3">
                   <div>
                     <span className="text-sm text-gray-700">{f.label}</span>
                     {f.hint && (
@@ -372,7 +373,7 @@ export default function MarkupChain() {
 
             {/* ── IVA ── */}
             <SectionDivider label="IVA" />
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-3">
               <div>
                 <span className="text-sm text-gray-700">IVA</span>
                 <span className="ml-2 text-[11px] text-gray-400">(sobre el precio sin IVA)</span>
@@ -387,18 +388,18 @@ export default function MarkupChain() {
             {/* ── DESPERDICIO ── */}
             <SectionDivider label="Desperdicio" />
             <div className="space-y-2">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-3">
                 <div>
                   <span className="text-sm text-gray-700">General</span>
                   <span className="ml-2 text-[11px] text-gray-400">(toda la empresa)</span>
                 </div>
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-1 flex-shrink-0">
                   {puedeGuardar ? (
                   <input
                     value={orgWaste}
                     placeholder="0"
                     onChange={(e) => setOrgWaste(e.target.value)}
-                    className="w-16 text-right px-2 py-1 text-sm font-semibold border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-[#2D8D68] tabular-nums"
+                    className="w-16 max-md:w-20 max-md:min-h-10 text-right px-2 py-1 text-sm font-semibold border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-[#2D8D68] tabular-nums"
                   />
                   ) : (
                     <span className="w-16 text-right px-2 py-1 text-sm font-semibold text-gray-800 tabular-nums">{orgWaste || '—'}</span>
@@ -406,18 +407,18 @@ export default function MarkupChain() {
                   <span className="text-sm text-gray-500 font-medium">%</span>
                 </div>
               </div>
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-3">
                 <div>
                   <span className="text-sm text-gray-700">Este presupuesto</span>
                   <span className="ml-2 text-[11px] text-gray-400">(vacío = hereda fórmula / general)</span>
                 </div>
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-1 flex-shrink-0">
                   {puedeGuardar ? (
                   <input
                     value={budgetWaste}
                     placeholder={orgWaste || '0'}
                     onChange={(e) => setBudgetWaste(e.target.value)}
-                    className="w-16 text-right px-2 py-1 text-sm font-semibold border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-[#2D8D68] tabular-nums"
+                    className="w-16 max-md:w-20 max-md:min-h-10 text-right px-2 py-1 text-sm font-semibold border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-[#2D8D68] tabular-nums"
                   />
                   ) : (
                     <span className="w-16 text-right px-2 py-1 text-sm font-semibold text-gray-800 tabular-nums">{budgetWaste || '—'}</span>
@@ -441,7 +442,7 @@ export default function MarkupChain() {
             {/* Save */}
             <div className={`${!id && puedeGuardar ? 'mt-3' : 'mt-6'} flex items-center justify-end gap-x-4 gap-y-2 flex-wrap`}>
               {id && esAdmin && (
-                <label className="flex items-center gap-2 text-xs text-gray-600">
+                <label className="flex items-center gap-2 text-xs text-gray-600 max-md:min-h-10">
                   <input type="checkbox" checked={alsoGeneral} onChange={(e) => setAlsoGeneral(e.target.checked)} />
                   Usar también como valores generales
                 </label>
@@ -450,7 +451,7 @@ export default function MarkupChain() {
               <button
                 onClick={handleSave}
                 disabled={saving || loading || !!confirmar}
-                className="bg-[#2D8D68] hover:bg-[#1B5E4B] disabled:opacity-60 text-white font-semibold px-6 py-2.5 rounded-xl text-sm transition-colors flex items-center gap-2 shadow-sm"
+                className="max-sm:w-full justify-center min-h-11 sm:min-h-0 bg-[#2D8D68] hover:bg-[#1B5E4B] disabled:opacity-60 text-white font-semibold px-6 py-2.5 rounded-xl text-sm transition-colors flex items-center gap-2 shadow-sm"
               >
                 {saving && (
                   <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
@@ -475,13 +476,13 @@ export default function MarkupChain() {
                   <button
                     autoFocus
                     onClick={() => void guardar()}
-                    className="bg-[#2D8D68] hover:bg-[#1B5E4B] text-white font-semibold px-5 py-2 rounded-xl text-sm"
+                    className="flex-1 sm:flex-none min-h-11 sm:min-h-0 bg-[#2D8D68] hover:bg-[#1B5E4B] text-white font-semibold px-5 py-2 rounded-xl text-sm"
                   >
                     Seguir
                   </button>
                   <button
                     onClick={() => setConfirmar(null)}
-                    className="bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 font-medium px-5 py-2 rounded-xl text-sm"
+                    className="flex-1 sm:flex-none min-h-11 sm:min-h-0 bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 font-medium px-5 py-2 rounded-xl text-sm"
                   >
                     Cancelar
                   </button>
@@ -511,15 +512,15 @@ export default function MarkupChain() {
         {/* Recalculate the whole budget (solo con una obra abierta) */}
         {puedeEditar && id && (
         <div className="mt-4 bg-white rounded-xl border border-gray-100 shadow-sm p-4">
-          <div className="flex items-center justify-between gap-3">
-            <div>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex-1 min-w-[200px]">
               <div className="text-sm font-semibold text-gray-800">Recalcular obra</div>
               <div className="text-[11px] text-gray-400">Fórmulas, desperdicio heredado, redondeo a unidad de compra e indirectos.</div>
             </div>
             <button
               onClick={handleRecalc}
               disabled={recalculating}
-              className="border border-[#2D8D68] text-[#2D8D68] hover:bg-[#E8F5EE] disabled:opacity-60 font-semibold px-4 py-2 rounded-xl text-sm"
+              className="max-sm:w-full min-h-11 sm:min-h-0 border border-[#2D8D68] text-[#2D8D68] hover:bg-[#E8F5EE] disabled:opacity-60 font-semibold px-4 py-2 rounded-xl text-sm"
             >
               {recalculating ? 'Recalculando...' : 'Recalcular'}
             </button>
@@ -534,7 +535,8 @@ export default function MarkupChain() {
                 </ul>
               )}
               {recalc.redondeos.length > 0 && (
-                <table className="w-full text-[11px]">
+                <div className="overflow-x-auto">
+                <table className="w-full min-w-[420px] md:min-w-0 text-[11px]">
                   <thead className="text-gray-500">
                     <tr>
                       <th className="text-left font-medium py-1">Material</th>
@@ -554,6 +556,7 @@ export default function MarkupChain() {
                     ))}
                   </tbody>
                 </table>
+                </div>
               )}
             </div>
           )}

@@ -256,7 +256,7 @@ export default function Export() {
               </div>
               <button
                 onClick={() => void cargar()}
-                className="text-xs font-semibold bg-white border border-red-200 rounded-lg px-3 py-1.5 hover:bg-red-100"
+                className="max-md:min-h-10 text-xs font-semibold bg-white border border-red-200 rounded-lg px-3 py-1.5 hover:bg-red-100"
               >
                 Probar de nuevo
               </button>
@@ -349,7 +349,7 @@ function AvisoRojos({ rojos, budgetId }: { rojos: BudgetItem[]; budgetId: string
           <Link
             to={`/app/budgets/${budgetId}/editor`}
             data-testid="ver-cuales"
-            className="mt-2 inline-flex items-center gap-1 text-xs font-semibold bg-white border border-amber-300 text-amber-900 rounded-lg px-3 py-1.5 hover:bg-amber-100"
+            className="mt-2 max-md:min-h-10 inline-flex items-center gap-1 text-xs font-semibold bg-white border border-amber-300 text-amber-900 rounded-lg px-3 py-1.5 hover:bg-amber-100"
           >
             Ver cuáles
           </Link>
@@ -460,7 +460,7 @@ function TarjetaOpcion({
               <p className="mt-0.5 [overflow-wrap:anywhere]">{estado.mensaje}</p>
               <button
                 onClick={onDescargar}
-                className="mt-2 inline-flex items-center gap-1 font-semibold bg-white border border-red-200 rounded-lg px-3 py-1.5 hover:bg-red-100"
+                className="mt-2 max-md:min-h-10 inline-flex items-center gap-1 font-semibold bg-white border border-red-200 rounded-lg px-3 py-1.5 hover:bg-red-100"
               >
                 <RefreshCw size={12} /> Probar de nuevo
               </button>

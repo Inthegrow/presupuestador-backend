@@ -82,36 +82,36 @@ export default function Dashboard() {
   const totalNeto = Object.values(analyses).reduce((s, a) => s + (a.neto_total ?? 0), 0)
 
   return (
-    <div className="p-6 fade-in">
+    <div className="p-4 md:p-6 fade-in">
       {/* Section header */}
       <div className="flex items-center gap-2 text-[#2D8D68] text-[11px] font-bold tracking-wider mb-1">
         <LayoutGrid size={14} />
         CENTRO DE PRESUPUESTOS
       </div>
-      <div className="flex items-center justify-between mb-1">
-        <div className="flex items-center gap-3">
-          <div className="w-1 h-8 bg-[#2D8D68] rounded-full" />
-          <h1 className="text-2xl font-extrabold text-gray-900">MIS PRESUPUESTOS</h1>
-          <span className="bg-[#E8F5EE] text-[#1B5E4B] text-xs font-medium px-2 py-0.5 rounded-full">
+      <div className="flex items-center justify-between gap-3 mb-1">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-1 h-8 bg-[#2D8D68] rounded-full flex-shrink-0" />
+          <h1 className="text-xl md:text-2xl font-extrabold text-gray-900">MIS PRESUPUESTOS</h1>
+          <span className="bg-[#E8F5EE] text-[#1B5E4B] text-xs font-medium px-2 py-0.5 rounded-full whitespace-nowrap">
             {budgets.length} {budgets.length === 1 ? 'obra' : 'obras'}
           </span>
         </div>
         {puedeEditar && (
           <button
             onClick={() => navigate('/app/new-project')}
-            className="bg-[#2D8D68] hover:bg-[#1B5E4B] text-white font-semibold px-4 py-2 rounded-lg text-xs flex items-center gap-1.5 transition-colors"
+            className="hidden md:flex bg-[#2D8D68] hover:bg-[#1B5E4B] text-white font-semibold px-4 py-2 rounded-lg text-xs items-center gap-1.5 transition-colors flex-shrink-0"
           >
             <Plus size={14} /> Nuevo presupuesto
           </button>
         )}
       </div>
-      <p className="text-sm text-gray-500 mb-6 pl-4">
+      <p className="text-sm text-gray-500 mb-5 md:mb-6 pl-4">
         Las obras cargadas. Entrá a una para ver el detalle o compararla con el Excel.
       </p>
 
       {/* KPI cards */}
       <div className="text-[10px] font-bold text-gray-400 tracking-wider mb-2">RESUMEN GENERAL</div>
-      <div className="grid grid-cols-3 gap-3 mb-6">
+      <div className="grid grid-cols-3 gap-2 md:gap-3 mb-6">
         <KpiCard icon={<LayoutGrid size={16} strokeWidth={1.5} className="text-[#2D8D68]" />} bg="bg-[#E8F5EE]" value={String(budgets.length)} label="OBRAS" />
         <KpiCard icon={<TrendingUp size={16} strokeWidth={1.5} className="text-blue-600" />} bg="bg-blue-50" value={String(totalItems)} label="TRABAJOS CARGADOS" valueClass="text-blue-600" />
         <KpiCard icon={<DollarSign size={16} strokeWidth={1.5} className="text-[#2D8D68]" />} bg="bg-[#E8F5EE]" value={totalNeto > 0 ? fmtCurrency(totalNeto) : '$0'} label="TOTAL DE LA CARTERA, SIN IVA" />
@@ -120,14 +120,14 @@ export default function Dashboard() {
       {/* Search and filter */}
       <div className="mb-4 flex flex-col gap-3">
         {/* Search input */}
-        <div className="relative max-w-sm">
+        <div className="relative md:max-w-sm">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
           <input
             type="text"
             placeholder="Buscar presupuesto..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-9 pr-4 py-2 text-sm border border-gray-200 rounded-xl bg-white focus:outline-none focus:border-[#2D8D68] focus:ring-2 focus:ring-[#2D8D68]/20 transition-all"
+            className="w-full pl-9 pr-4 py-2.5 md:py-2 text-sm border border-gray-200 rounded-xl bg-white focus:outline-none focus:border-[#2D8D68] focus:ring-2 focus:ring-[#2D8D68]/20 transition-all"
           />
         </div>
         {/* Status filter pills */}
@@ -136,7 +136,7 @@ export default function Dashboard() {
             <button
               key={pill.key}
               onClick={() => setStatusFilter(pill.key)}
-              className={`px-3 py-1 rounded-full text-xs font-medium transition-all ${
+              className={`px-4 md:px-3 min-h-10 md:min-h-0 py-1 rounded-full text-[13px] md:text-xs font-medium transition-all ${
                 statusFilter === pill.key
                   ? 'bg-[#2D8D68] text-white shadow-sm'
                   : 'bg-white border border-gray-200 text-gray-600 hover:border-[#2D8D68] hover:text-[#2D8D68]'
@@ -145,7 +145,7 @@ export default function Dashboard() {
               {pill.label}
             </button>
           ))}
-          <span className="ml-auto text-[11px] text-gray-400">
+          <span className="w-full md:w-auto text-right md:ml-auto text-[11px] text-gray-400">
             Mostrando {filteredBudgets.length} de {budgets.length} presupuestos
           </span>
         </div>
@@ -203,7 +203,7 @@ export default function Dashboard() {
           <p className="text-gray-500 text-sm">No hay presupuestos que coincidan con la búsqueda.</p>
         </div>
       )}
-      <div className="grid grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4 mb-6">
         {filteredBudgets.map((b) => {
           const a = analyses[b.id]
           return (
@@ -234,14 +234,14 @@ export default function Dashboard() {
               return (
                 <div
                   key={b.id}
-                  className={`flex justify-between items-center py-2 cursor-pointer hover:bg-gray-50 rounded-lg px-2 -mx-2 transition-colors ${i < Math.min(budgets.length, 5) - 1 ? 'border-b border-gray-50' : ''}`}
-                  onClick={() => navigate(`/app/budget/${b.id}`)}
+                  className={`flex justify-between items-center gap-3 min-h-11 py-2 cursor-pointer hover:bg-gray-50 rounded-lg px-2 -mx-2 transition-colors ${i < Math.min(budgets.length, 5) - 1 ? 'border-b border-gray-50' : ''}`}
+                  onClick={() => navigate(`/app/budgets/${b.id}/editor`)}
                 >
-                  <div>
+                  <div className="min-w-0">
                     <span className="font-semibold text-gray-900">{b.name}</span>
                     {detail && <span className="text-gray-500 ml-2">{detail}</span>}
                   </div>
-                  <span className="text-gray-400 text-xs whitespace-nowrap ml-4">
+                  <span className="text-gray-400 text-xs whitespace-nowrap">
                     {dateStr ? timeAgo(dateStr) : ''}
                   </span>
                 </div>
@@ -264,13 +264,13 @@ function KpiCard({
   valueClass?: string
 }) {
   return (
-    <div className="relative overflow-hidden rounded-xl p-4 bg-gradient-to-br from-white to-gray-50/50 shadow-sm border border-gray-100">
+    <div className="relative overflow-hidden rounded-xl p-3 md:p-4 bg-gradient-to-br from-white to-gray-50/50 shadow-sm border border-gray-100">
       <div className={`absolute top-0 left-0 w-full h-0.5 ${bg}`} />
       <div className="flex items-center gap-2 mb-1">
         <div className={`w-7 h-7 ${bg} rounded-lg flex items-center justify-center`}>{icon}</div>
       </div>
-      <div className={`text-2xl font-bold ${valueClass}`}>{value}</div>
-      <div className="text-[10px] text-gray-400 uppercase tracking-wider">{label}</div>
+      <div className={`text-xl md:text-2xl font-bold tabular-nums ${valueClass}`}>{value}</div>
+      <div className="text-[10px] text-gray-400 uppercase tracking-wider leading-snug">{label}</div>
     </div>
   )
 }
