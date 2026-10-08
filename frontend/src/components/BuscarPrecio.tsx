@@ -4,7 +4,7 @@ import {
   AlertTriangle, CheckCircle2, ExternalLink, Globe, Info, Pencil, RefreshCw, Search, Store, X,
 } from 'lucide-react'
 import { ApiError, catalogApi, mensajeDeError, preciosApi } from '../lib/api'
-import type { OpcionPrecio, ResultadoBusquedaPrecio } from '../lib/api'
+import type { EstadoBuscador, OpcionPrecio, ResultadoBusquedaPrecio } from '../lib/api'
 import { fmtPesos, todayIso, unidadEnPalabras } from '../lib/format'
 import { dominio, fechaCorta, unidadNormal, urlSegura } from '../lib/origen'
 import type { CatalogEntry, PriceCatalog } from '../types'
@@ -19,6 +19,55 @@ export function IconoBuscarInternet({ size = 14, className = '' }: { size?: numb
         <Search size={Math.max(8, Math.round(size * 0.62))} strokeWidth={3} />
       </span>
     </span>
+  )
+}
+
+// ─── ¿El buscador está listo? ──────────────────────────────────────────────────
+
+// Lo último que se supo, para no mostrar "cargando" cada vez que se abre el panel. undefined = todavía no se sabe;
+// null = el servidor no lo dice (uno de antes, o no respondió): no se muestra nada.
+let ultimoEstado: EstadoBuscador | null | undefined
+
+/** Si el servidor tiene la clave de OpenAI (GET /precios/buscador). Se vuelve a preguntar cada vez que se monta. */
+export function useEstadoBuscador(): EstadoBuscador | null | undefined {
+  const [estado, setEstado] = useState<EstadoBuscador | null | undefined>(ultimoEstado)
+  useEffect(() => {
+    let vivo = true
+    preciosApi
+      .estado()
+      .then((r) => (r && typeof r.configurado === 'boolean' ? r : null))
+      .catch(() => null)
+      .then((r) => {
+        ultimoEstado = r
+        if (vivo) setEstado(r)
+      })
+    return () => { vivo = false }
+  }, [])
+  return estado
+}
+
+/** El estado del buscador, chico, para poner junto a "Buscar un precio". */
+export function EstadoBuscadorChip({ className = '' }: { className?: string }) {
+  const estado = useEstadoBuscador()
+  if (!estado) return null
+  return estado.configurado ? (
+    <p
+      data-testid="estado-buscador"
+      data-configurado="si"
+      title={estado.modelo ? `Busca con ${estado.modelo}` : undefined}
+      className={`inline-flex items-center gap-1.5 text-[11px] font-medium text-[#1B5E4B] ${className}`}
+    >
+      <span className="w-2 h-2 rounded-full bg-[#2D8D68] flex-shrink-0" aria-hidden />
+      Buscador listo
+    </p>
+  ) : (
+    <div data-testid="estado-buscador" data-configurado="no" className={`text-[11px] leading-snug ${className}`}>
+      <p className="inline-flex items-center gap-1.5 font-medium text-gray-600">
+        <span className="w-2 h-2 rounded-full bg-gray-400 flex-shrink-0" aria-hidden />
+        Buscador sin configurar
+      </p>
+      <p className="text-gray-400">Falta la clave de OpenAI en el servidor (Render)</p>
+    </div>
   )
 }
 
@@ -102,8 +151,24 @@ type Busqueda =
   | { tipo: 'buscando' }
   // unidad: la unidad con la que se buscó; las cuentas de las opciones son por esa unidad
   | { tipo: 'resultados'; res: ResultadoBusquedaPrecio; opciones: OpcionPrecio[]; unidad: string }
-  | { tipo: 'error'; mensaje: string }
+  // codigo: CLAVE_INVALIDA, SIN_CREDITO, TIEMPO, MODELO, ERROR_BUSQUEDA (lo que diga el servidor)
+  | { tipo: 'error'; mensaje: string; codigo: string | null }
   | { tipo: 'no_configurado'; mensaje: string }
+
+/** El `codigo` de un error del buscador ({codigo, mensaje} en `detail`), si vino. */
+function codigoDeError(err: unknown): string | null {
+  if (!(err instanceof ApiError)) return null
+  const d = err.detail
+  return d && typeof d === 'object' && typeof (d as { codigo?: unknown }).codigo === 'string' ? (d as { codigo: string }).codigo : null
+}
+
+// Título de cada error y qué hacer, cuando el arreglo no está en manos de Sol (el mensaje del servidor va debajo)
+const TITULO_ERROR: Record<string, { titulo: string; quien?: string }> = {
+  CLAVE_INVALIDA: { titulo: 'La clave de OpenAI no anda', quien: 'La cambia quien administra la app, en el servidor (Render).' },
+  SIN_CREDITO: { titulo: 'OpenAI no atiende ahora' },
+  TIEMPO: { titulo: 'La búsqueda tardó demasiado' },
+  MODELO: { titulo: 'OpenAI no acepta el modelo configurado', quien: 'Lo revisa quien administra la app, en el servidor (Render).' },
+}
 
 // ─── Panel ─────────────────────────────────────────────────────────────────────
 
@@ -130,6 +195,7 @@ export default function BuscarPrecio({
   const [codigo, setCodigo] = useState(inicial.codigo)
   const [busqueda, setBusqueda] = useState<Busqueda>({ tipo: 'nada' })
   const pedido = useRef(0)
+  const estado = useEstadoBuscador()
 
   // Listas oficiales (para 'recurso' y 'nueva')
   const [oficiales, setOficiales] = useState<PriceCatalog[] | null>(null)
@@ -204,10 +270,11 @@ export default function BuscarPrecio({
       setBusqueda({ tipo: 'resultados', res, opciones, unidad: unidadBuscada })
     } catch (err) {
       if (req !== pedido.current) return
-      if (err instanceof ApiError && err.status === 503) {
+      const codigo = codigoDeError(err)
+      if (codigo === 'NO_CONFIGURADO' || (err instanceof ApiError && err.status === 503 && !codigo)) {
         setBusqueda({ tipo: 'no_configurado', mensaje: mensajeDeError(err, 'El buscador de precios no está configurado.') })
       } else {
-        setBusqueda({ tipo: 'error', mensaje: mensajeDeError(err, 'No pude buscar el precio. Probá de nuevo.') })
+        setBusqueda({ tipo: 'error', codigo, mensaje: mensajeDeError(err, 'No pude buscar el precio. Probá de nuevo.') })
       }
     }
   }
@@ -334,6 +401,20 @@ export default function BuscarPrecio({
         </div>
 
         <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 sm:p-5 space-y-4">
+          {/* Sin la clave en el servidor: se avisa antes de buscar (buscar igual se puede: si ya la pusieron, anda) */}
+          {estado?.configurado === false && busqueda.tipo === 'nada' && (
+            <div role="status" data-testid="aviso-sin-configurar" className="flex items-start gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-xs text-gray-700">
+              <Info size={14} className="flex-shrink-0 mt-px text-gray-500" />
+              <div className="min-w-0">
+                <p className="font-semibold">El buscador todavía no está configurado</p>
+                <p className="mt-0.5 text-gray-600">
+                  Falta la clave de OpenAI en el servidor (Render): la agrega quien administra la app. Hasta entonces la
+                  búsqueda no va a encontrar nada; el precio se puede cargar a mano en la lista.
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* La búsqueda, armada y editable */}
           <form onSubmit={buscar} className="space-y-2" aria-label="La búsqueda">
             <div className="grid grid-cols-[minmax(0,1fr)_5.5rem] gap-2">
@@ -438,8 +519,12 @@ export default function BuscarPrecio({
                 <Info size={16} className="flex-shrink-0 mt-0.5 text-gray-500" />
                 <div className="min-w-0">
                   <p className="font-semibold">El buscador de precios no está configurado</p>
+                  {busqueda.mensaje && !/^El buscador de precios no está configurado\.?$/.test(busqueda.mensaje.trim()) && (
+                    <p className="text-xs mt-1 text-gray-700 [overflow-wrap:anywhere]">{busqueda.mensaje}</p>
+                  )}
                   <p className="text-xs mt-1 text-gray-600">
-                    Lo activa quien administra la app. Mientras tanto, podés cargar el precio a mano en la lista; el resto de la app funciona igual.
+                    Falta la clave de OpenAI en el servidor (Render): la agrega quien administra la app. Mientras tanto,
+                    podés cargar el precio a mano en la lista; el resto de la app funciona igual.
                   </p>
                 </div>
               </div>
@@ -452,8 +537,11 @@ export default function BuscarPrecio({
               <div className="flex items-start gap-2">
                 <AlertTriangle size={14} className="flex-shrink-0 mt-px" />
                 <div className="min-w-0 flex-1">
-                  <p className="font-semibold">No pude buscar el precio</p>
-                  <p className="mt-0.5 [overflow-wrap:anywhere]">{busqueda.mensaje}</p>
+                  <p className="font-semibold">{(busqueda.codigo && TITULO_ERROR[busqueda.codigo]?.titulo) || 'No pude buscar el precio'}</p>
+                  <p className="mt-0.5 [overflow-wrap:anywhere] whitespace-pre-line" data-testid="buscador-error-mensaje">{busqueda.mensaje}</p>
+                  {busqueda.codigo && TITULO_ERROR[busqueda.codigo]?.quien && (
+                    <p className="mt-1 text-red-800/80">{TITULO_ERROR[busqueda.codigo].quien}</p>
+                  )}
                   <button
                     onClick={() => void buscar()}
                     className="mt-2 min-h-10 sm:min-h-0 inline-flex items-center gap-1 font-semibold bg-white border border-red-200 rounded-lg px-3 py-1.5 hover:bg-red-100"

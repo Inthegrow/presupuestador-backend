@@ -1,92 +1,168 @@
-import { Fragment, useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useId, useRef, useState } from 'react'
 import {
-  BookOpen, Check, CheckCircle, ChevronDown, ChevronRight, FileSpreadsheet, History, Pencil, Plus,
+  AlertTriangle, BookOpen, Check, CheckCircle, ChevronDown, ChevronRight, Download, FileSpreadsheet, History, Pencil, Plus,
   Search, Trash2, Upload, X, Zap,
 } from 'lucide-react'
-import { budgetApi, catalogApi, textoDeError } from '../lib/api'
+import { budgetApi, catalogApi, mensajeDeError, textoDeError } from '../lib/api'
 import { useAuth } from '../contexts/AuthContext'
 import { fmtCurrency, fmtDate, fmtPesos, todayIso } from '../lib/format'
-import BuscarPrecio, { IconoBuscarInternet } from '../components/BuscarPrecio'
+import BuscarPrecio, { EstadoBuscadorChip, IconoBuscarInternet } from '../components/BuscarPrecio'
 import type { PrecioGuardado } from '../components/BuscarPrecio'
 import OrigenPrecio from '../components/OrigenPrecio'
 import type { Budget, CatalogEntry, CatalogPriceHistory, PriceCatalog } from '../types'
 
-// ─── Inline CSV upload form ────────────────────────────────────────────────────
+// ─── Subir una lista desde un archivo (.csv) ───────────────────────────────────
 
-function UploadForm({ onSuccess, onCancel }: { onSuccess: (catalog: PriceCatalog) => void; onCancel: () => void }) {
+/** El .csv de ejemplo: como lo guarda el Excel en castellano (";" y precios con coma), con la marca UTF-8 para las tildes. */
+function csvDeEjemplo(): string {
+  const [a, m, d] = todayIso().split('-')
+  const hoy = `${d}/${m}/${a}`
+  return '\uFEFF' + [
+    'código;descripción;unidad;precio_unitario;fecha;proveedor',
+    `M-CEM50;Cemento Portland x 50 kg;bolsa;12.450,00;${hoy};Corralón de ejemplo`,
+    `M-ARENA;Arena gruesa a granel;m3;38.900,50;${hoy};Corralón de ejemplo`,
+  ].join('\r\n') + '\r\n'
+}
+
+function bajarEjemplo() {
+  const url = URL.createObjectURL(new Blob([csvDeEjemplo()], { type: 'text/csv;charset=utf-8' }))
+  const a = document.createElement('a')
+  a.href = url
+  a.download = 'ejemplo-lista-de-precios.csv'
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
+/** El nombre que se propone para la lista: el del archivo, sin ".csv". */
+const nombreDeArchivo = (f: File) => f.name.replace(/\.(csv|txt)$/i, '').trim()
+
+/** Una lista recién subida, para el aviso de arriba. */
+interface CsvSubido {
+  id: string
+  nombre: string
+  entradas: number
+  salteadas: number
+  warnings: string[]
+}
+
+function UploadForm({ onSuccess, onCancel }: { onSuccess: (r: CsvSubido) => void; onCancel: () => void }) {
   const [name, setName] = useState('')
   const [tipo, setTipo] = useState('material')
   const [file, setFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // El nombre que se propuso desde el archivo: si Sol no lo cambió, elegir otro archivo lo reemplaza
+  const propuesto = useRef('')
+  const ayudaId = useId()
+
+  function elegirArchivo(f: File | null) {
+    setFile(f)
+    setError(null)
+    if (f && (!name.trim() || name === propuesto.current)) {
+      propuesto.current = nombreDeArchivo(f)
+      setName(propuesto.current)
+    }
+  }
 
   async function handleUpload() {
-    if (!file || !name.trim()) return
+    if (!file) return
     setUploading(true)
     setError(null)
     try {
-      const catalog = await catalogApi.uploadCsv(file, name.trim(), tipo)
-      onSuccess(catalog)
+      const res = await catalogApi.uploadCsv(file, { nombre: name.trim() || undefined, tipo })
+      const id = res.catalog_id ?? res.id ?? ''
+      onSuccess({
+        id,
+        nombre: res.name || name.trim() || nombreDeArchivo(file),
+        entradas: res.entradas ?? res.entries_count ?? 0,
+        salteadas: res.salteadas ?? 0,
+        warnings: Array.isArray(res.warnings) ? res.warnings : [],
+      })
     } catch (err) {
-      setError(textoDeError(err, 'No se pudo subir el archivo.'))
+      setError(mensajeDeError(err, 'No se pudo subir el archivo. Probá de nuevo.'))
     } finally {
       setUploading(false)
     }
   }
 
+  const campo = 'w-full max-md:min-h-10 text-xs border rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-[#2D8D68]'
+  const etiqueta = 'block text-[11px] text-gray-500 mb-1 font-medium'
+
   return (
-    <div className="bg-white rounded-xl border border-[#2D8D68] p-4 mb-4 shadow-sm">
-      <div className="flex items-center gap-2 mb-3">
-        <Upload size={14} className="text-[#2D8D68]" />
+    <div className="bg-white rounded-xl border border-[#2D8D68] p-4 mb-4 shadow-sm" data-testid="subir-csv">
+      <div className="flex items-center gap-2 mb-2">
+        <Upload size={14} className="text-[#2D8D68] flex-shrink-0" />
         <span className="text-sm font-semibold text-gray-800">Lista de precios nueva, desde un archivo (.csv)</span>
       </div>
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <div>
-          <label className="block text-[11px] text-gray-500 mb-1 font-medium">Nombre de la lista *</label>
+
+      <div id={ayudaId} className="rounded-lg bg-[#F3FAF6] border border-[#C3E5D3] px-3 py-2.5 mb-3 text-[11px] text-gray-700 leading-relaxed" data-testid="columnas-csv">
+        <p>
+          El archivo necesita una columna de <strong>código</strong> y una de <strong>precio sin IVA</strong>. Puede traer
+          también <strong>descripción</strong>, <strong>unidad</strong>, <strong>fecha</strong> y <strong>proveedor</strong>.
+        </p>
+        <p className="mt-1 text-gray-600">
+          Los nombres de las columnas van con o sin tilde, en mayúsculas o minúsculas (el precio puede llamarse «precio»,
+          «precio unitario» o «precio sin IVA»). Sirve el .csv que guarda el Excel, separado con «;» o con «,», y los
+          precios escritos como «$ 1.234,50».
+        </p>
+        <button
+          type="button"
+          onClick={bajarEjemplo}
+          className="mt-2 max-md:min-h-10 inline-flex items-center gap-1.5 bg-white border border-[#2D8D68]/50 text-[#1B5E4B] hover:bg-[#E8F5EE] font-semibold px-3 py-1.5 rounded-lg transition-colors"
+        >
+          <Download size={12} /> Bajar un ejemplo (.csv)
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)_minmax(0,0.8fr)]">
+        <label className="min-w-0">
+          <span className={etiqueta}>Archivo (.csv) *</span>
+          <input
+            type="file"
+            accept=".csv,text/csv,.txt"
+            aria-describedby={ayudaId}
+            onChange={(e) => elegirArchivo(e.target.files?.[0] ?? null)}
+            className="w-full min-w-0 text-xs border rounded-lg px-2 py-1.5 max-md:min-h-10 focus:outline-none focus:ring-2 focus:ring-[#2D8D68] file:mr-2 file:text-xs file:border-0 file:bg-[#E8F5EE] file:text-[#1B5E4B] file:px-2 file:py-1 file:rounded"
+          />
+        </label>
+        <label className="min-w-0">
+          <span className={etiqueta}>Nombre de la lista (opcional)</span>
           <input
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="Ej: Materiales 2024"
-            className="w-full text-xs border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#2D8D68]"
+            placeholder="Si lo dejás vacío, va el del archivo"
+            className={campo}
           />
-        </div>
-        <div>
-          <label className="block text-[11px] text-gray-500 mb-1 font-medium">Tipo</label>
-          <select
-            value={tipo}
-            onChange={(e) => setTipo(e.target.value)}
-            className="w-full text-xs border rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-[#2D8D68]"
-          >
-            <option value="material">Material</option>
+        </label>
+        <label className="min-w-0">
+          <span className={etiqueta}>Qué precios trae</span>
+          <select value={tipo} onChange={(e) => setTipo(e.target.value)} className={campo}>
+            <option value="material">Materiales</option>
             <option value="mano_obra">Mano de obra</option>
-            <option value="equipo">Equipo</option>
-            <option value="subcontrato">Subcontrato</option>
+            <option value="equipo">Equipos</option>
+            <option value="subcontrato">Subcontratos</option>
           </select>
-        </div>
-        <div>
-          <label className="block text-[11px] text-gray-500 mb-1 font-medium">Archivo (.csv) *</label>
-          <input
-            type="file"
-            accept=".csv"
-            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-            className="w-full text-xs border rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-[#2D8D68] file:mr-2 file:text-xs file:border-0 file:bg-[#E8F5EE] file:text-[#1B5E4B] file:px-2 file:py-1 file:rounded"
-          />
-        </div>
+        </label>
       </div>
       {error && (
-        <div className="mt-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>
+        <div role="alert" data-testid="error-csv" className="mt-3 flex items-start gap-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+          <AlertTriangle size={14} className="flex-shrink-0 mt-px" />
+          <span className="min-w-0 whitespace-pre-line [overflow-wrap:anywhere]">{error}</span>
+        </div>
       )}
-      <div className="flex items-center gap-2 mt-3">
+      <div className="flex flex-wrap items-center gap-2 mt-3">
         <button
           onClick={handleUpload}
-          disabled={!file || !name.trim() || uploading}
-          className="bg-[#2D8D68] hover:bg-[#1B5E4B] disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-semibold px-4 py-2 rounded-lg transition-colors flex items-center gap-1.5"
+          disabled={!file || uploading}
+          className="max-md:min-h-10 bg-[#2D8D68] hover:bg-[#1B5E4B] disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-semibold px-4 py-2 rounded-lg transition-colors flex items-center gap-1.5"
         >
           {uploading ? (
             <>
               <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
-              Subiendo...
+              Subiendo…
             </>
           ) : (
             <><Upload size={12} /> Subir el archivo</>
@@ -94,11 +170,103 @@ function UploadForm({ onSuccess, onCancel }: { onSuccess: (catalog: PriceCatalog
         </button>
         <button
           onClick={onCancel}
-          className="text-xs px-4 py-2 rounded-lg border text-gray-600 hover:bg-gray-50 transition-colors"
+          disabled={uploading}
+          className="max-md:min-h-10 text-xs px-4 py-2 rounded-lg border text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-50"
         >
           Cancelar
         </button>
       </div>
+    </div>
+  )
+}
+
+/** Lo que dejó la subida de un .csv: cuántos precios, cuántos renglones no entraron y el paso que falta (oficial). */
+function AvisoCsvSubido({
+  subido, catalog, onOficial, onClose,
+}: {
+  subido: CsvSubido
+  catalog: PriceCatalog | undefined
+  onOficial: (c: PriceCatalog) => void
+  onClose: () => void
+}) {
+  const { esAdmin } = useAuth()
+  const [marcando, setMarcando] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [verAvisos, setVerAvisos] = useState(false)
+  const oficial = !!catalog?.oficial
+
+  async function marcarOficial() {
+    if (!catalog) return
+    setMarcando(true)
+    setError(null)
+    try {
+      const updated = await catalogApi.setOficial(catalog.id, true)
+      onOficial({ ...catalog, ...updated, oficial: true })
+    } catch (err) {
+      setError(mensajeDeError(err, 'No se pudo marcar como oficial. Probá de nuevo.'))
+    } finally {
+      setMarcando(false)
+    }
+  }
+
+  const n = subido.entradas
+  const s = subido.salteadas
+  // El servidor ya explica los renglones que no entraron ("3 renglones sin código o sin precio, no se cargaron
+  // (renglones 4, 7 y 9)"): esos avisos van primero y no se repite la cuenta
+  const avisos = [...subido.warnings].sort((a, b) => Number(/no se carg/.test(b)) - Number(/no se carg/.test(a)))
+  const explicadas = avisos.some((w) => /no se carg/.test(w))
+  const AVISOS_A_LA_VISTA = 4
+
+  return (
+    <div role="status" data-testid="csv-subido" className="flex items-start gap-2 rounded-xl border border-[#2D8D68]/30 bg-[#E8F5EE] px-3 py-2.5 text-xs text-[#143D34]">
+      <CheckCircle size={15} className="flex-shrink-0 mt-px text-[#2D8D68]" />
+      <div className="min-w-0 flex-1 [overflow-wrap:anywhere]">
+        <p className="font-semibold" data-testid="csv-subido-titulo">
+          {/* La última letra va pegada a "»." para que el punto no quede solo en un renglón */}
+          Se {n === 1 ? 'cargó 1 precio' : `cargaron ${n.toLocaleString('es-AR')} precios`} en «{subido.nombre.slice(0, -1)}
+          <span className="whitespace-nowrap">{subido.nombre.slice(-1)}».</span>
+        </p>
+        {s > 0 && !explicadas && (
+          <p className="mt-1 text-amber-800" data-testid="csv-salteadas">
+            {s === 1 ? '1 renglón sin código o sin precio, no se cargó.' : `${s.toLocaleString('es-AR')} renglones sin código o sin precio, no se cargaron.`}
+          </p>
+        )}
+        {avisos.length > 0 && (
+          <ul className="mt-1 space-y-0.5 text-amber-800" data-testid="csv-avisos">
+            {(verAvisos ? avisos : avisos.slice(0, AVISOS_A_LA_VISTA)).map((w, i) => <li key={i}>{w}</li>)}
+            {avisos.length > AVISOS_A_LA_VISTA && (
+              <li>
+                <button onClick={() => setVerAvisos((v) => !v)} className="max-md:min-h-10 font-semibold underline underline-offset-2">
+                  {verAvisos ? 'Ver menos' : `Ver ${avisos.length - AVISOS_A_LA_VISTA} avisos más`}
+                </button>
+              </li>
+            )}
+          </ul>
+        )}
+        {oficial ? (
+          <p className="mt-1.5 inline-flex items-center gap-1 font-semibold text-[#1B5E4B]" data-testid="csv-ya-oficial">
+            <Check size={13} /> Es la lista oficial: la app calcula con estos precios.
+          </p>
+        ) : (
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+            <p>Para que la app calcule con esta lista, marcala como oficial.</p>
+            {esAdmin && catalog ? (
+              <button
+                onClick={marcarOficial}
+                disabled={marcando}
+                className="max-md:min-h-10 inline-flex items-center gap-1 bg-white border border-[#2D8D68]/50 text-[#1B5E4B] hover:bg-white/70 font-semibold px-3 py-1 rounded-lg disabled:opacity-50"
+              >
+                {marcando && <span className="w-3 h-3 border-2 border-[#2D8D68] border-t-transparent rounded-full animate-spin" aria-hidden />}
+                Marcarla como oficial
+              </button>
+            ) : !esAdmin ? (
+              <p className="text-[#1B5E4B]/80">La marca quien administra la app.</p>
+            ) : null}
+          </div>
+        )}
+        {error && <p role="alert" className="mt-1 text-red-700">{error}</p>}
+      </div>
+      <button onClick={onClose} aria-label="Cerrar" className="opacity-60 hover:opacity-100 flex-shrink-0 max-md:min-w-10 max-md:min-h-10 inline-flex items-center justify-center max-md:-mr-2 max-md:-mt-2"><X size={14} /></button>
     </div>
   )
 }
@@ -379,12 +547,15 @@ function CatalogRow({
   onDeleted,
   onChanged,
   guardado,
+  abrir = 0,
 }: {
   catalog: PriceCatalog
   budgets: Budget[]
   onDeleted: (id: string) => void
   onChanged: (catalog: PriceCatalog) => void
   guardado: GuardadoEnLista | null
+  // Cambia (>0) cuando hay que abrir esta lista y mostrarla (la recién subida)
+  abrir?: number
 }) {
   const { puedeEditar, esAdmin } = useAuth()
   const [open, setOpen] = useState(false)
@@ -412,6 +583,7 @@ function CatalogRow({
   const [resaltado, setResaltado] = useState<{ id: string; texto: string } | null>(null)
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pedido = useRef<Promise<CatalogEntry[]> | null>(null)
+  const raiz = useRef<HTMLDivElement>(null)
 
   function cargarEntradas(): Promise<CatalogEntry[]> {
     if (!pedido.current) {
@@ -450,6 +622,17 @@ function CatalogRow({
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [guardado?.n])
+
+  // La lista recién subida: se abre con sus precios y se lleva a la vista
+  useEffect(() => {
+    if (!abrir) return
+    setOpen(true)
+    setSearchQ('')
+    void cargarEntradas()
+    const raf = requestAnimationFrame(() => raiz.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+    return () => cancelAnimationFrame(raf)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [abrir])
 
   useEffect(() => {
     if (!resaltado) return
@@ -564,10 +747,14 @@ function CatalogRow({
     }
   }
 
+  // Sin fecha válida (una lista recién creada que el servidor devolvió sin ella) no se muestra "Invalid Date"
+  const fechaCreada = catalog.created_at ? new Date(catalog.created_at) : null
+  const creada = fechaCreada && !Number.isNaN(fechaCreada.getTime()) ? fechaCreada.toLocaleDateString('es-AR') : null
+
   const accion = 'p-1.5 max-md:min-w-10 max-md:min-h-10 inline-flex items-center justify-center rounded-md text-gray-400 transition-colors disabled:opacity-40'
 
   return (
-    <div className="@container bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden" data-testid="lista-precios" data-catalog-id={catalog.id}>
+    <div ref={raiz} className="@container scroll-mt-4 bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden" data-testid="lista-precios" data-catalog-id={catalog.id}>
       {/* Header row */}
       <div className="p-3 sm:p-4 flex flex-wrap justify-between items-center gap-x-3 gap-y-2 cursor-pointer hover:bg-gray-50 transition-colors" onClick={toggle}>
         <div className="min-w-0 flex-1 basis-56">
@@ -580,8 +767,10 @@ function CatalogRow({
             )}
           </div>
           <div className="text-[10px] text-gray-400 mt-0.5">
-            Creada: {new Date(catalog.created_at).toLocaleDateString('es-AR')}
-            {entries.length > 0 && <> · {entries.length} precios</>}
+            {[
+              creada && `Creada: ${creada}`,
+              entries.length > 0 && `${entries.length} ${entries.length === 1 ? 'precio' : 'precios'}`,
+            ].filter(Boolean).join(' · ')}
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2 ml-auto" onClick={(e) => e.stopPropagation()}>
@@ -921,6 +1110,9 @@ export default function Catalogs() {
   // "Buscar un precio" (uno que todavía no está en la lista) y lo que se guardó con él
   const [buscarNuevo, setBuscarNuevo] = useState(false)
   const [guardado, setGuardado] = useState<(GuardadoEnLista & { catalogo: string; sinOrigen: boolean }) | null>(null)
+  // La última lista subida desde un .csv: el aviso de arriba y cuál abrir
+  const [subido, setSubido] = useState<CsvSubido | null>(null)
+  const [abrirLista, setAbrirLista] = useState<{ id: string; n: number } | null>(null)
 
   useEffect(() => {
     setLoading(true)
@@ -935,9 +1127,23 @@ export default function Catalogs() {
       .finally(() => setLoading(false))
   }, [])
 
-  function handleUploaded(catalog: PriceCatalog) {
-    setCatalogs((prev) => [catalog, ...prev])
+  async function handleUploaded(r: CsvSubido) {
     setShowUpload(false)
+    setGuardado(null)
+    setSubido(r)
+    // La lista entera de nuevo (con la nueva, tal cual la guardó el servidor); si no responde, se agrega la nueva igual
+    let cats: PriceCatalog[] | null = null
+    try {
+      cats = await catalogApi.list()
+    } catch {
+      cats = null
+    }
+    setCatalogs((prev) => {
+      if (cats && (!r.id || cats.some((c) => c.id === r.id))) return cats
+      if (!r.id || prev.some((c) => c.id === r.id)) return prev
+      return [{ id: r.id, org_id: '', name: r.nombre, created_at: new Date().toISOString(), oficial: false }, ...prev]
+    })
+    if (r.id) setAbrirLista((prev) => ({ id: r.id, n: (prev?.n ?? 0) + 1 }))
   }
 
   function handleExcelUploaded(_count: number) {
@@ -978,12 +1184,15 @@ export default function Catalogs() {
             </span>
           </div>
           {puedeEditar && (
-            <button
-              onClick={() => setBuscarNuevo(true)}
-              className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 bg-white border border-[#2D8D68]/50 text-[#1B5E4B] hover:bg-[#E8F5EE] font-semibold px-4 py-2 rounded-xl text-sm shadow-sm transition-colors"
-            >
-              <IconoBuscarInternet size={15} /> Buscar un precio
-            </button>
+            <div className="flex flex-col items-start sm:items-end gap-1 w-full sm:w-auto">
+              <button
+                onClick={() => setBuscarNuevo(true)}
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 bg-white border border-[#2D8D68]/50 text-[#1B5E4B] hover:bg-[#E8F5EE] font-semibold px-4 py-2 rounded-xl text-sm shadow-sm transition-colors"
+              >
+                <IconoBuscarInternet size={15} /> Buscar un precio
+              </button>
+              <EstadoBuscadorChip className="max-sm:pl-1 max-sm:pb-1 sm:text-right" />
+            </div>
           )}
         </div>
         <p className="text-sm text-gray-500 mb-4 pl-4 max-w-3xl">
@@ -1008,7 +1217,7 @@ export default function Catalogs() {
           <div className="flex flex-wrap items-center gap-2 mt-2">
             <button
               onClick={() => { setShowUpload((prev) => !prev); setShowExcelUpload(false) }}
-              className={`flex items-center gap-1.5 text-xs font-semibold px-4 py-2 rounded-lg transition-colors ${
+              className={`max-md:min-h-10 flex items-center gap-1.5 text-xs font-semibold px-4 py-2 rounded-lg transition-colors ${
                 showUpload
                   ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                   : 'bg-[#2D8D68] hover:bg-[#1B5E4B] text-white'
@@ -1019,7 +1228,7 @@ export default function Catalogs() {
             </button>
             <button
               onClick={() => { setShowExcelUpload((prev) => !prev); setShowUpload(false) }}
-              className={`flex items-center gap-1.5 text-xs font-semibold px-4 py-2 rounded-lg border transition-colors ${
+              className={`max-md:min-h-10 flex items-center gap-1.5 text-xs font-semibold px-4 py-2 rounded-lg border transition-colors ${
                 showExcelUpload
                   ? 'bg-gray-100 text-gray-700 hover:bg-gray-200 border-gray-300'
                   : 'border-[#2D8D68] text-[#2D8D68] hover:bg-[#E8F5EE]'
@@ -1034,6 +1243,16 @@ export default function Catalogs() {
       )}
 
       <div className="max-w-5xl space-y-3">
+        {/* Lo que dejó la subida de un .csv */}
+        {subido && (
+          <AvisoCsvSubido
+            subido={subido}
+            catalog={catalogs.find((c) => c.id === subido.id)}
+            onOficial={handleChanged}
+            onClose={() => setSubido(null)}
+          />
+        )}
+
         {/* Lo que se guardó con "Buscar un precio" */}
         {guardado && (
           <div role="status" data-testid="precio-guardado" className="flex items-start gap-2 rounded-xl border border-[#2D8D68]/30 bg-[#E8F5EE] px-3 py-2.5 text-xs text-[#143D34]">
@@ -1099,6 +1318,7 @@ export default function Catalogs() {
             onDeleted={handleDeleted}
             onChanged={handleChanged}
             guardado={guardado}
+            abrir={abrirLista?.id === c.id ? abrirLista.n : 0}
           />
         ))}
       </div>

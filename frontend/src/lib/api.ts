@@ -730,6 +730,20 @@ export const obraApi = {
 
 // ─── Catalog API ───────────────────────────────────────────────────────────────
 
+/** Lo que devuelve subir un .csv: la lista creada y cuántos renglones entraron y cuántos no. */
+export interface CsvCargado {
+  catalog_id?: string
+  id?: string
+  name: string
+  tipo?: string
+  // Precios cargados (`entries_count` es el nombre de antes)
+  entradas?: number
+  entries_count?: number
+  // Renglones que no se cargaron (sin código o sin precio)
+  salteadas?: number
+  warnings?: string[]
+}
+
 export const catalogApi = {
   list: () => get<PriceCatalog[]>('/catalogs'),
   getEntries: (id: string) => get<CatalogEntry[]>(`/catalogs/${id}/entries`),
@@ -748,12 +762,19 @@ export const catalogApi = {
   // Historial de precios de una entrada, el más nuevo primero (cada valor con su origen)
   history: (catalogId: string, entryId: string) =>
     get<CatalogPriceHistory[]>(`/catalogs/${catalogId}/entries/${entryId}/history`),
-  uploadCsv: (name: string, tipo: string, file: File) => {
+  // Lista nueva desde un .csv (con ";", "," o tabulador). Sin nombre, el servidor usa el del archivo.
+  // El tipo y el nombre van en el formulario y también en la dirección: así los lee el servidor de antes y el de ahora.
+  uploadCsv: (file: File, { nombre, tipo }: { nombre?: string; tipo: string }) => {
     const formData = new FormData()
-    formData.append('name', name)
-    formData.append('tipo', tipo)
     formData.append('file', file)
-    return postFile<any>('/catalogs/upload', formData)
+    formData.append('tipo', tipo)
+    const params = new URLSearchParams({ tipo })
+    const n = nombre?.trim()
+    if (n) {
+      formData.append('name', n)
+      params.set('name', n)
+    }
+    return postFile<CsvCargado>(`/catalogs/upload-csv?${params.toString()}`, formData)
   },
   uploadExcel: (file: File) => {
     const formData = new FormData()
@@ -797,9 +818,18 @@ export interface ResultadoBusquedaPrecio {
   aviso?: string | null
 }
 
+/** Si el buscador está listo para usar (el servidor tiene la clave de OpenAI) y con qué modelo. Nunca trae la clave. */
+export interface EstadoBuscador {
+  configurado: boolean
+  modelo?: string | null
+}
+
 export const preciosApi = {
   // Busca precios en corralones y ferreterías (puede tardar hasta un minuto). No guarda nada.
+  // Errores: `detail` = {codigo, mensaje}; codigo NO_CONFIGURADO (503), CLAVE_INVALIDA, SIN_CREDITO, TIEMPO, MODELO,
+  // ERROR_BUSQUEDA (502). El `mensaje` ya está escrito para Sol.
   buscar: (data: BusquedaPrecio) => post<ResultadoBusquedaPrecio>('/precios/buscar', data),
+  estado: () => get<EstadoBuscador>('/precios/buscador'),
 }
 
 // ─── Correcciones de la revisión de Ginkgo ─────────────────────────────────────
