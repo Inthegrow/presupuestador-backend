@@ -152,6 +152,22 @@ class TestRespuesta:
         assert db.tables["price_catalogs"] == []
 
 
+    def test_agrupaciones_invalidas_se_saltean_y_se_explican(self, client, db):
+        """Codex PR #48: '1,2,3' and '1.234.56' were saved as 123 and 123456 with no warning."""
+        r = subir(client, "codigo;precio\nA;1,2,3\nB;1.234.56\nC;1.23,4.5\nD;1.234,50\n")
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["entradas"] == 1 and body["salteadas"] == 3
+        assert set(entradas(db)) == {"D"} and entradas(db)["D"]["precio_sin_iva"] == pytest.approx(1234.5)
+        assert any("precio que no se entiende" in w and "1,2,3" in w for w in body["warnings"]), body["warnings"]
+
+    def test_solo_precios_mal_escritos_da_400_sin_crear_la_lista(self, client, db):
+        r = subir(client, "codigo;precio\nA;1,2,3\nB;1.234.56\n")
+        assert r.status_code == 400
+        assert "precio que no se entiende" in r.json()["detail"]
+        assert db.tables["price_catalogs"] == [] and db.tables["catalog_entries"] == []
+
+
 class TestFaltanColumnas:
     def test_falta_el_precio(self, client, db):
         r = subir(client, "Código;Descripción;Unidad\nA;Uno;u\n")
@@ -186,12 +202,14 @@ class TestPiezas:
         ("$ 1.234,50", 1234.5), ("1.234,50", 1234.5), ("1234,5", 1234.5), ("1234.5", 1234.5), ("1.234", 1234),
         ("12.345", 12345), ("1.234.567", 1234567), ("1,234.50", 1234.5), ("$1234", 1234), ("  5000 ", 5000),
         ("6669.42", 6669.42), ("0.125", 0.125), ("12345.678", 12345.678), ("$ 1.000", 1000), ("ARS 10", 10),
-        ("169000", 169000), ("0", 0),
+        ("169000", 169000), ("0", 0), ("1,234,567", 1234567), ("0,5", 0.5), ("012.345", 12.345),
     ])
     def test_leer_precio(self, raw, valor):
         assert cat.leer_precio(raw) == pytest.approx(valor)
 
-    @pytest.mark.parametrize("raw", ["", "$", "abc", "1,2,x", "nan", "inf"])
+    # Codex PR #48: thousands groups that are not well formed are not prices (they used to become 123, 123456)
+    @pytest.mark.parametrize("raw", ["", "$", "abc", "1,2,x", "nan", "inf", "1,2,3", "1.234.56", "1.23,4.5",
+                                     "1,234.5.6", "12.34.567", "1,23,456", "1.2345,6", "--5"])
     def test_precio_ilegible(self, raw):
         assert cat.leer_precio(raw) is None
 

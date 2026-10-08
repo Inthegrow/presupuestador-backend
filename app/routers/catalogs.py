@@ -231,23 +231,34 @@ def detectar_separador(texto: str) -> str:
     return mejor if conteos[mejor] else ","
 
 
+# Formats a price can come in; anything else (ej. "1,2,3" or "1.234.56") is not a price: it is skipped and
+# reported, never guessed
+_PRECIO_AR = re.compile(r"-?[1-9]\d{0,2}(?:\.\d{3})+(?:,\d+)?")      # 1.234 / 1.234.567 / 1.234,50
+_PRECIO_COMA = re.compile(r"-?\d+,\d+")                          # 1234,5
+_PRECIO_US = re.compile(r"-?[1-9]\d{0,2}(?:,\d{3})+\.\d+|-?[1-9]\d{0,2}(?:,\d{3}){2,}")  # 1,234.50 / 1,234,567
+_PRECIO_PUNTO = re.compile(r"-?\d+(?:\.\d+)?")                  # 1234 / 1234.5 / 0.125
+
+
 def leer_precio(raw: object) -> float | None:
     """A price as Sol writes it: '$ 1.234,50', '1234,5', '1234.5', '1.234' (one thousand two hundred
-    thirty-four: a dot followed by exactly 3 digits is the thousands separator). None when unreadable."""
+    thirty-four: a dot followed by exactly 3 digits is the thousands separator), '1,234.50'.
+
+    The thousands groups have to be well formed: '1,2,3' or '1.234.56' are not prices (None), so the row is
+    skipped and reported instead of saving an invented amount.
+    """
     t = re.sub(r"\s+", "", str(raw or "")).replace("$", "")
     if t.upper().startswith("ARS"):
         t = t[3:]
     if not t:
         return None
-    if "," in t and "." in t:
-        if t.rfind(",") > t.rfind("."):  # 1.234,50
-            t = t.replace(".", "").replace(",", ".")
-        else:  # 1,234.50
-            t = t.replace(",", "")
-    elif "," in t:
-        t = t.replace(",", "") if t.count(",") > 1 else t.replace(",", ".")
-    elif t.count(".") > 1 or re.fullmatch(r"-?[1-9]\d{0,2}\.\d{3}", t):
-        t = t.replace(".", "")  # 1.234.567 / 1.234
+    if _PRECIO_AR.fullmatch(t):
+        t = t.replace(".", "").replace(",", ".")
+    elif _PRECIO_COMA.fullmatch(t):
+        t = t.replace(",", ".")
+    elif _PRECIO_US.fullmatch(t):
+        t = t.replace(",", "")
+    elif not _PRECIO_PUNTO.fullmatch(t):
+        return None
     try:
         valor = float(t)
     except ValueError:
