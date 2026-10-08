@@ -32,7 +32,7 @@ export default function OlvideMiClave() {
           <div className="bg-[#F0FAF5] border border-[#2D8D68]/30 text-[#143D34] text-sm px-4 py-3 rounded-lg">
             Te mandamos un enlace a <span className="font-semibold">{enviado}</span>. Fijate también en correo no deseado.
           </div>
-          <Link to="/login" className="block text-center text-sm text-[#2D8D68] hover:text-[#1B5E4B] font-medium">
+          <Link to="/login" className="block py-2.5 text-center text-sm text-[#2D8D68] hover:text-[#1B5E4B] font-medium">
             Volver a entrar
           </Link>
         </div>
@@ -54,13 +54,13 @@ export default function OlvideMiClave() {
               />
             </div>
             <div className="flex items-center justify-between gap-3 pt-1">
-              <Link to="/login" className="text-sm text-gray-500 hover:text-gray-700">
+              <Link to="/login" className="inline-block py-2.5 text-sm text-gray-500 hover:text-gray-700">
                 Volver
               </Link>
               <button
                 type="submit"
                 disabled={loading}
-                className="bg-[#2D8D68] hover:bg-[#1B5E4B] disabled:opacity-60 text-white font-semibold px-5 py-2.5 rounded-lg text-sm transition-colors flex items-center justify-center gap-2"
+                className="bg-[#2D8D68] hover:bg-[#1B5E4B] disabled:opacity-60 text-white font-semibold min-h-11 px-5 py-2.5 rounded-lg text-sm transition-colors flex items-center justify-center gap-2"
               >
                 {loading ? (
                   <>

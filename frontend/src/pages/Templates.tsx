@@ -154,8 +154,9 @@ function TemplateCard({
           {puedeEditar && (<>
           <button
             onClick={(e) => { e.stopPropagation(); onEdit(template) }}
-            className="text-xs px-2 py-1 rounded text-gray-400 hover:text-[#2D8D68] hover:bg-[#E8F5EE] flex items-center gap-1"
+            className="text-xs px-2 py-1 max-md:min-w-10 max-md:min-h-10 justify-center rounded text-gray-400 hover:text-[#2D8D68] hover:bg-[#E8F5EE] flex items-center gap-1"
             title="Editar fórmulas y parámetros"
+            aria-label="Editar fórmulas y parámetros"
           >
             <Pencil size={13} />
           </button>
@@ -163,7 +164,8 @@ function TemplateCard({
           <button
             onClick={(e) => { e.stopPropagation(); handleDelete() }}
             disabled={deleting}
-            className={`text-xs px-2 py-1 rounded transition-colors flex items-center gap-1 ${
+            aria-label={confirmDelete ? 'Tocá de nuevo para eliminarla' : 'Eliminar fórmula'}
+            className={`text-xs px-2 py-1 max-md:min-w-10 max-md:min-h-10 justify-center rounded transition-colors flex items-center gap-1 ${
               confirmDelete
                 ? 'bg-red-600 text-white hover:bg-red-700'
                 : 'text-gray-400 hover:text-red-600 hover:bg-red-50'
@@ -200,8 +202,8 @@ function TemplateCard({
                   {TIPO_LABELS[tipo] || tipo}
                 </div>
 
-                <table className="w-full text-[11px]">
-                  <thead className="bg-gray-50">
+                <table className="w-full text-[11px] block md:table">
+                  <thead className="bg-gray-50 hidden md:table-header-group">
                     <tr>
                       <th className="px-3 py-1.5 text-left text-gray-500 font-medium">Código</th>
                       <th className="px-3 py-1.5 text-left text-gray-500 font-medium">Descripción</th>
@@ -212,19 +214,20 @@ function TemplateCard({
                       </th>
                     </tr>
                   </thead>
-                  <tbody>
+                  <tbody className="block md:table-row-group">
                     {groups[tipo].map((r, i) => (
                       <Fragment key={i}>
-                      <tr className={`hover:bg-gray-50 ${r.correccion?.texto ? '' : 'border-b last:border-0'}`}>
-                        <td className="px-3 py-1.5 font-mono text-gray-400">{r.codigo || '—'}</td>
-                        <td className="px-3 py-1.5 text-gray-800">{r.descripcion || '—'}</td>
-                        <td className="px-3 py-1.5 font-mono text-gray-700">
+                      <tr className={`block md:table-row py-2 md:py-0 hover:bg-gray-50 ${r.correccion?.texto ? '' : 'border-b last:border-0'}`}>
+                        <td className="block md:table-cell px-3 md:py-1.5 font-mono text-[10px] md:text-[11px] text-gray-400">{r.codigo || '—'}</td>
+                        <td className="block md:table-cell px-3 md:py-1.5 text-[13px] md:text-[11px] text-gray-800">{r.descripcion || '—'}</td>
+                        <td className="inline-block md:table-cell pl-3 pr-1 md:px-3 pt-0.5 md:py-1.5 font-mono text-gray-700">
                           {quantityText(r)}
                           {r.lo_compra_cliente && <span className="ml-1 font-sans bg-amber-100 text-amber-700 rounded px-1.5">cliente</span>}
                           {r.redondear && <span className="ml-1 font-sans bg-blue-100 text-blue-700 rounded px-1.5">redondea</span>}
                         </td>
-                        <td className="px-3 py-1.5 text-gray-500">{tipo === 'mano_obra' ? 'jornal' : r.unidad || '—'}</td>
-                        <td className="px-3 py-1.5 text-right text-gray-700">
+                        <td className="inline-block md:table-cell pr-3 md:px-3 md:py-1.5 text-gray-500">{tipo === 'mano_obra' ? 'jornal' : r.unidad || '—'}</td>
+                        <td className="inline-block md:table-cell px-3 md:py-1.5 md:text-right text-gray-700">
+                          <span className="md:hidden text-gray-400">{tipo === 'mano_obra' ? 'Cargas sociales ' : 'Desperdicio '}</span>
                           {tipo === 'mano_obra'
                             ? `${r.cargas_sociales_pct ?? 25}%`
                             : r.desperdicio_pct === undefined || r.desperdicio_pct === null || r.desperdicio_pct === ''
@@ -233,8 +236,8 @@ function TemplateCard({
                         </td>
                       </tr>
                       {r.correccion?.texto && (
-                        <tr className="border-b last:border-0">
-                          <td colSpan={5} className="px-3 pb-1.5 pt-0">
+                        <tr className="block md:table-row border-b last:border-0">
+                          <td colSpan={5} className="block md:table-cell px-3 pb-1.5 pt-0">
                             <NotaCorreccion texto={r.correccion.texto} />
                           </td>
                         </tr>
@@ -373,7 +376,7 @@ export default function Templates() {
     puedeEditar ? (
       <button
         onClick={() => setEditing(null)}
-        className={`bg-[#2D8D68] hover:bg-[#1B5E4B] text-white font-semibold px-4 py-2 rounded-xl text-sm flex items-center justify-center gap-1.5 shadow-sm transition-colors ${
+        className={`bg-[#2D8D68] hover:bg-[#1B5E4B] text-white font-semibold px-4 py-2 min-h-10 sm:min-h-0 rounded-xl text-sm flex items-center justify-center gap-1.5 shadow-sm transition-colors whitespace-nowrap flex-shrink-0 ${
           ancho ? 'w-full sm:w-auto' : ''
         }`}
       >
@@ -382,17 +385,17 @@ export default function Templates() {
     ) : null
 
   return (
-    <div className="px-6 pb-6 fade-in">
+    <div className="px-4 md:px-6 pb-6 fade-in">
       {/* Cabecera fija: título, cuántas hay, el botón para crear y el buscador siempre a la vista */}
       <div
         data-testid="cabecera-formulas"
-        className="sticky top-0 z-20 -mx-6 px-6 pt-5 pb-3 bg-[#F5F6F8] border-b border-gray-200/80 shadow-[0_6px_12px_-10px_rgba(0,0,0,0.15)]"
+        className="sticky top-0 z-20 -mx-4 px-4 md:-mx-6 md:px-6 pt-3 md:pt-5 pb-3 bg-[#F5F6F8] border-b border-gray-200/80 shadow-[0_6px_12px_-10px_rgba(0,0,0,0.15)]"
       >
         <div className="max-w-3xl">
-          <div className="flex items-center gap-2 text-[#2D8D68] text-[11px] font-bold tracking-wider mb-1">
+          <div className="hidden sm:flex items-center gap-2 text-[#2D8D68] text-[11px] font-bold tracking-wider mb-1">
             <Library size={14} /> CONFIGURACIÓN
           </div>
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3">
             <div className="flex items-center gap-x-3 gap-y-1 min-w-0 flex-wrap">
               <div className="flex items-center gap-3">
                 <div className="w-1 h-7 bg-[#2D8D68] rounded-full flex-shrink-0" />
@@ -441,13 +444,13 @@ export default function Templates() {
 
         {/* Rubros */}
         {categories.length > 0 && (
-          <div className="flex flex-wrap gap-2 mb-3" role="group" aria-label="Rubro">
+          <div className="flex md:flex-wrap gap-2 mb-3 overflow-x-auto md:overflow-visible sin-barra -mx-1 px-1 py-0.5" role="group" aria-label="Rubro">
             {[TODOS, ...categories].map((cat) => (
               <button
                 key={cat}
                 onClick={() => setActiveCategory(cat)}
                 aria-pressed={activeCategory === cat}
-                className={`text-xs px-3 py-1 rounded-full font-medium transition-colors ${
+                className={`flex-shrink-0 whitespace-nowrap max-md:min-h-10 text-[13px] md:text-xs px-3.5 md:px-3 py-1 rounded-full font-medium transition-colors ${
                   activeCategory === cat
                     ? 'bg-[#2D8D68] text-white'
                     : 'bg-white border border-gray-200 text-gray-600 hover:border-[#2D8D68] hover:text-[#2D8D68]'

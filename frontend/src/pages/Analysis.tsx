@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { BarChart2, Download } from 'lucide-react'
 import { budgetApi, mensajeDeError } from '../lib/api'
 import { fmtCurrency } from '../lib/format'
+import { usePantalla } from '../lib/pantalla'
 import { escaleraDe, indirectosCompletos, pctsEscalera } from '../lib/cascada'
 import CostSummaryBar from '../components/ui/CostSummaryBar'
 import ViewModeSelector from '../components/ui/ViewModeSelector'
@@ -95,6 +96,7 @@ function sumItems(items: BudgetItem[]) {
 export default function Analysis() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const { celular } = usePantalla()
   const [data, setData] = useState<AnalysisResponse | null>(null)
   const [budget, setBudget] = useState<Budget | null>(null)
   const [allItems, setAllItems] = useState<BudgetItem[]>([])
@@ -171,28 +173,28 @@ export default function Analysis() {
   const impuestosTotal = escalera.impuestos
 
   return (
-    <div className="p-4 fade-in h-full flex flex-col">
+    <div className={celular ? 'px-4 pt-3 pb-10 fade-in' : 'p-4 fade-in h-full flex flex-col'}>
       {/* Fixed header area */}
       <div className="flex-shrink-0">
         {/* Section label */}
         <div className="flex items-center gap-2 text-[#2D8D68] text-[11px] font-bold tracking-wider mb-1">
           <BarChart2 size={14} /> ANÁLISIS
         </div>
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-3">
-            <div className="w-1 h-7 bg-[#2D8D68] rounded-full" />
-            <h1 className="text-xl font-extrabold text-gray-900">ANÁLISIS — {budgetName.toUpperCase()}</h1>
+        <div className="flex items-center justify-between gap-3 mb-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-1 h-7 bg-[#2D8D68] rounded-full flex-shrink-0 max-md:hidden" />
+            <h1 className="text-xl max-md:text-[19px] max-md:leading-snug font-extrabold text-gray-900 min-w-0 [overflow-wrap:anywhere]">ANÁLISIS — {budgetName.toUpperCase()}</h1>
           </div>
           <button
             onClick={() => navigate(`/app/budgets/${id ?? '1'}/export`)}
-            className="bg-white border text-gray-700 px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-gray-50 flex items-center gap-1.5 transition-colors"
+            className="flex-shrink-0 bg-white border text-gray-700 px-3 py-1.5 max-md:h-10 max-md:px-3.5 max-md:rounded-xl max-md:text-[14px] rounded-lg text-xs font-medium hover:bg-gray-50 flex items-center gap-1.5 transition-colors"
           >
             <Download size={13} /> Exportar
           </button>
         </div>
 
         {/* View Mode Selector */}
-        <div className="mb-3">
+        <div className={celular ? 'mb-3 -mx-4 px-4' : 'mb-3'}>
           <ViewModeSelector mode={viewMode} onChange={setViewMode} />
         </div>
 
@@ -222,15 +224,75 @@ export default function Analysis() {
         )}
       </div>
 
-      {/* Scrollable table area */}
+      {celular ? (
+        <section aria-label={`Desglose por ${VIEW_MODE_LABELS[viewMode].toLowerCase()}`}>
+          <h2 className="text-[11px] font-bold text-[#2D8D68] tracking-wide mb-2 px-1">
+            DESGLOSE POR {VIEW_MODE_LABELS[viewMode].toUpperCase()}
+          </h2>
+          {sections.length === 0 ? (
+            <div className="bg-white rounded-2xl border border-gray-100 px-4 py-8 text-center text-[13px] text-gray-400">
+              No hay datos para agrupar con esta vista.
+            </div>
+          ) : (
+            <ul className="space-y-2.5">
+              {sections.map((s, i) => (
+                <li key={i} data-testid="analisis-tarjeta" className="bg-white rounded-2xl border border-gray-100 shadow-sm px-4 py-3">
+                  <div className="text-[15px] font-semibold text-gray-900 leading-snug">{s.name}</div>
+                  <div className="flex items-baseline justify-between gap-3 mt-1">
+                    <span className="text-[12px] text-gray-500">Precio sin IVA</span>
+                    <b className="text-[17px] font-bold text-[#143D34] tabular-nums">{fmtCurrency(s.neto)}</b>
+                  </div>
+                  <dl className="grid grid-cols-2 gap-x-4 gap-y-1 mt-2 pt-2 border-t border-gray-100 text-[13px]">
+                    {([
+                      ['Materiales', s.mat, 'text-gray-800'],
+                      ['Mano de obra', s.mo, 'text-gray-800'],
+                      ['Costo directo', s.directo, 'text-blue-700 font-semibold'],
+                      ['Indirecto', s.indirecto, 'text-gray-800'],
+                      ['Beneficio', s.benef, 'text-gray-800'],
+                      ['Impuestos', s.impuestos, 'text-gray-800'],
+                    ] as [string, number, string][]).map(([label, v, cls]) => (
+                      <div key={label} className="flex items-baseline justify-between gap-2 min-w-0">
+                        <dt className="text-gray-500 truncate">{label}</dt>
+                        <dd className={`tabular-nums whitespace-nowrap ${cls}`}>{fmtCurrency(v)}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                </li>
+              ))}
+              <li className="bg-[#E8F5EE] rounded-2xl border border-[#2D8D68]/20 px-4 py-3">
+                <div className="text-[11px] font-bold text-[#2D8D68] uppercase tracking-wider">Total de la obra</div>
+                <div className="flex items-baseline justify-between gap-3 mt-1">
+                  <span className="text-[12px] text-[#1B5E4B]">Precio sin IVA</span>
+                  <b className="text-[18px] font-extrabold text-[#143D34] tabular-nums">{fmtCurrency(netoTotal)}</b>
+                </div>
+                <dl className="grid grid-cols-2 gap-x-4 gap-y-1 mt-2 pt-2 border-t border-[#2D8D68]/15 text-[13px]">
+                  {([
+                    ['Materiales', matTotal],
+                    ['Mano de obra', moTotal],
+                    ['Costo directo', directoTotal],
+                    ['Indirecto', indirectoTotal],
+                    ['Beneficio', beneficioTotal],
+                    ['Impuestos', impuestosTotal],
+                  ] as [string, number][]).map(([label, v]) => (
+                    <div key={label} className="flex items-baseline justify-between gap-2 min-w-0">
+                      <dt className="text-[#1B5E4B]/80 truncate">{label}</dt>
+                      <dd className="tabular-nums whitespace-nowrap font-semibold text-[#143D34]">{fmtCurrency(v)}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </li>
+            </ul>
+          )}
+        </section>
+      ) : (
       <div className="flex-1 min-h-0 bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden flex flex-col">
         <div className="bg-[#E8F5EE]/30 px-3 py-2 border-b flex-shrink-0">
           <span className="text-[10px] font-bold text-[#2D8D68] tracking-wide">
             DESGLOSE POR {VIEW_MODE_LABELS[viewMode].toUpperCase()}
           </span>
         </div>
-        <div className="flex-1 overflow-y-auto">
-          <table className="w-full text-xs">
+        <div className="flex-1 overflow-auto">
+          <table className="w-full text-xs min-w-[760px]">
             <thead className="bg-[#E8F5EE] text-[#143D34] sticky top-0">
               <tr>
                 <th className="px-3 py-2 text-left font-semibold text-[11px] tracking-wide">{VIEW_MODE_LABELS[viewMode]}</th>
@@ -280,6 +342,7 @@ export default function Analysis() {
           </table>
         </div>
       </div>
+      )}
     </div>
   )
 }

@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import { ChevronDown, Plus } from 'lucide-react'
+import { ChevronDown, Menu, Plus } from 'lucide-react'
 import { rolEnPalabras } from '../../lib/roles'
 import { useAuth } from '../../contexts/AuthContext'
 import { useNavigate } from 'react-router-dom'
 import { FORMAS_DE_EMPEZAR } from './formasDeEmpezar'
+import LogoSole from './LogoSole'
 
 const AI_ICON = (
   <svg width="18" height="18" viewBox="0 0 512 512" fill="none">
@@ -15,7 +16,9 @@ const AI_ICON = (
   </svg>
 )
 
-export default function TopBar() {
+// En el celular: ☰, el logo chico, la IA, NUEVO como "+" y el avatar. La empresa va dentro del cajón.
+// Entre 768 y 1023 px: ☰ y la barra completa. Desde 1024 px: igual que siempre.
+export default function TopBar({ onAbrirMenu }: { onAbrirMenu?: () => void }) {
   const { user, org, orgs, role, puedeEditar, switchOrg } = useAuth()
   const navigate = useNavigate()
 
@@ -24,13 +27,32 @@ export default function TopBar() {
   const initials = displayName.slice(0, 2)
 
   return (
-    <header className="bg-white border-b flex items-center justify-between px-4 h-14 flex-shrink-0">
+    <header className="bg-white border-b flex items-center justify-between gap-2 pl-1.5 pr-3 md:px-4 h-14 flex-shrink-0">
       {/* Left */}
-      <div className="flex items-center gap-3">
-        <div className="flex items-center gap-1.5 text-[#2D8D68]">
+      <div className="flex items-center gap-1.5 md:gap-3 min-w-0">
+        {onAbrirMenu && (
+          <button
+            type="button"
+            onClick={onAbrirMenu}
+            aria-label="Abrir el menú"
+            data-testid="abrir-menu"
+            className="lg:hidden w-10 h-10 -mr-0.5 rounded-lg flex items-center justify-center text-[#143D34] hover:bg-gray-100 active:bg-gray-200 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#2D8D68]/40"
+          >
+            <Menu size={22} />
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={() => navigate('/app/dashboard')}
+          aria-label="Ir a Mis presupuestos"
+          className="md:hidden w-10 h-10 rounded-lg flex items-center justify-center"
+        >
+          <LogoSole size={30} />
+        </button>
+        <div className="hidden md:flex items-center gap-1.5 text-[#2D8D68]">
           <LayoutGridIcon />
         </div>
-        <div>
+        <div className="hidden md:block min-w-0">
           <div className="font-bold text-gray-900 text-sm tracking-tight">PRESUPUESTADOR PRO</div>
           {orgs.length > 1 ? (
             <select
@@ -51,7 +73,7 @@ export default function TopBar() {
 
       {/* Center AI icon */}
       <div className="flex items-center gap-2">
-        <div className="relative">
+        <div className="relative" aria-label="Asistente con IA" role="img">
           <div className="w-9 h-9 bg-gradient-to-br from-[#2D8D68] to-[#1B5E4B] rounded-full flex items-center justify-center">
             {AI_ICON}
           </div>
@@ -61,14 +83,17 @@ export default function TopBar() {
       </div>
 
       {/* Right */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2 md:gap-3">
         {puedeEditar && <MenuNuevo onElegir={(ruta) => navigate(ruta)} />}
         <div className="flex items-center gap-2">
           <div className="text-right leading-tight hidden sm:block">
             <div className="text-xs font-semibold text-gray-700">{displayName}</div>
             <div className="text-[10px] text-gray-400">{rolEnPalabras(role)}</div>
           </div>
-          <div className="w-8 h-8 bg-gray-200 rounded-full flex items-center justify-center text-xs font-bold text-gray-600">
+          <div
+            className="w-9 h-9 md:w-8 md:h-8 bg-gray-200 rounded-full flex items-center justify-center text-xs font-bold text-gray-600"
+            title={`${displayName} · ${rolEnPalabras(role)}`}
+          >
             {initials}
           </div>
         </div>
@@ -139,18 +164,23 @@ function MenuNuevo({ onElegir }: { onElegir: (ruta: string) => void }) {
         aria-controls="menu-nuevo"
         onClick={() => (abierto ? cerrar(false) : abrir(null))}
         onKeyDown={teclaBoton}
-        className="bg-[#2D8D68] hover:bg-[#1B5E4B] text-white font-semibold px-4 py-1.5 rounded-lg text-xs flex items-center gap-1.5 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#2D8D68]/40 focus-visible:ring-offset-1"
+        data-testid="boton-nuevo"
+        className="bg-[#2D8D68] hover:bg-[#1B5E4B] text-white font-semibold w-10 h-10 justify-center rounded-full shadow-sm md:shadow-none md:w-auto md:h-auto md:px-4 md:py-1.5 md:rounded-lg text-xs flex items-center gap-1.5 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#2D8D68]/40 focus-visible:ring-offset-1"
       >
-        <Plus size={14} />
-        NUEVO
-        <ChevronDown size={13} className={`transition-transform ${abierto ? 'rotate-180' : ''}`} />
+        <Plus size={14} className="hidden md:block" />
+        <Plus size={22} strokeWidth={2.5} className="md:hidden" aria-hidden="true" />
+        <span className="sr-only md:not-sr-only">NUEVO</span>
+        <ChevronDown size={13} className={`hidden md:block transition-transform ${abierto ? 'rotate-180' : ''}`} />
       </button>
+      {abierto && (
+        <div className="md:hidden fixed inset-x-0 top-14 bottom-0 bg-[#0F2A24]/25 z-40 cajon-fondo" onClick={() => cerrar(false)} aria-hidden="true" />
+      )}
       {abierto && (
         <div
           id="menu-nuevo"
           role="menu"
           aria-label="Formas de empezar un presupuesto"
-          className="absolute right-0 mt-2 w-80 bg-white rounded-xl border border-gray-100 shadow-lg p-1.5 z-50 fade-in"
+          className="fixed inset-x-3 top-[60px] md:absolute md:inset-x-auto md:top-auto md:right-0 md:mt-2 md:w-80 bg-white rounded-xl border border-gray-100 shadow-xl md:shadow-lg p-1.5 z-50 fade-in"
         >
           <div className="px-3 pt-1.5 pb-1 text-[10px] font-bold text-gray-400 tracking-wider">¿CÓMO QUERÉS EMPEZAR?</div>
           {FORMAS_DE_EMPEZAR.map((f, i) => (

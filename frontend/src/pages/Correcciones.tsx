@@ -237,7 +237,7 @@ export default function Correcciones() {
       <div className="max-w-3xl">
         <Link
           to="/app/templates"
-          className="inline-flex items-center gap-1 text-xs text-[#2D8D68] hover:text-[#1B5E4B] font-medium mb-2"
+          className="max-md:min-h-10 inline-flex items-center gap-1 text-xs text-[#2D8D68] hover:text-[#1B5E4B] font-medium md:mb-2"
         >
           <ArrowLeft size={13} /> Volver a Fórmulas
         </Link>
@@ -322,7 +322,7 @@ export default function Correcciones() {
                   <div className="mt-2 flex flex-wrap gap-2">
                     <button
                       onClick={() => void aplicarTodas()}
-                      className="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 bg-[#2D8D68] hover:bg-[#1B5E4B] text-white text-sm font-semibold px-4 py-2 rounded-xl"
+                      className="flex-1 sm:flex-none min-h-11 sm:min-h-0 inline-flex items-center justify-center gap-1.5 bg-[#2D8D68] hover:bg-[#1B5E4B] text-white text-sm font-semibold px-4 py-2 rounded-xl"
                     >
                       Sí, aplicar {resumen.paraAplicar === 1 ? 'la corrección' : `las ${resumen.paraAplicar}`}
                     </button>
@@ -393,7 +393,7 @@ export default function Correcciones() {
             </p>
 
             {/* Filtros */}
-            <div className="flex flex-wrap gap-2 mb-3" role="group" aria-label="Mostrar">
+            <div className="flex md:flex-wrap gap-2 mb-3 overflow-x-auto md:overflow-visible sin-barra -mx-1 px-1 py-0.5" role="group" aria-label="Mostrar">
               {([
                 ['todas', `Todas (${lista.length})`],
                 ['para_aplicar', `Para aplicar (${resumen.paraAplicar})`],
@@ -404,7 +404,7 @@ export default function Correcciones() {
                   key={f}
                   onClick={() => setFiltro(f)}
                   aria-pressed={filtro === f}
-                  className={`text-xs px-3 py-1 rounded-full font-medium transition-colors ${
+                  className={`flex-shrink-0 whitespace-nowrap max-md:min-h-10 text-[13px] md:text-xs px-3.5 md:px-3 py-1 rounded-full font-medium transition-colors ${
                     filtro === f ? 'bg-[#2D8D68] text-white' : 'bg-white border border-gray-200 text-gray-600 hover:border-[#2D8D68] hover:text-[#2D8D68]'
                   }`}
                 >
@@ -576,7 +576,7 @@ function TarjetaCorreccion({
           <button
             onClick={() => setVerCambios((v) => !v)}
             aria-expanded={verCambios}
-            className="inline-flex items-center gap-1 text-xs font-semibold text-[#2D8D68] hover:text-[#1B5E4B]"
+            className="max-md:min-h-10 inline-flex items-center gap-1 text-xs font-semibold text-[#2D8D68] hover:text-[#1B5E4B]"
           >
             {verCambios ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
             {verCambios ? 'Ocultar los cambios' : `Ver los cambios (${c.cambios.length})`}
@@ -595,7 +595,7 @@ function TarjetaCorreccion({
           <button
             onClick={onAplicar}
             disabled={ocupado}
-            className="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 bg-[#2D8D68] hover:bg-[#1B5E4B] disabled:opacity-50 text-white text-sm font-semibold px-4 py-2 rounded-xl transition-colors"
+            className="flex-1 sm:flex-none min-h-11 sm:min-h-0 inline-flex items-center justify-center gap-1.5 bg-[#2D8D68] hover:bg-[#1B5E4B] disabled:opacity-50 text-white text-sm font-semibold px-4 py-2 rounded-xl transition-colors"
           >
             {accion.tipo === 'aplicando'
               ? <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" aria-hidden /> Aplicando…</>
@@ -606,7 +606,7 @@ function TarjetaCorreccion({
           <button
             onClick={onDeshacer}
             disabled={ocupado}
-            className="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50 text-sm font-semibold px-4 py-2 rounded-xl transition-colors"
+            className="flex-1 sm:flex-none min-h-11 sm:min-h-0 inline-flex items-center justify-center gap-1.5 bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50 text-sm font-semibold px-4 py-2 rounded-xl transition-colors"
           >
             {accion.tipo === 'deshaciendo'
               ? <><span className="w-4 h-4 border-2 border-gray-500 border-t-transparent rounded-full animate-spin" aria-hidden /> Deshaciendo…</>
@@ -635,7 +635,7 @@ function TarjetaCorreccion({
                   <button onClick={onAplicar} disabled={ocupado} className="inline-flex items-center gap-1 font-semibold bg-white border border-red-200 rounded-lg px-3 py-1.5 hover:bg-red-100 disabled:opacity-50">
                     <RefreshCw size={12} /> Volver a aplicarla
                   </button>
-                  <button onClick={onDeshacer} disabled={ocupado} className="inline-flex items-center gap-1 font-semibold bg-white border border-red-200 rounded-lg px-3 py-1.5 hover:bg-red-100 disabled:opacity-50">
+                  <button onClick={onDeshacer} disabled={ocupado} className="max-md:min-h-10 inline-flex items-center gap-1 font-semibold bg-white border border-red-200 rounded-lg px-3 py-1.5 hover:bg-red-100 disabled:opacity-50">
                     <RotateCcw size={12} /> Deshacerla
                   </button>
                 </div>

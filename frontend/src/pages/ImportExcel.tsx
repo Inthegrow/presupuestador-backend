@@ -55,7 +55,7 @@ export default function ImportExcel() {
 
   if (!puedeEditar) {
     return (
-      <div className="p-6 fade-in">
+      <div className="p-4 md:p-6 fade-in">
         <div className="flex items-center gap-2 text-[#2D8D68] text-[11px] font-bold tracking-wider mb-1">
           <Upload size={14} /> IMPORTACIÓN
         </div>
@@ -67,7 +67,7 @@ export default function ImportExcel() {
   }
 
   return (
-    <div className="p-6 fade-in">
+    <div className="p-4 md:p-6 fade-in">
       <div className="flex items-center gap-2 text-[#2D8D68] text-[11px] font-bold tracking-wider mb-1">
         <Upload size={14} /> IMPORTACIÓN
       </div>
@@ -86,6 +86,7 @@ export default function ImportExcel() {
             <FileUpload
               accept=".xlsx,.xls"
               label="Arrastrá tu Excel acá"
+              labelCelular="Elegí tu Excel"
               hint=".xlsx o .xls — Formato Terrac (Las Heras, Lugones, El Encuentro)"
               onFile={handleFile}
               icon={
@@ -105,7 +106,7 @@ export default function ImportExcel() {
                 <Upload size={20} className="text-[#2D8D68]" />
               </div>
               <div>
-                <div className="font-semibold text-gray-900 text-sm">{file.name}</div>
+                <div className="font-semibold text-gray-900 text-sm break-all">{file.name}</div>
                 <div className="text-xs text-gray-400">{(file.size / 1024).toFixed(0)} KB</div>
               </div>
             </div>
@@ -126,11 +127,11 @@ export default function ImportExcel() {
               </div>
             )}
 
-            <div className="flex gap-3">
+            <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
               <button
                 onClick={handleImport}
                 disabled={importing}
-                className="bg-[#2D8D68] hover:bg-[#1B5E4B] disabled:opacity-60 text-white font-semibold px-5 py-2.5 rounded-lg text-sm transition-colors flex items-center gap-2"
+                className="min-h-11 sm:min-h-0 justify-center bg-[#2D8D68] hover:bg-[#1B5E4B] disabled:opacity-60 text-white font-semibold px-5 py-2.5 rounded-lg text-sm transition-colors flex items-center gap-2"
               >
                 {importing && (
                   <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
@@ -139,7 +140,7 @@ export default function ImportExcel() {
               </button>
               <button
                 onClick={() => { setFile(null); setError('') }}
-                className="bg-white border text-gray-600 px-5 py-2.5 rounded-lg text-sm hover:bg-gray-50 transition-colors"
+                className="min-h-11 sm:min-h-0 bg-white border text-gray-600 px-5 py-2.5 rounded-lg text-sm hover:bg-gray-50 transition-colors"
               >
                 Cancelar
               </button>
@@ -149,7 +150,7 @@ export default function ImportExcel() {
 
         {/* Success result */}
         {result && (
-          <div className="bg-white rounded-xl border p-6 fade-in">
+          <div className="bg-white rounded-xl border p-4 md:p-6 fade-in">
             <div className="flex items-center gap-3 mb-4">
               <CheckCircle size={28} className="text-[#2D8D68]" />
               <div>
@@ -158,7 +159,7 @@ export default function ImportExcel() {
               </div>
             </div>
 
-            <div className="grid grid-cols-4 gap-3 mb-5">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-3 mb-5">
               <div className="bg-[#E8F5EE] rounded-lg p-3 text-center">
                 <div className="text-xl font-bold text-[#2D8D68]">{result.items_inserted}</div>
                 <div className="text-[10px] text-gray-500">TRABAJOS</div>
@@ -198,22 +199,22 @@ export default function ImportExcel() {
               )
             })()}
 
-            <div className="flex gap-3">
+            <div className="flex flex-col sm:flex-row flex-wrap gap-2 sm:gap-3">
               <button
                 onClick={() => navigate(`/app/budgets/${result.budget_id}/editor`)}
-                className="bg-[#2D8D68] hover:bg-[#1B5E4B] text-white font-semibold px-5 py-2.5 rounded-lg text-sm transition-colors"
+                className="min-h-11 sm:min-h-0 bg-[#2D8D68] hover:bg-[#1B5E4B] text-white font-semibold px-5 py-2.5 rounded-lg text-sm transition-colors"
               >
                 Abrir el presupuesto
               </button>
               <button
                 onClick={() => navigate('/app/dashboard')}
-                className="bg-white border text-gray-600 px-5 py-2.5 rounded-lg text-sm hover:bg-gray-50 transition-colors"
+                className="min-h-11 sm:min-h-0 bg-white border text-gray-600 px-5 py-2.5 rounded-lg text-sm hover:bg-gray-50 transition-colors"
               >
                 Volver a Mis presupuestos
               </button>
               <button
                 onClick={() => { setFile(null); setResult(null) }}
-                className="bg-white border text-gray-600 px-5 py-2.5 rounded-lg text-sm hover:bg-gray-50 transition-colors"
+                className="min-h-11 sm:min-h-0 bg-white border text-gray-600 px-5 py-2.5 rounded-lg text-sm hover:bg-gray-50 transition-colors"
               >
                 Importar otro
               </button>

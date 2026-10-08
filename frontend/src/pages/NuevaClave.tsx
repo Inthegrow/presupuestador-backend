@@ -58,7 +58,7 @@ export default function NuevaClave() {
         <p className="text-sm text-gray-600 mb-5">El enlace venció o ya se usó. Pedí uno nuevo y listo.</p>
         <Link
           to="/olvide-mi-clave"
-          className="block text-center bg-[#2D8D68] hover:bg-[#1B5E4B] text-white font-semibold py-2.5 rounded-lg text-sm transition-colors"
+          className="block text-center bg-[#2D8D68] hover:bg-[#1B5E4B] text-white font-semibold min-h-11 py-2.5 rounded-lg text-sm transition-colors"
         >
           Pedir un enlace nuevo
         </Link>
@@ -102,7 +102,7 @@ export default function NuevaClave() {
         <button
           type="submit"
           disabled={loading}
-          className="w-full bg-[#2D8D68] hover:bg-[#1B5E4B] disabled:opacity-60 text-white font-semibold py-2.5 rounded-lg text-sm transition-colors flex items-center justify-center gap-2"
+          className="w-full bg-[#2D8D68] hover:bg-[#1B5E4B] disabled:opacity-60 text-white font-semibold min-h-11 py-2.5 rounded-lg text-sm transition-colors flex items-center justify-center gap-2"
         >
           {loading ? (
             <>

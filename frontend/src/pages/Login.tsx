@@ -48,12 +48,15 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-screen bg-[#F5F6F8] flex items-center justify-center px-4">
+    // html y body no se deslizan (la app tiene su propio lugar que se desliza): esta pantalla se desliza sola,
+    // así en un celular chico o con el teclado abierto se llega a todo
+    <div className="h-full overflow-y-auto bg-[#F5F6F8]">
+    <div className="min-h-full flex items-center justify-center px-4 py-6">
       <div className="w-full max-w-md">
         {/* Card */}
         <div className="bg-white rounded-2xl border shadow-sm overflow-hidden">
           {/* Header */}
-          <div className="bg-[#143D34] px-8 py-8 flex flex-col items-center">
+          <div className="bg-[#143D34] px-6 sm:px-8 py-6 sm:py-8 flex flex-col items-center">
             {SOLE_LOGO}
             <div className="mt-4 text-center">
               <div className="text-white font-extrabold text-xl tracking-wide">SOLE</div>
@@ -66,7 +69,7 @@ export default function Login() {
           </div>
 
           {/* Form */}
-          <div className="px-8 py-6">
+          <div className="px-5 sm:px-8 py-6">
             <h2 className="font-bold text-gray-900 text-lg mb-1">Iniciar sesión</h2>
             <p className="text-gray-500 text-sm mb-6">Entrá con el mismo mail y clave de SOLÉ.</p>
 
@@ -78,9 +81,12 @@ export default function Login() {
 
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1.5">Mail</label>
+                <label htmlFor="login-mail" className="block text-xs font-semibold text-gray-700 mb-1.5">Mail</label>
                 <input
+                  id="login-mail"
                   type="email"
+                  autoComplete="email"
+                  inputMode="email"
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
@@ -89,9 +95,11 @@ export default function Login() {
                 />
               </div>
               <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1.5">Clave</label>
+                <label htmlFor="login-clave" className="block text-xs font-semibold text-gray-700 mb-1.5">Clave</label>
                 <input
+                  id="login-clave"
                   type="password"
+                  autoComplete="current-password"
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
@@ -100,14 +108,14 @@ export default function Login() {
                 />
               </div>
               <div className="text-right -mt-2">
-                <Link to="/olvide-mi-clave" className="text-xs text-[#2D8D68] hover:text-[#1B5E4B] font-medium">
+                <Link to="/olvide-mi-clave" className="inline-block py-2 sm:py-0 text-xs text-[#2D8D68] hover:text-[#1B5E4B] font-medium">
                   Olvidé mi clave
                 </Link>
               </div>
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full bg-[#2D8D68] hover:bg-[#1B5E4B] disabled:opacity-60 text-white font-semibold py-2.5 rounded-lg text-sm transition-colors flex items-center justify-center gap-2"
+                className="w-full min-h-11 bg-[#2D8D68] hover:bg-[#1B5E4B] disabled:opacity-60 text-white font-semibold py-2.5 rounded-lg text-sm transition-colors flex items-center justify-center gap-2"
               >
                 {loading ? (
                   <>
@@ -124,6 +132,7 @@ export default function Login() {
           </div>
         </div>
       </div>
+    </div>
     </div>
   )
 }

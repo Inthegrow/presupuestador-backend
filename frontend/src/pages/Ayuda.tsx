@@ -58,11 +58,11 @@ export default function Ayuda() {
       {/* Índice */}
       <nav aria-label="Índice" className="bg-[#F0FAF5] border border-[#CFE8DB] rounded-xl p-4 mb-6">
         <div className="text-[10px] font-bold text-[#2D8D68] tracking-wider mb-2">EN ESTA PÁGINA</div>
-        <ol className="space-y-1.5 text-sm">
+        <ol className="space-y-1.5 max-md:space-y-0 text-sm">
           {SECCIONES.map((s, i) => (
-            <li key={s.id} className="flex gap-2">
+            <li key={s.id} className="flex items-baseline gap-2">
               <span className="text-gray-400 w-4 shrink-0">{i + 1}.</span>
-              <a href={`#${s.id}`} onClick={(e) => irA(e, s.id)} className="text-[#1B5E4B] hover:underline">{s.titulo}</a>
+              <a href={`#${s.id}`} onClick={(e) => irA(e, s.id)} className="text-[#1B5E4B] hover:underline max-md:inline-block max-md:py-2">{s.titulo}</a>
             </li>
           ))}
         </ol>
@@ -72,7 +72,7 @@ export default function Ayuda() {
         <Pasos>
           <li>
             <b>Entrar a Cargar obra.</b> Desde SOLÉ: Crecer → Presupuestador → Abrir el Presupuestador, con el mismo mail
-            y clave de SOLÉ. En el menú de la izquierda, Cargar obra.
+            y clave de SOLÉ. En el menú de la izquierda (en el celular, ☰), Cargar obra.
           </li>
           <li>
             <b>Arrastrar el Excel de la obra.</b> El de siempre, el que tiene la hoja 01_C&amp;P. No hay que agregarle

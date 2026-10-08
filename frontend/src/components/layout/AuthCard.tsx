@@ -27,10 +27,11 @@ export default function AuthCard({
   children: ReactNode
 }) {
   return (
-    <div className="min-h-screen bg-[#F5F6F8] flex items-center justify-center px-4 py-8">
+    <div className="h-full overflow-y-auto bg-[#F5F6F8]">
+    <div className="min-h-full flex items-center justify-center px-4 py-6 sm:py-8">
       <div className="w-full max-w-md">
         <div className="bg-white rounded-2xl border shadow-sm overflow-hidden">
-          <div className="bg-[#143D34] px-8 py-8 flex flex-col items-center">
+          <div className="bg-[#143D34] px-6 sm:px-8 py-6 sm:py-8 flex flex-col items-center">
             {SOLE_LOGO}
             <div className="mt-4 text-center">
               <div className="text-white font-extrabold text-xl tracking-wide">SOLE</div>
@@ -40,13 +41,14 @@ export default function AuthCard({
               <div className="text-white font-semibold text-sm">PRESUPUESTADOR PRO</div>
             </div>
           </div>
-          <div className="px-8 py-6">
+          <div className="px-5 sm:px-8 py-6">
             <h2 className="font-bold text-gray-900 text-lg mb-1">{title}</h2>
             {subtitle && <p className="text-gray-500 text-sm mb-6">{subtitle}</p>}
             {children}
           </div>
         </div>
       </div>
+    </div>
     </div>
   )
 }

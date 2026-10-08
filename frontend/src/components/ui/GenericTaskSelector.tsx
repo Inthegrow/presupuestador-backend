@@ -143,20 +143,20 @@ export default function GenericTaskSelector({ selection, onChange }: GenericTask
   return (
     <div className="space-y-3">
       {/* Header with bulk actions */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="text-sm text-gray-500">
           <span className="font-semibold text-[#2D8D68]">{totalSelected}</span> de {totalItems} trabajos elegidos
         </div>
         <div className="flex gap-2">
           <button
             onClick={selectAll}
-            className="text-xs font-medium text-[#2D8D68] hover:text-[#1B5E4B] bg-[#E8F5EE] hover:bg-[#D4EDDF] px-3 py-1.5 rounded-md transition-colors"
+            className="min-h-10 md:min-h-0 text-xs font-medium text-[#2D8D68] hover:text-[#1B5E4B] bg-[#E8F5EE] hover:bg-[#D4EDDF] px-3 py-1.5 rounded-md transition-colors"
           >
             Tildar todos
           </button>
           <button
             onClick={deselectAll}
-            className="text-xs font-medium text-gray-500 hover:text-gray-700 bg-gray-100 hover:bg-gray-200 px-3 py-1.5 rounded-md transition-colors"
+            className="min-h-10 md:min-h-0 text-xs font-medium text-gray-500 hover:text-gray-700 bg-gray-100 hover:bg-gray-200 px-3 py-1.5 rounded-md transition-colors"
           >
             Destildar todos
           </button>
@@ -177,7 +177,7 @@ export default function GenericTaskSelector({ selection, onChange }: GenericTask
           >
             {/* Category header */}
             <div
-              className="bg-gray-50 px-4 py-3 flex items-center gap-3 cursor-pointer select-none hover:bg-gray-100 transition-colors"
+              className="bg-gray-50 px-3 md:px-4 py-3 flex items-center gap-2.5 md:gap-3 cursor-pointer select-none hover:bg-gray-100 transition-colors"
               onClick={() => toggleCategory(cat.code)}
             >
               {/* Expand/collapse arrow */}
@@ -194,7 +194,7 @@ export default function GenericTaskSelector({ selection, onChange }: GenericTask
                 role="checkbox"
                 aria-checked={allSelected ? true : someSelected ? 'mixed' : false}
                 aria-label={`Todo el rubro ${cat.nombre}`}
-                className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors flex-shrink-0 ${
+                className={`relative after:absolute after:-inset-2.5 after:content-[''] w-6 h-6 md:w-5 md:h-5 rounded border-2 flex items-center justify-center transition-colors flex-shrink-0 ${
                   allSelected
                     ? 'bg-[#2D8D68] border-[#2D8D68] text-white'
                     : someSelected
@@ -206,7 +206,7 @@ export default function GenericTaskSelector({ selection, onChange }: GenericTask
               </button>
 
               <span className="text-xs font-bold text-[#2D8D68] w-5">{cat.code}.</span>
-              <span className="text-sm font-semibold text-gray-800 flex-1">{cat.nombre}</span>
+              <span className="text-sm font-semibold text-gray-800 flex-1 min-w-0">{cat.nombre}</span>
               <span className="text-xs text-gray-400">
                 {catCount}/{cat.items.length}
               </span>
@@ -214,13 +214,13 @@ export default function GenericTaskSelector({ selection, onChange }: GenericTask
 
             {/* Items */}
             {isExpanded && (
-              <div className="px-4 py-2 space-y-1">
+              <div className="px-2 md:px-4 py-2 space-y-1">
                 {cat.items.map((item, idx) => {
                   const itemSel = selection[cat.code][idx]
                   return (
                     <div
                       key={idx}
-                      className={`flex items-center gap-3 py-1.5 px-2 rounded-md transition-colors ${
+                      className={`flex flex-wrap md:flex-nowrap items-center gap-x-3 gap-y-1.5 min-h-11 md:min-h-0 py-1.5 px-2 rounded-md transition-colors ${
                         itemSel.selected ? 'bg-[#E8F5EE]/50' : 'hover:bg-gray-50'
                       }`}
                     >
@@ -230,7 +230,7 @@ export default function GenericTaskSelector({ selection, onChange }: GenericTask
                         role="checkbox"
                         aria-checked={itemSel.selected}
                         aria-label={item.descripcion}
-                        className="flex-shrink-0 text-gray-400 hover:text-[#2D8D68] transition-colors"
+                        className="relative after:absolute after:-inset-2.5 after:content-[''] flex-shrink-0 text-gray-400 hover:text-[#2D8D68] transition-colors"
                       >
                         {itemSel.selected ? (
                           <CheckSquare size={18} className="text-[#2D8D68]" />
@@ -241,7 +241,8 @@ export default function GenericTaskSelector({ selection, onChange }: GenericTask
 
                       {/* Description */}
                       <span
-                        className={`flex-1 text-sm ${
+                        onClick={() => toggleItem(cat.code, idx)}
+                        className={`flex-1 min-w-0 text-sm cursor-pointer md:cursor-auto ${
                           itemSel.selected ? 'text-gray-800' : 'text-gray-500'
                         }`}
                       >
@@ -263,7 +264,8 @@ export default function GenericTaskSelector({ selection, onChange }: GenericTask
                           aria-label={`Cantidad de ${item.descripcion}`}
                           min={0}
                           step="any"
-                          className="w-20 border border-gray-200 rounded px-2 py-1 text-sm text-right focus:outline-none focus:ring-1 focus:ring-[#2D8D68]/30 focus:border-[#2D8D68] transition-all"
+                          inputMode="decimal"
+                          className="w-20 min-h-10 md:min-h-0 border border-gray-200 rounded px-2 py-1 text-sm text-right focus:outline-none focus:ring-1 focus:ring-[#2D8D68]/30 focus:border-[#2D8D68] transition-all"
                         />
                       )}
                     </div>

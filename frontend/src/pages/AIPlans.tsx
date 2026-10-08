@@ -220,7 +220,7 @@ export default function AIPlans() {
 
   if (!puedeEditar) {
     return (
-      <div className="p-6 fade-in">
+      <div className="p-4 md:p-6 fade-in">
         <div className="flex items-center gap-2 text-[#2D8D68] text-[11px] font-bold tracking-wider mb-1">
           <Layers size={14} /> INTELIGENCIA ARTIFICIAL
         </div>
@@ -232,7 +232,7 @@ export default function AIPlans() {
   }
 
   return (
-    <div className="p-6 fade-in">
+    <div className="p-4 md:p-6 fade-in">
       {/* Header */}
       <div className="flex items-center gap-2 text-[#2D8D68] text-[11px] font-bold tracking-wider mb-1">
         <Layers size={14} /> INTELIGENCIA ARTIFICIAL
@@ -277,6 +277,7 @@ export default function AIPlans() {
           <FileUpload
             accept="image/*,.pdf"
             label="Arrastrá el plano acá"
+            labelCelular="Elegí el plano (foto o PDF)"
             hint="JPG, PNG, WEBP o PDF, hasta 20 MB"
             onFile={handleFile}
             icon={
@@ -465,7 +466,7 @@ export default function AIPlans() {
                                 {/* Checkbox */}
                                 <button
                                   onClick={() => toggleItem(item._key)}
-                                  className={`mt-0.5 w-5 h-5 rounded border-2 flex-shrink-0 flex items-center justify-center transition-colors ${
+                                  className={`relative after:absolute after:-inset-2.5 after:content-[''] mt-0.5 w-6 h-6 md:w-5 md:h-5 rounded border-2 flex-shrink-0 flex items-center justify-center transition-colors ${
                                     item.accepted
                                       ? 'bg-[#2D8D68] border-[#2D8D68] text-white'
                                       : 'border-gray-300 hover:border-[#2D8D68]'
@@ -495,7 +496,7 @@ export default function AIPlans() {
                                   </div>
 
                                   {/* Unit + editable quantity + notes */}
-                                  <div className="flex items-center gap-3 mt-1.5">
+                                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5">
                                     <span className="text-[10px] text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">
                                       {item.unidad}
                                     </span>
@@ -507,7 +508,7 @@ export default function AIPlans() {
                                         onChange={(e) =>
                                           updateCantidad(item._key, parseFloat(e.target.value) || 0)
                                         }
-                                        className="w-16 text-xs text-right border border-gray-200 rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-[#2D8D68]/30 focus:border-[#2D8D68]"
+                                        className="w-20 md:w-16 max-md:min-h-10 text-xs text-right border border-gray-200 rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-[#2D8D68]/30 focus:border-[#2D8D68]"
                                         step="0.1"
                                         min="0"
                                       />
@@ -544,14 +545,14 @@ export default function AIPlans() {
                 </div>
 
                 {/* Footer */}
-                <div className="p-4 border-t bg-gray-50 flex items-center justify-between">
+                <div className="p-4 border-t bg-gray-50 flex flex-wrap items-center justify-between gap-2">
                   <span className="text-xs text-gray-500">
                     {accepted.length} de {totalItems} trabajos tildados
                   </span>
                   <button
                     onClick={addAccepted}
                     disabled={accepted.length === 0 || saving || done}
-                    className="bg-[#2D8D68] hover:bg-[#1B5E4B] disabled:opacity-50 text-white font-semibold px-5 py-2.5 rounded-lg text-xs transition-colors flex items-center gap-2"
+                    className="max-sm:w-full justify-center min-h-11 sm:min-h-0 bg-[#2D8D68] hover:bg-[#1B5E4B] disabled:opacity-50 text-white font-semibold px-5 py-2.5 rounded-lg text-xs transition-colors flex items-center gap-2"
                   >
                     {saving && (
                       <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />

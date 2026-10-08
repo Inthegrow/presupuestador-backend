@@ -50,7 +50,7 @@ export default function AddItemForm({ suggestedCode, onSubmit, onCancel }: AddIt
   }
 
   const inputClass =
-    'w-full px-2 py-1.5 text-xs border border-gray-200 rounded-md focus:outline-none focus:ring-1 focus:ring-[#2D8D68] focus:border-[#2D8D68] bg-white'
+    'w-full px-2 py-1.5 max-md:h-11 max-md:px-3 text-xs border border-gray-200 rounded-md max-md:rounded-lg focus:outline-none focus:ring-1 focus:ring-[#2D8D68] focus:border-[#2D8D68] bg-white'
 
   return (
     <div className="border border-[#2D8D68]/30 bg-[#F8FDFB] rounded-lg mx-4 my-3 p-3">
@@ -60,7 +60,7 @@ export default function AddItemForm({ suggestedCode, onSubmit, onCancel }: AddIt
           onClick={onCancel}
           title="Cerrar"
           aria-label="Cerrar"
-          className="text-gray-400 hover:text-gray-600 transition-colors"
+          className="text-gray-400 hover:text-gray-600 transition-colors max-md:w-10 max-md:h-10 max-md:-mr-2 max-md:flex max-md:items-center max-md:justify-center"
         >
           <X size={14} />
         </button>
@@ -69,7 +69,7 @@ export default function AddItemForm({ suggestedCode, onSubmit, onCancel }: AddIt
       <div className="grid grid-cols-2 sm:grid-cols-12 gap-2">
         {/* Código */}
         <label className="col-span-1 sm:col-span-2">
-          <span className="block text-[10px] text-gray-500 mb-0.5 font-medium">Código</span>
+          <span className="block text-[10px] max-md:text-xs text-gray-500 mb-0.5 font-medium">Código</span>
           <input
             type="text"
             value={code}
@@ -81,7 +81,7 @@ export default function AddItemForm({ suggestedCode, onSubmit, onCancel }: AddIt
 
         {/* Descripción */}
         <label className="col-span-2 sm:col-span-4 order-first sm:order-none">
-          <span className="block text-[10px] text-gray-500 mb-0.5 font-medium">Descripción</span>
+          <span className="block text-[10px] max-md:text-xs text-gray-500 mb-0.5 font-medium">Descripción</span>
           <input
             type="text"
             value={description}
@@ -94,7 +94,7 @@ export default function AddItemForm({ suggestedCode, onSubmit, onCancel }: AddIt
 
         {/* Unidad */}
         <label className="col-span-1 sm:col-span-1">
-          <span className="block text-[10px] text-gray-500 mb-0.5 font-medium">Unidad</span>
+          <span className="block text-[10px] max-md:text-xs text-gray-500 mb-0.5 font-medium">Unidad</span>
           <select
             value={unidad}
             onChange={(e) => setUnidad(e.target.value)}
@@ -110,7 +110,7 @@ export default function AddItemForm({ suggestedCode, onSubmit, onCancel }: AddIt
 
         {/* Cantidad */}
         <label className="col-span-1 sm:col-span-1">
-          <span className="block text-[10px] text-gray-500 mb-0.5 font-medium">Cantidad</span>
+          <span className="block text-[10px] max-md:text-xs text-gray-500 mb-0.5 font-medium">Cantidad</span>
           <input
             type="number"
             value={cantidad}
@@ -123,7 +123,7 @@ export default function AddItemForm({ suggestedCode, onSubmit, onCancel }: AddIt
 
         {/* Materiales por unidad */}
         <label className="col-span-1 sm:col-span-2">
-          <span className="block text-[10px] text-gray-500 mb-0.5 font-medium">Materiales por unidad</span>
+          <span className="block text-[10px] max-md:text-xs text-gray-500 mb-0.5 font-medium">Materiales por unidad</span>
           <input
             type="number"
             value={matUnitario}
@@ -136,7 +136,7 @@ export default function AddItemForm({ suggestedCode, onSubmit, onCancel }: AddIt
 
         {/* Mano de obra por unidad */}
         <label className="col-span-1 sm:col-span-2">
-          <span className="block text-[10px] text-gray-500 mb-0.5 font-medium">Mano de obra por unidad</span>
+          <span className="block text-[10px] max-md:text-xs text-gray-500 mb-0.5 font-medium">Mano de obra por unidad</span>
           <input
             type="number"
             value={moUnitario}
@@ -155,14 +155,14 @@ export default function AddItemForm({ suggestedCode, onSubmit, onCancel }: AddIt
       <div className="flex items-center justify-end gap-2 mt-2.5">
         <button
           onClick={onCancel}
-          className="px-3 py-1 text-xs text-gray-500 hover:text-gray-700 font-medium transition-colors"
+          className="px-3 py-1 max-md:min-h-11 max-md:px-4 max-md:text-sm text-xs text-gray-500 hover:text-gray-700 font-medium transition-colors"
         >
           Cancelar
         </button>
         <button
           onClick={handleSubmit}
           disabled={submitting}
-          className="px-3 py-1.5 text-xs bg-[#2D8D68] hover:bg-[#1B5E4B] disabled:opacity-50 text-white font-semibold rounded-md transition-colors"
+          className="px-3 py-1.5 max-md:min-h-11 max-md:px-5 max-md:text-sm max-md:rounded-lg text-xs bg-[#2D8D68] hover:bg-[#1B5E4B] disabled:opacity-50 text-white font-semibold rounded-md transition-colors"
         >
           {submitting ? 'Agregando…' : 'Agregar'}
         </button>

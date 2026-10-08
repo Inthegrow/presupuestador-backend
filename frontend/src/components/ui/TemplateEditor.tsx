@@ -87,7 +87,7 @@ function errorList(err: unknown): string[] {
 }
 
 const inputBase =
-  'px-2 py-1 text-xs border border-gray-200 rounded-md bg-white focus:outline-none focus:border-[#2D8D68] focus:ring-2 focus:ring-[#2D8D68]/20'
+  'px-2 py-1 max-md:min-h-10 text-xs border border-gray-200 rounded-md bg-white focus:outline-none focus:border-[#2D8D68] focus:ring-2 focus:ring-[#2D8D68]/20'
 const inputCls = `w-full ${inputBase}`
 
 // ─── Editor ────────────────────────────────────────────────────────────────────
@@ -184,19 +184,24 @@ export default function TemplateEditor({
   const inheritedLabel = orgWaste === null || orgWaste === undefined ? '0' : String(orgWaste)
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-5xl mx-4 overflow-hidden flex flex-col max-h-[92vh]">
+    <div className="fixed inset-0 z-[70] flex items-stretch md:items-center justify-center bg-black/40 backdrop-blur-sm">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={template ? 'Editar fórmula' : 'Nueva fórmula'}
+        className="bg-white md:rounded-2xl shadow-xl w-full h-full md:h-auto max-w-5xl md:mx-4 overflow-hidden flex flex-col md:max-h-[92vh]"
+      >
         {/* Header */}
-        <div className="bg-[#E8F5EE] px-5 py-4 flex items-center justify-between border-b border-[#C3E5D3] flex-shrink-0">
+        <div className="bg-[#E8F5EE] pl-4 pr-2 md:px-5 py-2 md:py-4 flex items-center justify-between border-b border-[#C3E5D3] flex-shrink-0">
           <span className="font-bold text-[#143D34] text-base">
             {template ? 'Editar fórmula' : 'Nueva fórmula'}
           </span>
-          <button onClick={onClose} aria-label="Cerrar" className="p-1.5 rounded-lg hover:bg-[#C3E5D3] text-[#2D8D68]">
+          <button onClick={onClose} aria-label="Cerrar" className="w-10 h-10 md:w-auto md:h-auto md:p-1.5 flex items-center justify-center rounded-lg hover:bg-[#C3E5D3] text-[#2D8D68]">
             <X size={16} />
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-5 space-y-5">
+        <div className="flex-1 overflow-y-auto overscroll-contain p-4 md:p-5 space-y-5">
           {/* Datos */}
           <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
             <label className="col-span-2 text-xs text-gray-500">
@@ -232,7 +237,7 @@ export default function TemplateEditor({
               <h3 className="text-xs font-bold text-[#1B5E4B] tracking-wide">PARÁMETROS</h3>
               <button
                 onClick={() => setParams([...params, { clave: '', valor: 0 }])}
-                className="text-xs text-[#2D8D68] hover:underline flex items-center gap-1"
+                className="max-md:min-h-10 max-md:px-2 text-sm md:text-xs text-[#2D8D68] hover:underline flex items-center gap-1"
               >
                 <Plus size={12} /> Agregar
               </button>
@@ -243,18 +248,18 @@ export default function TemplateEditor({
             {params.length === 0 && <p className="text-xs text-gray-400 italic">Sin parámetros.</p>}
             <div className="space-y-1.5">
               {params.map((p, i) => (
-                <div key={i} className="grid grid-cols-12 gap-2 items-center">
-                  <input className={`${inputCls} col-span-3 font-mono`} placeholder="espesor" aria-label="Nombre del parámetro (se usa en la cantidad)" value={p.clave}
+                <div key={i} className="grid grid-cols-6 md:grid-cols-12 gap-2 items-center pb-2 md:pb-0 border-b md:border-0 border-gray-100">
+                  <input className={`${inputCls} col-span-2 md:col-span-3 font-mono`} placeholder="espesor" aria-label="Nombre del parámetro (se usa en la cantidad)" value={p.clave}
                     onChange={(e) => setParam(i, { clave: e.target.value })} />
                   <input className={`${inputCls} col-span-2 text-right`} placeholder="0.20" aria-label="Valor por defecto" value={str(p.valor)}
                     onChange={(e) => setParam(i, { valor: e.target.value })} />
                   <input className={`${inputCls} col-span-2`} placeholder="m" aria-label="Unidad del parámetro" value={p.unidad ?? ''}
                     onChange={(e) => setParam(i, { unidad: e.target.value })} />
-                  <input className={`${inputCls} col-span-4`} placeholder="Descripción (lo que se ve, ej. Espesor)" aria-label="Descripción del parámetro" value={p.descripcion ?? ''}
+                  <input className={`${inputCls} col-span-5 md:col-span-4`} placeholder="Descripción (lo que se ve, ej. Espesor)" aria-label="Descripción del parámetro" value={p.descripcion ?? ''}
                     onChange={(e) => setParam(i, { descripcion: e.target.value })} />
                   <button onClick={() => setParams(params.filter((_, j) => j !== i))}
                     aria-label="Borrar el parámetro" title="Borrar el parámetro"
-                    className="col-span-1 text-gray-400 hover:text-red-600 justify-self-center">
+                    className="col-span-1 max-md:w-10 max-md:h-10 flex items-center justify-center text-gray-400 hover:text-red-600 justify-self-center">
                     <Trash2 size={13} />
                   </button>
                 </div>
@@ -268,7 +273,7 @@ export default function TemplateEditor({
               <h3 className="text-xs font-bold text-[#1B5E4B] tracking-wide">RECURSOS</h3>
               <button
                 onClick={() => setRecursos([...recursos, { tipo: 'material', formula: 'Q' }])}
-                className="text-xs text-[#2D8D68] hover:underline flex items-center gap-1"
+                className="max-md:min-h-10 max-md:px-2 text-sm md:text-xs text-[#2D8D68] hover:underline flex items-center gap-1"
               >
                 <Plus size={12} /> Agregar
               </button>
@@ -278,9 +283,9 @@ export default function TemplateEditor({
               <span className="font-mono"> + - * / ( )</span> y parámetros. Mano de obra: días = Q / rendimiento.
               Desperdicio vacío = hereda.
             </p>
-            <div className="overflow-x-auto">
-              <table className="w-full text-[11px]">
-                <thead className="bg-gray-50 text-gray-500">
+            <div className="md:overflow-x-auto">
+              <table className="w-full text-[11px] block md:table">
+                <thead className="bg-gray-50 text-gray-500 hidden md:table-header-group">
                   <tr>
                     <th className="px-2 py-1.5 text-left font-medium">Tipo</th>
                     <th className="px-2 py-1.5 text-left font-medium">Código</th>
@@ -293,35 +298,40 @@ export default function TemplateEditor({
                     <th />
                   </tr>
                 </thead>
-                <tbody>
+                <tbody className="block md:table-row-group space-y-2 md:space-y-0">
                   {recursos.map((r, i) => {
                     const mo = r.tipo === 'mano_obra'
                     const legacyMo = mo && !str(r.rendimiento) && r.trabajadores_por_unidad !== undefined
                     const nota = r.correccion?.texto
                     return (
                       <Fragment key={i}>
-                      <tr className={`align-top ${nota ? '' : 'border-b last:border-0'}`}>
-                        <td className="px-1 py-1 w-36">
+                      <tr className={`align-top grid grid-cols-6 gap-x-2 gap-y-2 p-3 rounded-xl border border-gray-200 md:table-row md:p-0 md:rounded-none md:border-x-0 md:border-t-0 ${nota ? 'md:border-b-0' : 'md:border-b md:last:border-0'}`}>
+                        <td className="col-span-3 md:px-1 md:py-1 md:w-36">
+                          <span className="md:hidden block text-[10px] text-gray-500 mb-0.5">Tipo</span>
                           <select className={inputCls} value={r.tipo}
                             onChange={(e) => setRecurso(i, { tipo: e.target.value as TemplateResource['tipo'] })}>
                             {TIPOS.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
                           </select>
                         </td>
-                        <td className="px-1 py-1 w-24">
+                        <td className="col-span-3 md:px-1 md:py-1 md:w-24">
+                          <span className="md:hidden block text-[10px] text-gray-500 mb-0.5">Código</span>
                           <input className={`${inputCls} font-mono`} value={r.codigo ?? ''}
                             onChange={(e) => setRecurso(i, { codigo: e.target.value })} />
                         </td>
-                        <td className="px-1 py-1">
+                        <td className="col-span-6 md:px-1 md:py-1">
+                          <span className="md:hidden block text-[10px] text-gray-500 mb-0.5">Descripción</span>
                           <input className={inputCls} value={r.descripcion ?? ''}
                             onChange={(e) => setRecurso(i, { descripcion: e.target.value })} />
                         </td>
-                        <td className="px-1 py-1 w-16">
-                          {mo ? <span className="text-gray-400 px-2">jornal</span> : (
+                        <td className="col-span-2 md:px-1 md:py-1 md:w-16">
+                          <span className="md:hidden block text-[10px] text-gray-500 mb-0.5">Unidad</span>
+                          {mo ? <span className="text-gray-400 px-2 max-md:leading-10">jornal</span> : (
                             <input className={inputCls} value={r.unidad ?? ''}
                               onChange={(e) => setRecurso(i, { unidad: e.target.value })} />
                           )}
                         </td>
-                        <td className="px-1 py-1 w-56">
+                        <td className="col-span-4 md:px-1 md:py-1 md:w-56">
+                          <span className="md:hidden block text-[10px] text-gray-500 mb-0.5">{mo ? 'Rendimiento' : 'Cantidad'}</span>
                           {mo ? (
                             <div className="flex gap-1 items-center">
                               <input className={`${inputBase} w-12 text-right`} title="Trabajadores" placeholder="1"
@@ -340,23 +350,30 @@ export default function TemplateEditor({
                             </p>
                           )}
                         </td>
-                        <td className="px-1 py-1 w-20">
+                        <td className={`col-span-2 md:px-1 md:py-1 md:w-20 ${mo ? 'max-md:hidden' : ''}`}>
+                          {!mo && <span className="md:hidden block text-[10px] text-gray-500 mb-0.5">Desperdicio %</span>}
                           {!mo && (
                             <input className={`${inputCls} text-right`} placeholder="hereda" value={str(r.desperdicio_pct)}
                               onChange={(e) => setRecurso(i, { desperdicio_pct: e.target.value })} />
                           )}
                         </td>
-                        <td className="px-1 py-1 text-center">
+                        <td className={`col-span-2 md:px-1 md:py-1 md:text-center ${mo ? 'max-md:hidden' : ''}`}>
                           {!mo && (
-                            <input type="checkbox" checked={!!r.lo_compra_cliente}
-                              onChange={(e) => setRecurso(i, { lo_compra_cliente: e.target.checked })} />
+                            <label className="max-md:flex max-md:items-center max-md:gap-2 max-md:min-h-10 max-md:text-xs max-md:text-gray-600">
+                              <input type="checkbox" checked={!!r.lo_compra_cliente} aria-label="Lo compra el cliente"
+                                className="max-md:w-5 max-md:h-5"
+                                onChange={(e) => setRecurso(i, { lo_compra_cliente: e.target.checked })} />
+                              <span className="md:hidden">Lo compra el cliente</span>
+                            </label>
                           )}
                         </td>
-                        <td className="px-1 py-1 w-24">
+                        <td className={`col-span-4 md:px-1 md:py-1 md:w-24 ${mo ? 'max-md:hidden' : ''}`}>
                           {!mo && (
-                            <div className="flex items-center gap-1">
-                              <input type="checkbox" checked={!!r.redondear}
+                            <div className="flex items-center gap-1 max-md:gap-2 max-md:min-h-10">
+                              <input type="checkbox" checked={!!r.redondear} aria-label="Redondear a unidad de compra"
+                                className="max-md:w-5 max-md:h-5"
                                 onChange={(e) => setRecurso(i, { redondear: e.target.checked })} />
+                              <span className="md:hidden text-xs text-gray-600 whitespace-nowrap">Redondea</span>
                               {r.redondear && (
                                 <input className={`${inputCls} text-right`} title="Tamaño de la unidad de compra (ej. 50 kg por bolsa)"
                                   placeholder="1" value={str(r.unidad_compra)}
@@ -365,17 +382,18 @@ export default function TemplateEditor({
                             </div>
                           )}
                         </td>
-                        <td className="px-1 py-1">
+                        <td className="col-span-6 md:col-span-1 md:px-1 md:py-1 max-md:border-t max-md:border-gray-100 max-md:pt-1 max-md:-mb-1">
                           <button onClick={() => setRecursos(recursos.filter((_, j) => j !== i))}
-                            className="text-gray-400 hover:text-red-600 p-1">
-                            <Trash2 size={13} />
+                            aria-label="Borrar el recurso" title="Borrar el recurso"
+                            className="text-gray-400 hover:text-red-600 p-1 max-md:min-h-10 max-md:w-full max-md:flex max-md:items-center max-md:justify-center max-md:gap-1.5 max-md:text-xs">
+                            <Trash2 size={13} /><span className="md:hidden">Borrar el recurso</span>
                           </button>
                         </td>
                       </tr>
                       {nota && (
-                        <tr className="border-b last:border-0">
-                          <td />
-                          <td colSpan={8} className="px-1 pb-1.5">
+                        <tr className="block md:table-row md:border-b md:last:border-0">
+                          <td className="hidden md:table-cell" />
+                          <td colSpan={8} className="block md:table-cell px-1 pb-1.5">
                             <NotaCorreccion texto={nota} />
                           </td>
                         </tr>
@@ -390,7 +408,7 @@ export default function TemplateEditor({
 
           {/* Prueba */}
           <section className="bg-gray-50 rounded-xl border border-gray-100 p-4">
-            <div className="flex items-center gap-3 mb-3">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2 mb-3">
               <FlaskConical size={14} className="text-[#2D8D68]" />
               <h3 className="text-xs font-bold text-[#1B5E4B] tracking-wide">PROBAR</h3>
               <label className="text-xs text-gray-500 flex items-center gap-1 whitespace-nowrap">
@@ -406,7 +424,8 @@ export default function TemplateEditor({
                 ))}
               </ul>
             ) : (
-              <table className="w-full text-[11px]">
+              <div className="overflow-x-auto">
+              <table className="w-full min-w-[480px] md:min-w-0 text-[11px]">
                 <thead className="text-gray-500">
                   <tr>
                     <th className="text-left font-medium py-1">Recurso</th>
@@ -437,6 +456,7 @@ export default function TemplateEditor({
                   ))}
                 </tbody>
               </table>
+              </div>
             )}
             <p className="text-[10px] text-gray-400 mt-2">
               El redondeo a unidad de compra se aplica al recalcular la obra, sobre el total de todos los trabajos.
@@ -445,17 +465,17 @@ export default function TemplateEditor({
         </div>
 
         {/* Footer */}
-        <div className="border-t px-5 py-3 flex items-center justify-between gap-3 flex-shrink-0">
-          <ul className="text-xs text-red-700 flex-1">
+        <div className="border-t px-4 md:px-5 py-3 flex flex-wrap items-center justify-between gap-2 md:gap-3 flex-shrink-0" style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}>
+          <ul className="text-xs text-red-700 basis-full md:basis-auto flex-1">
             {saveErrors.map((e, i) => <li key={i}>{e}</li>)}
           </ul>
-          <button onClick={onClose} className="text-sm text-gray-500 px-4 py-2 hover:bg-gray-100 rounded-xl">
+          <button onClick={onClose} className="flex-1 md:flex-none min-h-11 md:min-h-0 text-sm text-gray-500 px-4 py-2 hover:bg-gray-100 rounded-xl">
             Cancelar
           </button>
           <button
             onClick={handleSave}
             disabled={saving}
-            className="bg-[#2D8D68] hover:bg-[#1B5E4B] disabled:opacity-60 text-white font-semibold px-6 py-2 rounded-xl text-sm"
+            className="flex-1 md:flex-none min-h-11 md:min-h-0 bg-[#2D8D68] hover:bg-[#1B5E4B] disabled:opacity-60 text-white font-semibold px-6 py-2 rounded-xl text-sm"
           >
             {saving ? 'Guardando...' : 'Guardar'}
           </button>
