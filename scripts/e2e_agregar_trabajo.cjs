@@ -143,6 +143,8 @@ const j = async (method, url, body) => (await fetch(API + url, { method, headers
   const m = await b.newPage({ viewport: { width: 400, height: 800 } });
   await m.goto(`${B}/app/budgets/${bud.id}/editor`); await m.waitForTimeout(2500);
   await m.screenshot({ path: SHOTS + '/10_celular.png', fullPage: true });
+  // En el celular "Agregá un trabajo" arranca plegado como un botón (PLAN_CELULAR 1.B)
+  await m.getByTestId('desplegar-agregar').click(); await m.waitForTimeout(200);
   await m.getByPlaceholder('hueco 18, contrapiso, pintura…').pressSequentially('hueco 18', { delay: 20 }); await m.waitForTimeout(1200);
   await m.screenshot({ path: SHOTS + '/11_celular_quizas.png', fullPage: true });
   console.log(`\n${ok} OK, ${bad} FALLAS`); await b.close(); if (bad) process.exit(1);

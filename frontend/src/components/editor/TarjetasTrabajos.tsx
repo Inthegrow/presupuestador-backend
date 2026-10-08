@@ -14,6 +14,8 @@ interface Props {
   onViewDetail: (itemId: string) => void
   onDeleteItem?: (itemId: string, description: string) => void
   semaforo?: (item: BudgetItem) => { estado: Semaforo; frase: string } | null
+  // El trabajo recién agregado: se resalta un momento
+  resaltar?: string | null
 }
 
 const fmtCantidad = (v: number | null | undefined) =>
@@ -29,8 +31,9 @@ function leerCantidad(t: string): number | null {
 }
 
 function Tarjeta({
-  item, puedeEditar, editando, onEditar, onDejarDeEditar, onGuardar, onVer, onMenu, semaforo,
+  item, puedeEditar, editando, onEditar, onDejarDeEditar, onGuardar, onVer, onMenu, semaforo, resaltada,
 }: {
+  resaltada: boolean
   item: BudgetItem
   puedeEditar: boolean
   editando: boolean
@@ -89,7 +92,7 @@ function Tarjeta({
       data-testid="tarjeta-trabajo"
       data-id={item.id}
       className={`relative bg-white rounded-2xl border shadow-sm transition-colors duration-500 ${
-        recien ? 'border-[#2D8D68] bg-[#F2FBF6]' : error ? 'border-red-300' : 'border-gray-100'}`}
+        recien || resaltada ? 'border-[#2D8D68] bg-[#F2FBF6] ring-2 ring-[#2D8D68]/15' : error ? 'border-red-300' : 'border-gray-100'}`}
     >
       <button
         type="button"
@@ -98,6 +101,9 @@ function Tarjeta({
       >
         <span className="flex items-center gap-2 min-w-0">
           <span className="font-mono text-[11px] text-gray-500 bg-gray-100 rounded px-1.5 py-0.5 flex-shrink-0">{item.code || '—'}</span>
+          {resaltada && (
+            <span data-testid="recien-agregado" className="text-[11px] font-bold text-white bg-[#2D8D68] rounded-full px-2 py-0.5 flex-shrink-0">Recién agregado</span>
+          )}
           {semaforo && (
             <span className="inline-flex items-center gap-1.5 min-w-0 text-[12px] text-gray-500" title={semaforo.frase}>
               <span
@@ -201,7 +207,7 @@ function Tarjeta({
 }
 
 /** Los trabajos como tarjetas (celular): tocar abre el detalle; la cantidad se cambia desde la tarjeta. */
-export default function TarjetasTrabajos({ items, onEditItem, onViewDetail, onDeleteItem, semaforo }: Props) {
+export default function TarjetasTrabajos({ items, onEditItem, onViewDetail, onDeleteItem, semaforo, resaltar }: Props) {
   const [editandoId, setEditandoId] = useState<string | null>(null)
   const [menu, setMenu] = useState<BudgetItem | null>(null)
   const [confirmarBorrar, setConfirmarBorrar] = useState(false)
@@ -224,6 +230,7 @@ export default function TarjetasTrabajos({ items, onEditItem, onViewDetail, onDe
             onVer={() => onViewDetail(item.id)}
             onMenu={() => { setConfirmarBorrar(false); setMenu(item) }}
             semaforo={semaforo?.(item) ?? null}
+            resaltada={!!resaltar && resaltar === item.id}
           />
         ))}
       </ul>

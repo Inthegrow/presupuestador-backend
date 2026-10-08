@@ -301,15 +301,18 @@ export default function Sidebar({
         <div className="h-[53px] flex items-center justify-center border-b">
           <LogoSole size={28} />
         </div>
-        <MenuEntradas
-          modo={modo}
-          puedeEditar={puedeEditar}
-          currentBudgetId={currentBudgetId}
-          budgetName={budgetName}
-          onPista={setPista}
-          onVolver={() => navigate('/app/dashboard')}
-          mostrarPista={mostrar}
-        />
+        {/* En una notebook baja con el proyecto abierto no entra todo: el medio del menú se desliza */}
+        <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden pb-2" onScroll={() => setPista(null)}>
+          <MenuEntradas
+            modo={modo}
+            puedeEditar={puedeEditar}
+            currentBudgetId={currentBudgetId}
+            budgetName={budgetName}
+            onPista={setPista}
+            onVolver={() => navigate('/app/dashboard')}
+            mostrarPista={mostrar}
+          />
+        </div>
         {botonAncho}
         <div className="py-2 border-t flex justify-center">
           <div
@@ -359,13 +362,16 @@ export default function Sidebar({
         </div>
       </div>
 
-      <MenuEntradas
-        modo={modo}
-        puedeEditar={puedeEditar}
-        currentBudgetId={currentBudgetId}
-        budgetName={budgetName}
-        onVolver={() => navigate('/app/dashboard')}
-      />
+      {/* En una notebook baja con el proyecto abierto no entra todo: el medio del menú se desliza */}
+      <div className="flex-1 min-h-0 overflow-y-auto pb-2">
+        <MenuEntradas
+          modo={modo}
+          puedeEditar={puedeEditar}
+          currentBudgetId={currentBudgetId}
+          budgetName={budgetName}
+          onVolver={() => navigate('/app/dashboard')}
+        />
+      </div>
       {botonAncho}
 
       {/* User */}
@@ -482,7 +488,7 @@ function MenuEntradas({
       ))}
 
       {/* CONFIGURACIÓN — always visible */}
-      <div className={angosto ? 'flex-1 overflow-y-auto overflow-x-hidden' : cajon ? 'px-2 pb-2' : 'px-2 flex-1 overflow-y-auto'}>
+      <div className={angosto ? '' : 'px-2 pb-2'}>
         <Grupo modo={modo}>CONFIGURACIÓN</Grupo>
         <nav className={angosto ? 'space-y-1' : cajon ? 'space-y-0.5' : 'space-y-0.5 text-[13px]'}>
           {item('/app/settings/markups', (s) => <Settings size={s} />, 'Coeficiente de pase')}

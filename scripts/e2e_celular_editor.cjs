@@ -140,6 +140,15 @@ async function captura(page, nombre, entera = false) {
   check(anchoEscalera >= 390 - 32 - 1, `celular: la escalera usa el ancho de la ventana menos 32 px (${Math.round(anchoEscalera)} px)`)
   check(await m.getByTestId('precio-sin-iva').isVisible() && await m.getByTestId('precio-con-iva').isVisible(), 'celular: la tarjeta muestra el precio sin IVA y con IVA')
   check(await m.getByTestId('escalera-indirectos').count() === 0, 'celular: la escalera arranca cerrada')
+  const altoEscalera = (await m.getByTestId('escalera').boundingBox())?.height ?? 999
+  check(altoEscalera <= 140, `celular: la escalera cerrada es compacta (${Math.round(altoEscalera)} px)`)
+  check(/con IVA\s+\$[\d.]+/.test(await m.getByTestId('escalera').innerText()) && /costo directo\s+\$[\d.]+/.test(await m.getByTestId('escalera').innerText()),
+    'celular: la tarjeta dice "con IVA $… · costo directo $…"')
+  const primera = await tarjetas.first().boundingBox()
+  const bajado = await m.evaluate(() => document.querySelector('main').scrollTop)
+  check(!!primera && primera.y < 640 && bajado === 0, `celular: la primera tarjeta de trabajo arranca antes de los 640 px, sin bajar (${primera && Math.round(primera.y)} px)`)
+  check(await m.getByTestId('desplegar-agregar').isVisible() && await m.getByPlaceholder('hueco 18, contrapiso, pintura…').count() === 0,
+    'celular: "Agregar un trabajo" arranca plegado como un botón')
   // El encabezado: nombre, estado, Guardar versión y "Más"
   check(await m.getByRole('button', { name: 'Guardar versión' }).isVisible() && await m.getByRole('button', { name: 'Más', exact: true }).isVisible(),
     'celular: el encabezado tiene "Guardar versión" y "Más"')
@@ -280,8 +289,13 @@ async function captura(page, nombre, entera = false) {
   check(await m.getByText(/^Cantidad: .* → /).count() > 0, 'celular: el aviso dice la cantidad vieja y la nueva')
   await captura(m, '08_celular_cantidad_guardada.png')
 
-  // Agregar un trabajo, apilado
+  // Agregar un trabajo: se despliega desde el botón, apilado
   const seccion = m.locator('section[aria-label="Agregá un trabajo"]')
+  const bDesp = await m.getByTestId('desplegar-agregar').boundingBox()
+  check(!!bDesp && bDesp.width >= 390 - 32 - 1 && bDesp.height >= 44, `celular: el botón "Agregar un trabajo" va a lo ancho (${bDesp && Math.round(bDesp.width)}×${bDesp && Math.round(bDesp.height)})`)
+  await m.getByTestId('desplegar-agregar').click()
+  await m.waitForTimeout(200)
+  check(await m.evaluate(() => document.activeElement?.getAttribute('placeholder') === 'hueco 18, contrapiso, pintura…'), 'celular: al tocarlo se despliega el formulario con el foco en el buscador')
   const buscador = seccion.getByPlaceholder('hueco 18, contrapiso, pintura…')
   const bBus = await buscador.boundingBox()
   const bCant = await seccion.getByLabel('Cantidad').boundingBox()
@@ -301,6 +315,12 @@ async function captura(page, nombre, entera = false) {
   check(/^Agregado/.test(await seccion.getByRole('status').innerText().catch(() => '')), 'celular: agregar un trabajo funciona ("Agregado")')
   check(await tarjetas.count() === cuantasAntes + 1 && await tarjetas.filter({ hasText: /hueco del 18/i }).count() > 0,
     `celular: el trabajo nuevo aparece como tarjeta en el rubro elegido (${cuantasAntes} → ${await tarjetas.count()})`)
+  check(await m.getByTestId('desplegar-agregar').isVisible() && await m.getByPlaceholder('hueco 18, contrapiso, pintura…').count() === 0, 'celular: después de agregar, el formulario se vuelve a plegar')
+  const marcaNueva = m.getByTestId('recien-agregado')
+  const bNueva = await marcaNueva.boundingBox().catch(() => null)
+  check(!!bNueva && /hueco del 18/i.test(await tarjetas.filter({ has: marcaNueva }).innerText()) && bNueva.y > 0 && bNueva.y < 844,
+    'celular: y muestra el trabajo agregado, resaltado y a la vista')
+  await captura(m, '10a_celular_agregado_a_la_vista.png')
   await sinDesborde(m, 'celular, después de agregar')
   await captura(m, '10_celular_agregado.png', true)
 

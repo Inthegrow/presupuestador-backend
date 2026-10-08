@@ -57,6 +57,8 @@ const MAX_NOMBRES = 4
 
 export default function AgregarTrabajo({ budgetId, rubroElegido, onSoltarRubro, onAgregado, onVerTrabajo, pie, variante = 'normal', enRenglon }: Props) {
   const [verAyuda, setVerAyuda] = useState(false)
+  // Celular: arranca plegado como un botón; se despliega al tocarlo y se vuelve a plegar después de agregar
+  const [desplegado, setDesplegado] = useState(false)
   useEffect(() => {
     if (!verAyuda) return
     const tecla = (e: globalThis.KeyboardEvent) => { if (e.key === 'Escape') setVerAyuda(false) }
@@ -211,6 +213,7 @@ export default function AgregarTrabajo({ budgetId, rubroElegido, onSoltarRubro, 
         itemId: res?.item?.id,
       })
       limpiar()
+      if (variante === 'celular') setDesplegado(false)
       // Refrescar el árbol y la tabla no debe tapar que el trabajo ya quedó guardado
       try { await onAgregado(res) } catch { /* la pantalla se pone al día en el próximo cambio */ }
     } catch (err) {
@@ -341,6 +344,40 @@ export default function AgregarTrabajo({ budgetId, rubroElegido, onSoltarRubro, 
     </button>
   )
 
+  const avisoAgregado = aviso && !error && (
+    <p
+      role="status"
+      className={`mt-2 text-xs max-md:text-[13px] font-medium ${aviso.faltan ? 'text-red-600' : 'text-[#1B5E4B]'}`}
+    >
+      {aviso.texto}
+      {aviso.faltan && aviso.itemId && onVerTrabajo && (
+        <>
+          {' '}
+          <button onClick={() => onVerTrabajo(aviso.itemId)} className="underline text-[#2D8D68] font-medium max-md:min-h-10 max-md:inline-flex max-md:items-center">
+            Ver el trabajo
+          </button>
+        </>
+      )}
+    </p>
+  )
+
+  if (celular && !desplegado) {
+    return (
+      <section aria-label="Agregá un trabajo">
+        <button
+          type="button"
+          onClick={() => { setDesplegado(true); setFoco('buscador') }}
+          aria-expanded={false}
+          data-testid="desplegar-agregar"
+          className="w-full h-12 flex items-center justify-center gap-1.5 rounded-2xl border-2 border-dashed border-[#2D8D68]/40 bg-white text-[15px] font-semibold text-[#1B5E4B] active:bg-[#E8F5EE]"
+        >
+          <Plus size={18} /> Agregar un trabajo
+        </button>
+        {avisoAgregado}
+      </section>
+    )
+  }
+
   return (
     <section
       aria-label="Agregá un trabajo"
@@ -381,8 +418,19 @@ export default function AgregarTrabajo({ budgetId, rubroElegido, onSoltarRubro, 
         </div>
       ) : celular ? (
         <>
-          <div className="text-[14px] font-bold text-[#143D34] mb-2">
-            Agregá un trabajo: <span className="font-normal text-gray-600">escribí como hablás</span>
+          <div className="flex items-center gap-2 -mt-1.5 -mr-2 mb-1">
+            <div className="flex-1 text-[14px] font-bold text-[#143D34]">
+              Agregá un trabajo: <span className="font-normal text-gray-600">escribí como hablás</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => { setDesplegado(false); setError(null) }}
+              aria-label="Plegar"
+              title="Plegar"
+              className="w-10 h-10 flex-shrink-0 flex items-center justify-center rounded-full text-gray-400 active:bg-gray-100"
+            >
+              <X size={18} />
+            </button>
           </div>
           {buscador}
           <div className="grid grid-cols-[minmax(0,1fr)_7.5rem] gap-2 mt-2">
@@ -435,22 +483,7 @@ export default function AgregarTrabajo({ budgetId, rubroElegido, onSoltarRubro, 
         </div>
       )}
 
-      {aviso && !error && (
-        <p
-          role="status"
-          className={`mt-2 text-xs font-medium ${aviso.faltan ? 'text-red-600' : 'text-[#1B5E4B]'}`}
-        >
-          {aviso.texto}
-          {aviso.faltan && aviso.itemId && onVerTrabajo && (
-            <>
-              {' '}
-              <button onClick={() => onVerTrabajo(aviso.itemId)} className="underline text-[#2D8D68] font-medium max-md:min-h-10 max-md:inline-flex max-md:items-center">
-                Ver el trabajo
-              </button>
-            </>
-          )}
-        </p>
-      )}
+      {avisoAgregado}
 
       {pie}
     </section>

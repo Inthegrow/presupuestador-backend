@@ -66,6 +66,17 @@ export default function Editor() {
   }
   // Celular: el árbol se abre en una hoja desde abajo
   const [hojaArbol, setHojaArbol] = useState(false)
+  // Celular: el trabajo recién agregado se resalta y se lleva a la vista
+  const [recienAgregado, setRecienAgregado] = useState<string | null>(null)
+  useEffect(() => {
+    if (!recienAgregado) return
+    const t1 = setTimeout(() => {
+      document.querySelector(`[data-testid="tarjeta-trabajo"][data-id="${recienAgregado}"]`)
+        ?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    }, 60)
+    const t2 = setTimeout(() => setRecienAgregado(null), 4000)
+    return () => { clearTimeout(t1); clearTimeout(t2) }
+  }, [recienAgregado])
   const filaTituloRef = useRef<HTMLDivElement>(null)
   const tituloRef = useRef<HTMLHeadingElement>(null)
   const estadoRef = useRef<HTMLDivElement>(null)
@@ -495,6 +506,7 @@ export default function Editor() {
       const nuevo = data.items.find((i) => i.id === res?.item?.id)
       if (nuevo) setItems([nuevo])
     }
+    if (res?.item?.id) setRecienAgregado(res.item.id)
   }, [refreshData, cargarFaltantes, viewMode, rubroElegido, selectedNode, getItemsForNode])
 
   // Open section form with suggested code
@@ -1035,6 +1047,7 @@ export default function Editor() {
                 onEditItem={puedeEditar ? handleEditItem : undefined}
                 onViewDetail={(itemId) => navigate(`/app/budgets/${id}/item/${itemId}`)}
                 onDeleteItem={puedeEditar ? borrarTrabajo : undefined}
+                resaltar={recienAgregado}
               />
             )}
           </div>

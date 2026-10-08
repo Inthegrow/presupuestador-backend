@@ -61,44 +61,41 @@ export default function EscaleraResumen({ escalera: e, pcts, trabajos, variante,
     )
   }
 
+  // Celular: compacta (unos 120 px), para que los trabajos se vean sin bajar
   return (
     <section
       data-testid="escalera"
       aria-label="Del costo directo al precio"
-      className="rounded-2xl overflow-hidden shadow-sm bg-gradient-to-br from-[#2D8D68] to-[#143D34] text-white"
+      className="rounded-2xl shadow-sm bg-gradient-to-br from-[#2D8D68] to-[#143D34] text-white pl-4 pr-1.5 pt-1.5 pb-3"
     >
-      <div className="px-4 pt-3.5 pb-3">
-        <div className="text-[12px] text-white/70">Todo el presupuesto · {cuantos}</div>
-        <div data-testid="precio-sin-iva" data-valor={e.neto} className="mt-1.5">
-          <div className="text-[11px] font-bold uppercase tracking-wider text-white/80">Precio sin IVA</div>
-          <div className="text-[26px] leading-tight font-extrabold tabular-nums">{fmtPesos(e.neto)}</div>
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-[11px] font-bold uppercase tracking-wider text-white/80 min-w-0 truncate" title={`Todo el presupuesto · ${cuantos}`}>
+          Precio sin IVA
         </div>
-        <div data-testid="precio-con-iva" data-valor={e.total_final ?? ''} className="mt-2 flex items-end justify-between gap-3 flex-wrap">
-          <div>
-            <div className="text-[11px] font-bold uppercase tracking-wider text-white/80">Precio con IVA</div>
-            <div className="text-[21px] leading-tight font-bold tabular-nums">{conIva}</div>
-          </div>
-          <div className="text-[12px] text-white/75 pb-0.5">
-            {e.iva === null ? 'Falta saber el % de IVA' : <>IVA{pcts ? ` ${fmtPct(pcts.iva)}%` : ''}: {fmtPesos(e.iva)}</>}
-          </div>
-        </div>
-        <div
-          data-testid="escalera-directo"
-          data-valor={e.directo}
-          className="mt-3 pt-2.5 border-t border-white/15 flex items-baseline justify-between gap-3 text-[13px] text-white/80"
+        <button
+          type="button"
+          onClick={onVer}
+          aria-expanded={false}
+          className="flex-shrink-0 flex items-center gap-1 text-[13px] font-semibold text-white rounded-xl px-2.5 h-10 active:bg-white/15"
         >
-          <span>Costo directo</span>
-          <b className="font-semibold text-white tabular-nums">{fmtPesos(e.directo)}</b>
-        </div>
+          Ver la escalera <ChevronDown size={15} />
+        </button>
       </div>
-      <button
-        type="button"
-        onClick={onVer}
-        aria-expanded={false}
-        className="w-full flex items-center justify-center gap-1.5 text-[14px] font-semibold text-white bg-black/15 active:bg-black/25 h-11"
-      >
-        Ver la escalera <ChevronDown size={16} />
-      </button>
+      <div data-testid="precio-sin-iva" data-valor={e.neto} className="-mt-1 text-[27px] leading-tight font-extrabold tabular-nums">
+        {fmtPesos(e.neto)}
+      </div>
+      <div className="mt-1.5 pr-2.5 grid grid-cols-2 gap-3 text-[12px] leading-tight text-white/70">
+        <span
+          data-testid="precio-con-iva"
+          data-valor={e.total_final ?? ''}
+          title={e.iva === null ? 'Falta saber el % de IVA' : `IVA${pcts ? ` ${fmtPct(pcts.iva)}%` : ''}: ${fmtPesos(e.iva)}`}
+        >
+          con IVA <b className="block mt-0.5 text-[14px] font-semibold text-white tabular-nums">{conIva}</b>
+        </span>
+        <span data-testid="escalera-directo" data-valor={e.directo}>
+          costo directo <b className="block mt-0.5 text-[14px] font-semibold text-white tabular-nums">{fmtPesos(e.directo)}</b>
+        </span>
+      </div>
     </section>
   )
 }

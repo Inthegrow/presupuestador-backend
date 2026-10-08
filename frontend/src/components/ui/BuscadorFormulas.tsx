@@ -126,7 +126,7 @@ export default function BuscadorFormulas<R extends FormulaBuscable, Q extends Fo
           {parecidas.map((p) => filaQuizas(p, false))}
         </div>
       )}
-      {mostrarAbajo && <div className={listaClassName}>
+      {mostrarAbajo && <div className={listaClassName} data-testid="lista-formulas">
         {extra}
         {Object.entries(grupos).map(([cat, items]) => (
           <div key={cat}>

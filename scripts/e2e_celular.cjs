@@ -461,7 +461,10 @@ const solapan = (a, b) => a && b && a.x < b.x + b.width - 0.5 && b.x < a.x + a.w
     // Si el navegador no deja guardar, el menú funciona igual (arranca angosto)
     await page.setViewportSize({ width: 1100, height: 720 })
     await page.addInitScript(() => {
-      Object.defineProperty(window, 'localStorage', { get() { throw new Error('bloqueado') } })
+      // el navegador no deja leer ni guardar la preferencia del menú (modo privado, sitio bloqueado)
+      const leer = Storage.prototype.getItem, guardar = Storage.prototype.setItem
+      Storage.prototype.getItem = function (k) { if (String(k).startsWith('presupuestador:menu-angosto')) throw new Error('bloqueado'); return leer.call(this, k) }
+      Storage.prototype.setItem = function (k, v) { if (String(k).startsWith('presupuestador:menu-angosto')) throw new Error('bloqueado'); return guardar.call(this, k, v) }
     })
     await page.reload(); await esperarPantalla(page)
     check(Math.round((await page.locator('aside').boundingBox())?.width ?? 0) === 64, '1100 sin poder guardar en el navegador: arranca angosto y no se rompe')
