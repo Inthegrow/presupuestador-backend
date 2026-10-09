@@ -9,6 +9,7 @@ const SECCIONES = [
   { id: 'formula', titulo: 'Cómo encuentra la app la fórmula de cada trabajo' },
   { id: 'otro-formato', titulo: 'Si el Excel tiene otro formato' },
   { id: 'lista-precios', titulo: 'Lista de precios: cuál se usa' },
+  { id: 'buscar-precio', titulo: 'Buscar un precio en internet' },
 ]
 
 // El router puede interceptar el "#": scrollIntoView a mano, y el href queda como respaldo.
@@ -157,6 +158,36 @@ export default function Ayuda() {
           tiene fecha: si no, el material cuenta como sin precio. Importar dos veces el mismo Excel actualiza su lista;
           no crea otra.
         </p>
+      </Seccion>
+
+      <Seccion id="buscar-precio" n={6} titulo="Buscar un precio en internet">
+        <Pasos>
+          <li>
+            <b>Dónde están los botones.</b> En <b>Lista de precios</b>: "Buscar un precio", arriba, para uno que todavía
+            no está en la lista, y el botón del globo con la lupa ("Buscar en internet") en cada renglón, para
+            actualizarlo. En el detalle de un trabajo: el recurso que está en rojo, sin precio, tiene "Buscar en
+            internet".
+          </li>
+          <li>
+            <b>Qué hace.</b> Busca el material en corralones y ferreterías, pasa cada precio a sin IVA y a la unidad de
+            la lista (por ejemplo, de bolsa de 50 kg a bolsa de 25 kg) y muestra la cuenta y el link de donde salió.
+            Si la unidad no coincide, avisa y deja corregir el número. Puede tardar hasta un minuto.
+          </li>
+          <li>
+            <b>Qué guarda.</b> Nada, hasta tocar "Usar este precio". Entonces guarda el precio, el comercio, la fecha y
+            el link, que se ven en el origen del precio y en su historial (el reloj de cada renglón).
+          </li>
+          <li>
+            <b>Son precios de venta al público.</b> Un corralón que vende por volumen suele cobrar menos: sirven de
+            referencia o para un material que no está en la lista.
+          </li>
+          <li>
+            <b>Si dice "Buscador sin configurar".</b> Junto a "Buscar un precio" se ve si el buscador está listo. Si no
+            lo está, falta la clave de OpenAI en el servidor (Render): la agrega quien administra la app. Mientras
+            tanto, el precio se carga a mano en la lista y el resto de la app funciona igual. Si dice que la clave no
+            es válida o que se terminó el crédito, también lo resuelve quien administra la app.
+          </li>
+        </Pasos>
       </Seccion>
     </div>
   )

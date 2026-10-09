@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import csv
 import io
+import math
+import re
+import unicodedata
 import warnings
+from typing import get_args
 from uuid import UUID
 
-from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, UploadFile
 
 from app.auth import get_current_user, require_admin, require_editor
 from app.budget_prices import HISTORY_CHUNK, fetch_all, today
@@ -170,81 +174,251 @@ def _fecha_or_warning(raw: object, where: str, warnings_list: list[str]) -> str 
 
 # ── Upload CSV catalog ────────────────────────────────────────────────────
 
+# Columns of a .csv price list: canonical name → accepted headers (normalized: without accents, lower
+# case, spaces and hyphens as "_"), in order of preference. Required: código and precio.
+CSV_COLUMNAS: dict[str, tuple[str, ...]] = {
+    "codigo": ("codigo", "cod", "code"),
+    "descripcion": ("descripcion", "detalle", "description"),
+    "unidad": ("unidad", "u", "unid", "ud"),
+    "precio": ("precio_unitario", "precio_sin_iva", "precio", "precio_unit", "p_unitario", "costo"),
+    "fecha": ("fecha", "fecha_precio", "fecha_act", "actualizado"),
+    "proveedor": ("proveedor", "prov", "supplier"),
+}
+CSV_OBLIGATORIAS = ("codigo", "precio")
+# How each column is named in the messages
+CSV_NOMBRES = {"codigo": "código", "descripcion": "descripción", "unidad": "unidad", "precio": "precio",
+               "fecha": "fecha", "proveedor": "proveedor"}
+CSV_FALTA = {"codigo": "la columna del código (código o cod)",
+             "precio": "la columna del precio (precio_unitario o precio)"}
+CSV_SEPARADORES = ",;\t"
+
+
+def sin_tildes(texto: str) -> str:
+    return "".join(c for c in unicodedata.normalize("NFKD", texto) if not unicodedata.combining(c))
+
+
+def normalizar_encabezado(texto: object) -> str:
+    """'Precio sin IVA' → 'precio_sin_iva'; 'Código' → 'codigo'; 'Cód.' → 'cod'."""
+    t = sin_tildes(str(texto or "").replace("﻿", "")).strip().lower()
+    return re.sub(r"[^a-z0-9]+", "_", t).strip("_")
+
+
+def columnas_csv(encabezados: list[str]) -> dict[str, int]:
+    """Canonical column → index in the row, by the accepted names (first preferred alias wins)."""
+    norm = [normalizar_encabezado(h) for h in encabezados]
+    cols: dict[str, int] = {}
+    for canon, alias in CSV_COLUMNAS.items():
+        for a in alias:
+            if a in norm:
+                cols[canon] = norm.index(a)
+                break
+    return cols
+
+
+def detectar_separador(texto: str) -> str:
+    """',', ';' or tab. csv.Sniffer first; when it cannot tell (or picks one the header line does not
+    have), the one that appears most in the first line."""
+    lineas = [ln for ln in texto.splitlines() if ln.strip()]
+    primera = lineas[0] if lineas else ""
+    try:
+        sep = csv.Sniffer().sniff("\n".join(lineas[:50]), delimiters=CSV_SEPARADORES).delimiter
+        if sep in primera:
+            return sep
+    except csv.Error:
+        pass
+    conteos = {d: primera.count(d) for d in CSV_SEPARADORES}
+    mejor = max(conteos, key=lambda d: conteos[d])
+    return mejor if conteos[mejor] else ","
+
+
+# Formats a price can come in; anything else (ej. "1,2,3" or "1.234.56") is not a price: it is skipped and
+# reported, never guessed
+_PRECIO_AR = re.compile(r"-?[1-9]\d{0,2}(?:\.\d{3})+(?:,\d+)?")      # 1.234 / 1.234.567 / 1.234,50
+_PRECIO_COMA = re.compile(r"-?\d+,\d+")                          # 1234,5
+_PRECIO_US = re.compile(r"-?[1-9]\d{0,2}(?:,\d{3})+\.\d+|-?[1-9]\d{0,2}(?:,\d{3}){2,}")  # 1,234.50 / 1,234,567
+_PRECIO_PUNTO = re.compile(r"-?\d+(?:\.\d+)?")                  # 1234 / 1234.5 / 0.125
+
+
+def leer_precio(raw: object) -> float | None:
+    """A price as Sol writes it: '$ 1.234,50', '1234,5', '1234.5', '1.234' (one thousand two hundred
+    thirty-four: a dot followed by exactly 3 digits is the thousands separator), '1,234.50'.
+
+    The thousands groups have to be well formed: '1,2,3' or '1.234.56' are not prices (None), so the row is
+    skipped and reported instead of saving an invented amount.
+    """
+    t = re.sub(r"\s+", "", str(raw or "")).replace("$", "")
+    if t.upper().startswith("ARS"):
+        t = t[3:]
+    if not t:
+        return None
+    if _PRECIO_AR.fullmatch(t):
+        t = t.replace(".", "").replace(",", ".")
+    elif _PRECIO_COMA.fullmatch(t):
+        t = t.replace(",", ".")
+    elif _PRECIO_US.fullmatch(t):
+        t = t.replace(",", "")
+    elif not _PRECIO_PUNTO.fullmatch(t):
+        return None
+    try:
+        valor = float(t)
+    except ValueError:
+        return None
+    return valor if math.isfinite(valor) else None
+
+
+def _renglones(n: int) -> str:
+    return "1 renglón" if n == 1 else f"{n} renglones"
+
+
+def _lista_filas(filas: list[int]) -> str:
+    muestra = [str(f) for f in filas[:8]]
+    texto = muestra[0] if len(muestra) == 1 else ", ".join(muestra[:-1]) + " y " + muestra[-1]
+    return texto + (" y otros" if len(filas) > 8 else "")
+
+
+def mensaje_faltan(faltan: list[str], encabezados: list[str]) -> str:
+    """'Al archivo le falta la columna del precio (precio_unitario o precio). Tiene: código, descripción, unidad.'"""
+    if len(faltan) == 1:
+        texto = f"Al archivo le falta {CSV_FALTA[faltan[0]]}."
+    else:
+        texto = ("Al archivo le faltan " + ", ".join(CSV_FALTA[f] for f in faltan[:-1])
+                 + " y " + CSV_FALTA[faltan[-1]].replace("la columna del", "la del") + ".")
+    tiene = []
+    for h in encabezados:
+        cols = columnas_csv([h])
+        nombre = CSV_NOMBRES[next(iter(cols))] if cols else str(h).replace("﻿", "").strip()
+        if nombre and nombre not in tiene:
+            tiene.append(nombre)
+    return texto + (f" Tiene: {', '.join(tiene)}." if tiene else " No tiene encabezados.")
+
+
+def leer_csv(content: bytes, archivo: str | None, tipo: str) -> tuple[list[dict], int, list[str]]:
+    """Rows of a .csv price list: (entries to insert, skipped rows, warnings). Raises HTTPException 400
+    when the required columns are missing."""
+    try:
+        text = content.decode("utf-8-sig")  # handle BOM
+    except UnicodeDecodeError:
+        try:
+            text = content.decode("cp1252")  # Excel en castellano (Windows)
+        except UnicodeDecodeError:
+            text = content.decode("latin-1")
+
+    sep = None
+    primera = text.lstrip("\r\n").split("\n", 1)[0].strip()
+    if re.fullmatch(r"(?i)sep=.", primera):  # Excel's "sep=;" first line
+        sep = primera[-1]
+    sep = sep or detectar_separador(text)
+
+    reader = csv.reader(io.StringIO(text), delimiter=sep)
+    encabezados: list[str] | None = None
+    for row in reader:
+        if not any(c.strip() for c in row):
+            continue
+        if re.fullmatch(r"(?i)sep=.?", row[0].strip()) and not "".join(row[1:]).strip():
+            continue  # Excel's "sep=;" line
+        encabezados = row
+        break
+    if not encabezados:
+        raise HTTPException(400, "El archivo está vacío: tiene que tener una primera línea con los nombres de "
+                                 "las columnas (código y precio) y un renglón por precio.")
+
+    cols = columnas_csv(encabezados)
+    faltan = [c for c in CSV_OBLIGATORIAS if c not in cols]
+    if faltan:
+        raise HTTPException(400, mensaje_faltan(faltan, encabezados))
+
+    def celda(row: list[str], canon: str) -> str:
+        idx = cols.get(canon)
+        return row[idx].strip() if idx is not None and idx < len(row) else ""
+
+    fuente = fuente_importada(archivo)
+    rows: list[dict] = []
+    warnings_list: list[str] = []
+    sin_datos: list[int] = []
+    precio_ilegible: list[tuple[int, str]] = []
+    for row in reader:
+        line_no = reader.line_num
+        if not any(c.strip() for c in row):
+            continue  # blank rows (Excel's ";;;;") are not rows
+        codigo, precio_raw = celda(row, "codigo"), celda(row, "precio")
+        if not codigo or not precio_raw:
+            sin_datos.append(line_no)
+            continue
+        precio = leer_precio(precio_raw)
+        if precio is None:
+            precio_ilegible.append((line_no, precio_raw))
+            continue
+        rows.append({
+            "codigo": codigo,
+            "descripcion": celda(row, "descripcion"),
+            "unidad": celda(row, "unidad"),
+            "precio_sin_iva": precio,
+            "tipo": tipo,
+            "fecha_precio": _fecha_or_warning(celda(row, "fecha"), f"Fila {line_no}", warnings_list),
+            "proveedor": celda(row, "proveedor") or None,
+            "fuente": fuente,
+        })
+
+    avisos: list[str] = []
+    if sin_datos:
+        n = len(sin_datos)
+        avisos.append(f"{_renglones(n)} sin código o sin precio, no se {'cargó' if n == 1 else 'cargaron'} "
+                      f"({'renglón' if n == 1 else 'renglones'} {_lista_filas(sin_datos)}).")
+    if precio_ilegible:
+        n = len(precio_ilegible)
+        ejemplos = ", ".join(f"renglón {f}: «{v}»" for f, v in precio_ilegible[:3])
+        avisos.append(f"{_renglones(n)} con un precio que no se entiende, no se {'cargó' if n == 1 else 'cargaron'} "
+                      f"({ejemplos}{' y otros' if n > 3 else ''}).")
+    return rows, len(sin_datos) + len(precio_ilegible), avisos + warnings_list
+
+
+def tipo_de_lista(valor: str | None) -> str:
+    """'material', 'mano_obra', 'equipo' or 'subcontrato' (also 'Mano de obra', 'Materiales'...)."""
+    clave = normalizar_encabezado(valor)
+    if clave in get_args(CatalogTipo):
+        return clave
+    tipo = TAB_TIPO_MAP.get(clave.replace("_", " ")) or TAB_TIPO_MAP.get(clave)
+    if tipo is None:
+        raise HTTPException(422, "Elegí el tipo de la lista: material, mano de obra, equipo o subcontrato.")
+    return tipo
+
 
 @router.post("/upload-csv")
 async def upload_csv_catalog(
     file: UploadFile = File(...),
-    tipo: CatalogTipo = Query(..., description="Tipo: material, mano_obra, equipo, subcontrato"),
-    name: str = Query(None, description="Nombre del catálogo (si no se indica, el nombre del archivo)"),
+    tipo: str | None = Query(None, description="Tipo: material, mano_obra, equipo, subcontrato"),
+    name: str | None = Query(None, description="Nombre del catálogo (si no se indica, el nombre del archivo)"),
+    nombre: str | None = Query(None, description="Igual que name"),
+    tipo_form: str | None = Form(None, alias="tipo"),
+    name_form: str | None = Form(None, alias="name"),
+    nombre_form: str | None = Form(None, alias="nombre"),
     user: dict = Depends(require_editor),
 ):
-    """Upload a CSV price list and create a catalog with entries.
+    """Upload a .csv price list and create a catalog with its entries.
 
-    CSV must have columns: codigo, descripcion, unidad, precio_unitario
+    ``tipo`` and ``name`` (or ``nombre``) come in the URL or in the form. Separator ",", ";" or tab.
+    Columns (any case, with or without accents): código/codigo/cod and precio_unitario/precio/precio sin
+    IVA are required; descripción/detalle, unidad/u/unid, fecha and proveedor are optional.
     """
+    tipo_lista = tipo_de_lista(tipo or tipo_form)
+    archivo = file.filename or ""
+    if archivo.lower().endswith((".xlsx", ".xls")):
+        raise HTTPException(400, "Ese archivo es un Excel, no un .csv: subilo con el botón del Excel, o en Excel "
+                                 "usá «Guardar como» → CSV.")
+    content = await file.read()
+    if content[:4] == b"PK\x03\x04":
+        raise HTTPException(400, "Ese archivo es un Excel, no un .csv: subilo con el botón del Excel, o en Excel "
+                                 "usá «Guardar como» → CSV.")
+
+    rows, salteadas, warnings_list = leer_csv(content, archivo, tipo_lista)
+    if not rows:
+        detalle = f" {' '.join(warnings_list)}" if warnings_list else ""
+        raise HTTPException(400, f"El archivo .csv no tiene renglones para cargar (con código y precio).{detalle}")
+
     db = get_data_db()
     org_id = user["org_id"]
-
-    # Read and parse CSV
-    content = await file.read()
-    try:
-        text = content.decode("utf-8-sig")  # handle BOM
-    except UnicodeDecodeError:
-        text = content.decode("latin-1")
-
-    reader = csv.DictReader(io.StringIO(text))
-
-    # Validate required columns
-    required_cols = {"codigo", "descripcion", "unidad", "precio_unitario"}
-    if not reader.fieldnames or not required_cols.issubset({c.strip().lower() for c in reader.fieldnames}):
-        raise HTTPException(
-            400,
-            f"El archivo .csv tiene que tener las columnas: {', '.join(sorted(required_cols))}. "
-            f"Tiene: {reader.fieldnames}",
-        )
-
-    # Normalize fieldnames
-    field_map = {c.strip().lower(): c for c in reader.fieldnames}
-    fecha_field = next((field_map[a] for a in _FECHA_ALIASES if a in field_map), None)
-    proveedor_field = next((field_map[a] for a in _PROVEEDOR_ALIASES if a in field_map), None)
-
-    rows = []
-    warnings_list: list[str] = []
-    for line_no, row in enumerate(reader, start=2):
-        codigo = (row.get(field_map.get("codigo", "codigo")) or "").strip()
-        descripcion = (row.get(field_map.get("descripcion", "descripcion")) or "").strip()
-        unidad = (row.get(field_map.get("unidad", "unidad")) or "").strip()
-        precio_raw = (row.get(field_map.get("precio_unitario", "precio_unitario")) or "").strip()
-
-        if not codigo or not precio_raw:
-            continue
-
-        try:
-            # Handle Argentine format (dot as thousands, comma as decimal)
-            precio_clean = precio_raw.replace(".", "").replace(",", ".") if "," in precio_raw else precio_raw
-            precio = float(precio_clean)
-        except ValueError:
-            continue
-
-        fecha_raw = (row.get(fecha_field) or "").strip() if fecha_field else ""
-        proveedor = (row.get(proveedor_field) or "").strip() if proveedor_field else ""
-
-        rows.append({
-            "codigo": codigo,
-            "descripcion": descripcion,
-            "unidad": unidad,
-            "precio_sin_iva": precio,
-            "tipo": tipo,
-            "fecha_precio": _fecha_or_warning(fecha_raw, f"Fila {line_no}", warnings_list),
-            "proveedor": proveedor or None,
-            "fuente": fuente_importada(file.filename),
-        })
-
-    if not rows:
-        raise HTTPException(400, "El archivo .csv no tiene filas válidas (con código y precio)")
-
-    # Create catalog
-    catalog_name = name or (file.filename or "catalogo").rsplit(".", 1)[0]
+    nombre_lista = next((n.strip() for n in (name, nombre, name_form, nombre_form) if n and n.strip()), None)
+    catalog_name = nombre_lista or (archivo or "catalogo").rsplit(".", 1)[0]
     catalog_result = db.table("price_catalogs").insert({
         "org_id": org_id,
         "name": catalog_name,
@@ -252,24 +426,22 @@ async def upload_csv_catalog(
     }).execute()
     if not catalog_result.data:
         raise HTTPException(500, "No se pudo crear el catálogo. Probá de nuevo.")
-    catalog_id = catalog_result.data[0]["id"]
+    catalogo = {"org_id": org_id, "name": catalog_name, "source_file": file.filename, "oficial": False,
+                **catalog_result.data[0]}
+    catalog_id = catalogo["id"]
 
-    # Insert entries
-    entries = [
-        {
-            "catalog_id": catalog_id,
-            "org_id": org_id,
-            **row,
-        }
-        for row in rows
-    ]
-    insert_entries(db, entries)
+    insert_entries(db, [{"catalog_id": catalog_id, "org_id": org_id, **row} for row in rows])
 
+    # The catalog row (what the screen adds to its lists) plus the summary of the upload
     return {
+        **catalogo,
+        "catalogo": catalogo,
         "catalog_id": catalog_id,
         "name": catalog_name,
-        "entries_count": len(entries),
-        "tipo": tipo,
+        "entries_count": len(rows),
+        "tipo": tipo_lista,
+        "entradas": len(rows),
+        "salteadas": salteadas,
         "warnings": warnings_list,
     }
 

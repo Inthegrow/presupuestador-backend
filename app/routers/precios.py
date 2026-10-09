@@ -1,4 +1,4 @@
-"""Buscador de precios en internet: POST /precios/buscar (app/price_search.py).
+"""Buscador de precios en internet: POST /precios/buscar y GET /precios/buscador (app/price_search.py).
 
 No guarda nada: "Usar este precio" es el POST/PATCH de la entrada de la lista
 (/catalogs/{id}/entries) con ``fuente`` y ``fuente_url``.
@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app import price_search
-from app.auth import require_editor
+from app.auth import get_current_user, require_editor
 
 router = APIRouter()
 
@@ -20,6 +20,12 @@ class BusquedaPrecio(BaseModel):
     unidad: str | None = Field(default=None, max_length=40)
     tipo: str | None = Field(default=None, max_length=40)
     codigo: str | None = Field(default=None, max_length=80)
+
+
+@router.get("/buscador")
+async def estado_buscador(user: dict = Depends(get_current_user)):
+    """Whether the price search is configured, and its model (never the key). Searches nothing."""
+    return price_search.estado()
 
 
 @router.post("/buscar")
@@ -33,4 +39,4 @@ async def buscar_precio(body: BusquedaPrecio, user: dict = Depends(require_edito
     except price_search.BuscadorNoConfigurado as exc:
         raise HTTPException(503, {"codigo": "NO_CONFIGURADO", "mensaje": price_search.NO_CONFIGURADO}) from exc
     except price_search.BuscadorError as exc:
-        raise HTTPException(502, {"codigo": "ERROR_BUSQUEDA", "mensaje": str(exc)}) from exc
+        raise HTTPException(502, {"codigo": getattr(exc, "codigo", "ERROR_BUSQUEDA"), "mensaje": str(exc)}) from exc
