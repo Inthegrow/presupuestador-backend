@@ -5,6 +5,7 @@ import FileUpload from '../components/ui/FileUpload'
 import BuscadorFormulas from '../components/ui/BuscadorFormulas'
 import { catalogApi, obraApi, textoDeError } from '../lib/api'
 import { borrarBorrador, duenoBorrador, guardarBorrador, haceCuanto, leerBorrador } from '../lib/borrador'
+import { tomarArchivoParaCargarObra } from '../lib/archivoPendiente'
 import type { Borrador } from '../lib/borrador'
 import { useAuth } from '../contexts/AuthContext'
 import type { ObraAnalisis, ObraAsignaciones, ObraCarga, ObraPrecio, ObraPropuesta, ObraRecetaCatalogo, ObraTarea } from '../lib/api'
@@ -291,8 +292,8 @@ function PrecioRow({
 // ─── Tarjeta de un trabajo ─────────────────────────────────────────────────────
 
 function TareaCard({
-  t, estadoLocal, recienConfirmada, actualizando, recetas, excelConPrecios, pendiente,
-  onConfirmar, onDeshacer, onElegir, onSinReceta, onValor, onCorregirPrecios,
+  t, estadoLocal, recienConfirmada, actualizando, recetas, excelConPrecios, pendiente, sinPrecio,
+  onConfirmar, onDeshacer, onElegir, onSinReceta, onSinPrecio, onValor, onCorregirPrecios,
 }: {
   t: ObraTarea
   // El estado con lo que Sol ya hizo en esta pantalla (lo confirma el servidor al revisar)
@@ -304,10 +305,13 @@ function TareaCard({
   recetas: ObraRecetaCatalogo[]
   excelConPrecios: boolean
   pendiente?: Pendiente
+  // Sol eligió cargarlo sin fórmula y sin precio ($0)
+  sinPrecio: boolean
   onConfirmar: () => void
   onDeshacer: () => void
   onElegir: (r: ObraRecetaCatalogo) => void
   onSinReceta: () => void
+  onSinPrecio: () => void
   onValor: (codigo: string, valor: number) => void
   onCorregirPrecios: () => void
 }) {
@@ -326,14 +330,16 @@ function TareaCard({
   const estado = pendiente || (pregunta && pregunta.valor == null) ? 'rojo' : estadoLocal
   const est = ESTILO[estado]
   const receta = t.receta
-  // Red because it has no recipe and no price in the Excel: it can only be solved by picking a recipe
-  const sinRecetaNiPrecio = !pendiente && t.estado === 'rojo' && t.motivo_rojo === 'sin_receta'
+  // Red because it has no recipe and no price in the Excel: pick a recipe, or load it at $0
+  const sinRecetaNiPrecio = !pendiente && !sinPrecio && t.estado === 'rojo' && t.motivo_rojo === 'sin_receta'
   const nombreReceta = pendiente
     ? pendiente.nombre
     : receta
       ? receta.partes.length > 1 ? receta.partes.map((p) => p.nombre).join(' + ') : receta.nombre
+      : sinPrecio
+        ? 'Sin fórmula y sin precio: entra en $0. Después le elegís la fórmula en el presupuesto.'
       : sinRecetaNiPrecio
-        ? 'Sin fórmula, y este trabajo no tiene precio en el Excel. Elegí una fórmula.'
+        ? 'Sin fórmula, y este trabajo no tiene precio en el Excel. Elegí una fórmula o cargalo en $0.'
         : t.total_excel <= 0
           ? 'Sin fórmula y el Excel lo tiene en $0: si no lo cotizás, confirmá; si no, elegí una fórmula.'
           : 'Sin fórmula: se usa el precio del Excel'
@@ -412,6 +418,16 @@ function TareaCard({
               className="flex-1 md:flex-none min-h-10 md:min-h-0 inline-flex items-center justify-center gap-1.5 bg-white border border-[#2D8D68]/40 text-[#1B5E4B] text-sm md:text-xs font-semibold px-3 py-1.5 rounded-lg hover:bg-[#E8F5EE]"
             >
               <RotateCcw size={13} /> Deshacer
+            </button>
+          )}
+          {sinRecetaNiPrecio && (
+            <button
+              onClick={onSinPrecio}
+              data-testid="cargar-sin-precio"
+              title="Entra sin fórmula y en $0; en el presupuesto queda en rojo con «Elegir fórmula»"
+              className="flex-1 md:flex-none min-h-10 md:min-h-0 bg-white border border-red-200 text-red-700 text-sm md:text-xs font-semibold px-3 py-1.5 rounded-lg hover:bg-red-50 whitespace-nowrap"
+            >
+              Cargarlo sin precio ($0)
             </button>
           )}
           <button
@@ -541,6 +557,8 @@ export default function CargarObra() {
   const [fijas, setFijas] = useState<Record<string, true>>({})
   // Lo que había antes de confirmar, para "Deshacer"
   const previas = useRef<Record<string, ObraAsignaciones[string] | undefined>>({})
+  // El color que tenía antes (amarillo al confirmar, rojo al cargarlo sin precio), para que «Deshacer» lo devuelva
+  const estadosPrevios = useRef<Record<string, Semaforo>>({})
   const [confirmandoTodos, setConfirmandoTodos] = useState(false)
   // "Cargar presupuesto" tocado con una revisión en camino: carga apenas termina
   const [cargarAlTerminar, setCargarAlTerminar] = useState(false)
@@ -548,6 +566,12 @@ export default function CargarObra() {
   analisisRef.current = analisis
 
   useEffect(() => { catalogApi.list().then(setCatalogs).catch(() => setCatalogs([])) }, [])
+  // Viene de Importar Excel («Cargarlo en Cargar obra»): el mismo archivo, como si Sol lo hubiera elegido acá
+  useEffect(() => {
+    const f = tomarArchivoParaCargarObra()
+    if (f) elegirArchivo(f)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   useEffect(() => {
     setBorrador(null)
     if (dueno) leerBorrador(dueno).then(setBorrador)
@@ -639,6 +663,7 @@ export default function CargarObra() {
     setCambiadas({})
     setFijas({})
     previas.current = {}
+    estadosPrevios.current = {}
     setConfirmandoTodos(false)
     setCargarAlTerminar(false)
     setFile(null)
@@ -698,6 +723,31 @@ export default function CargarObra() {
     programarRevision(next)
   }
 
+  // Sin fórmula y sin precio: entra en $0 (la tarjeta deja de estar en rojo enseguida, sin esperar al servidor)
+  function cargarSinPrecio(lista: ObraTarea[]) {
+    if (lista.length === 0) return
+    const next = { ...asignaciones }
+    const listas: Record<string, Semaforo> = {}
+    const marcadas: Record<string, true> = {}
+    for (const t of lista) {
+      if (!(t.clave in previas.current)) previas.current[t.clave] = asignaciones[t.clave]
+      if (!(t.clave in estadosPrevios.current)) estadosPrevios.current[t.clave] = estadoDe(t)
+      next[t.clave] = { plantillas: [], confirmada: true, sin_precio: true }
+      listas[t.clave] = 'verde'
+      marcadas[t.clave] = true
+    }
+    setAsignaciones(next)
+    setPendientes((p) => {
+      const resto = { ...p }
+      for (const t of lista) delete resto[t.clave]
+      return resto
+    })
+    setOptimista((o) => ({ ...o, ...listas }))
+    setCambiadas((c) => ({ ...c, ...marcadas }))
+    setFijas((f) => ({ ...f, ...marcadas }))
+    programarRevision(next, lista.length > 1 ? 0 : ESPERA_REVISION)
+  }
+
   // Lo que se manda al confirmar un amarillo: la fórmula propuesta, o sin fórmula (el precio del Excel)
   function asignacionPropuesta(t: ObraTarea): [string, number][] {
     return t.receta ? t.receta.partes.map((p) => [p.codigo, p.factor] as [string, number]) : []
@@ -742,12 +792,14 @@ export default function CargarObra() {
   // Deshacer: vuelve a como estaba antes de confirmar (amarillo, para confirmar)
   function deshacer(t: ObraTarea) {
     const previa = previas.current[t.clave]
+    const estadoPrevio = estadosPrevios.current[t.clave] ?? 'amarillo'
     delete previas.current[t.clave]
+    delete estadosPrevios.current[t.clave]
     const next = { ...asignaciones }
     if (previa) next[t.clave] = previa
     else delete next[t.clave]
     setAsignaciones(next)
-    setOptimista((o) => ({ ...o, [t.clave]: 'amarillo' }))
+    setOptimista((o) => ({ ...o, [t.clave]: estadoPrevio }))
     programarRevision(next)
   }
 
@@ -837,7 +889,10 @@ export default function CargarObra() {
   const rojosPrecio = tareas.filter(rojoSoloPrecio).length
   const rojosOtros = tareas.filter((t) => esRojo(t) && !rojoSoloPrecio(t)).length
   // Red with no recipe and no price in the Excel (not yet answered): counted as missing recipes
-  const rojosSinReceta = tareas.filter((t) => !hayPendiente(t) && t.estado === 'rojo' && t.motivo_rojo === 'sin_receta').length
+  const esSinRecetaNiPrecio = (t: ObraTarea) =>
+    !hayPendiente(t) && estadoDe(t) === 'rojo' && t.motivo_rojo === 'sin_receta' && !asignaciones[t.clave]?.sin_precio
+  const sinRecetaNiPrecio = tareas.filter(esSinRecetaNiPrecio)
+  const rojosSinReceta = sinRecetaNiPrecio.length
   const rojosPregunta = rojosOtros - rojosSinReceta
   const rojos = rojosPrecio + rojosOtros
   const listasParaConfirmar = tareas.filter((t) => !esRojo(t) && estadoDe(t) === 'amarillo')
@@ -914,7 +969,7 @@ export default function CargarObra() {
         <h1 className="text-xl font-extrabold text-gray-900">CARGAR UNA OBRA</h1>
       </div>
       <p className="text-gray-500 text-sm mb-4 ml-4">
-        Subí el cómputo de la obra (hoja 01_C&amp;P): la app le pone las fórmulas y los precios.
+        Subí el cómputo de la obra (la hoja 01_C&amp;P, CYP o cualquiera con Descripción y Cantidad): la app le pone las fórmulas y los precios.
       </p>
 
       <div className="max-w-5xl space-y-5">
@@ -961,7 +1016,7 @@ export default function CargarObra() {
               accept=".xlsx"
               label="Arrastrá el Excel de la obra acá"
               labelCelular="Elegí el Excel de la obra"
-              hint="El cómputo de la obra que hacés siempre, el que tiene la hoja 01_C&P, o una planilla que bajaste de la app (Exportar). No hay que agregarle nada."
+              hint="El cómputo de la obra: la hoja 01_C&P o CYP, o cualquier hoja con las columnas Descripción y Cantidad; también una planilla que bajaste de la app (Exportar). No hay que agregarle nada."
               onFile={elegirArchivo}
               value={file}
               onClear={quitarArchivo}
@@ -1014,6 +1069,11 @@ export default function CargarObra() {
               <div className="text-[11px] text-gray-500 mt-0.5">
                 Lo que elijas acá queda guardado para la próxima obra.
               </div>
+              {analisis.hoja && !/^01_C&P$/i.test(analisis.hoja.trim()) && (
+                <div data-testid="hoja-leida" className="mt-2 text-xs text-sky-800 bg-sky-50 border border-sky-200 rounded-lg px-3 py-2">
+                  Leí la solapa «{analisis.hoja}»: los trabajos salen de ahí.
+                </div>
+              )}
               {analisis.planilla_simple && (
                 <div data-testid="aviso-planilla-simple" className="mt-2 text-xs text-sky-800 bg-sky-50 border border-sky-200 rounded-lg px-3 py-2">
                   Es la planilla simple que bajó la app (Exportar): se cargan los trabajos con sus cantidades, rubros y
@@ -1118,6 +1178,24 @@ export default function CargarObra() {
               )}
             </div>
 
+            {sinRecetaNiPrecio.length > 0 && (
+              <div className="bg-red-50/60 border border-red-200 rounded-xl px-4 py-3 flex flex-wrap items-center gap-x-3 gap-y-2" data-testid="banner-sin-precio">
+                <span className="flex-1 min-w-[200px] text-xs text-red-800">
+                  {sinRecetaNiPrecio.length === 1
+                    ? 'Hay 1 trabajo sin fórmula y sin precio en el Excel.'
+                    : `Hay ${sinRecetaNiPrecio.length} trabajos sin fórmula y sin precio en el Excel.`}{' '}
+                  Podés cargarlos en $0 y elegirles la fórmula después, en el presupuesto.
+                </span>
+                <button
+                  onClick={() => cargarSinPrecio(sinRecetaNiPrecio)}
+                  data-testid="cargar-todos-sin-precio"
+                  className="w-full sm:w-auto min-h-10 sm:min-h-0 bg-white border border-red-300 text-red-700 font-semibold px-3 py-1.5 rounded-lg text-sm sm:text-xs hover:bg-red-100"
+                >
+                  {sinRecetaNiPrecio.length === 1 ? 'Cargar el que no tiene fórmula en $0' : `Cargar los ${sinRecetaNiPrecio.length} sin fórmula en $0`}
+                </button>
+              </div>
+            )}
+
             {amarillos > 0 && (
               <div className="bg-amber-50/60 border border-amber-200 rounded-xl px-4 py-3" data-testid="confirmar-todos">
                 {!confirmandoTodos ? (
@@ -1172,10 +1250,12 @@ export default function CargarObra() {
                   recetas={analisis.recetas}
                   excelConPrecios={analisis.excel_con_precios}
                   pendiente={pendientes[t.clave]}
+                  sinPrecio={!!asignaciones[t.clave]?.sin_precio}
                   onConfirmar={() => confirmar(t)}
                   onDeshacer={() => deshacer(t)}
                   onElegir={(rec) => elegir(t, rec)}
                   onSinReceta={() => asignar(t.clave, [])}
+                  onSinPrecio={() => cargarSinPrecio([t])}
                   onValor={(codigo, v) => responder(t, codigo, v)}
                   onCorregirPrecios={abrirPrecios}
                 />

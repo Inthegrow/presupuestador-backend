@@ -7,8 +7,18 @@ from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException
 
-from app.auth import get_current_user, require_admin, require_editor
-from app.budget_prices import budget_config, fetch_all, initial_indirects, precios_faltantes, today
+from app.auth import get_current_user, require_editor
+from app.budget_prices import (
+    budget_config,
+    es_precio_viejo,
+    fetch_all,
+    initial_indirects,
+    load_org_config,
+    precio_dias,
+    precio_viejo_dias,
+    precios_faltantes,
+    today,
+)
 from app.calculations import (
     PRICE_FIELDS,
     calc_budget_summary,
@@ -24,14 +34,17 @@ from app.obra_import import plain
 from app.recipes import ORIGEN_RECURSO, has_formula, merge_params, param_defaults, requantify_row
 from app.routers.analysis import _get_budget, _run_cascade, apply_catalog
 from app.routers.obras import _human
+from app.routers.obras import PriceBook
 from app.routers.templates import (
     A_MEDIAS,
     _budget_items,
     _json_list,
+    _precios_al,
     build_rows,
     check_factor,
     conversion_factor,
     save_applied,
+    write_applied,
 )
 from app.schemas import (
     BudgetCopyRequest,
@@ -47,7 +60,7 @@ from app.schemas import (
     SectionCreate,
     TrabajoCreate,
 )
-from app.tree import build_tree
+from app.tree import build_tree, get_parent_candidates, normalize_item_code
 
 logger = logging.getLogger(__name__)
 
@@ -104,9 +117,31 @@ async def create_budget(budget: BudgetCreate, user: dict = Depends(require_edito
     return result.data[0]
 
 
+NO_SE_CREO = "No se pudo crear el presupuesto. No quedó nada a medias; probá de nuevo."
+SIN_PLANTILLA = "La empresa no tiene una fórmula con ese código"
+
+
+def _sin_aplicar(item, motivo: object) -> dict:  # type: ignore[no-untyped-def]
+    if isinstance(motivo, dict):
+        motivo = motivo.get("mensaje")
+    elif isinstance(motivo, list):
+        motivo = " ".join(str(m) for m in motivo)
+    return {"codigo": item.codigo, "descripcion": item.descripcion, "plantilla": item.plantilla,
+            "motivo": str(motivo or "")}
+
+
 @router.post("/create-full")
 async def create_full_budget(payload: CreateFullBudget, user: dict = Depends(require_editor)):
-    """Create a complete budget with sections, items, and indirect config in one request."""
+    """Create a complete budget with sections, items, and indirect config in one request.
+
+    A section whose code continues another one already sent ("4.1" after "4") goes inside it (a piso).
+    An item with ``plantilla`` (the code of a fórmula of the company, Trabajos típicos of the TERRAC
+    model) is created with that fórmula applied and priced from the oficial list, with the same rule as
+    POST /budgets/{id}/trabajos (prepare_trabajo + write_applied); the budget is recalculated once at the
+    end. When the fórmula cannot be applied (no fórmula with that code, units without a conversion, a bad
+    formula) the work goes in without it and comes back in ``sin_formula`` with the reason. The quantity
+    may be empty (0). If something fails half way, the budget is deleted: nothing stays half done.
+    """
     db = get_data_db()
     org_id = user["org_id"]
 
@@ -129,51 +164,88 @@ async def create_full_budget(payload: CreateFullBudget, user: dict = Depends(req
     budget = budget_result.data[0]
     budget_id = budget["id"]
 
-    # 2. Create sections and their child items
+    # 2. The fórmulas of the works that bring one: everything that can say no, before writing items
+    secciones = payload.secciones or []
+    pedidas = {normalize_item_code(i.plantilla) for s in secciones for i in s.items if (i.plantilla or "").strip()}
+    templates: dict[str, dict] = {}
+    if pedidas:
+        rows = db.table("item_templates").select("*").eq("org_id", org_id).execute().data or []
+        templates = {normalize_item_code(t.get("codigo")): t for t in rows if t.get("codigo")}
+    book = PriceBook(db, org_id, _precios_al(budget)) if pedidas else None
+    preparados: dict[tuple[int, int], dict] = {}
+    sin_formula: list[dict] = []
+    for si, seccion in enumerate(secciones):
+        for ii, item in enumerate(seccion.items):
+            if not (item.plantilla or "").strip():
+                continue
+            template = templates.get(normalize_item_code(item.plantilla))
+            if template is None:
+                sin_formula.append(_sin_aplicar(item, SIN_PLANTILLA))
+                continue
+            try:
+                preparados[(si, ii)] = {"template": template, **prepare_trabajo(
+                    db, org_id, budget, template, item.cantidad, item.descripcion, item.unidad, None, book)}
+            except HTTPException as exc:  # FALTA_CONVERSION (409) or a bad formula (422)
+                sin_formula.append(_sin_aplicar(item, exc.detail))
+
+    # 3. Create sections and their child items
     config = budget_config(db, org_id, budget)
     sort_order = 0
     sections_created = 0
     items_created = 0
-
-    for seccion in (payload.secciones or []):
-        # Create section item (parent_id=None, notas="Seccion")
-        section_row = {
-            "budget_id": budget_id,
-            "org_id": org_id,
-            "parent_id": None,
-            "code": seccion.codigo,
-            "description": seccion.nombre,
-            "notas": "Seccion",
-            "sort_order": sort_order,
-            "mat_unitario": 0,
-            "mo_unitario": 0,
-        }
-        section_result = db.table("budget_items").insert(section_row).execute()
-        section_id = section_result.data[0]["id"]
-        sections_created += 1
-        sort_order += 1
-
-        # Create child items under this section
-        for item in seccion.items:
-            item_row = {
+    faltantes: dict[str, dict] = {}
+    section_ids: dict[str, str] = {}
+    try:
+        for si, seccion in enumerate(secciones):
+            # Create section item (notas="Seccion"); "4.1" after "4" is a piso of rubro 4
+            code = normalize_item_code(seccion.codigo)
+            padre = next((section_ids[c] for c in get_parent_candidates(code) if c in section_ids), None)
+            section_row = {
                 "budget_id": budget_id,
                 "org_id": org_id,
-                "parent_id": section_id,
-                "code": item.codigo,
-                "description": item.descripcion,
-                "unidad": item.unidad,
-                "cantidad": item.cantidad,
+                "parent_id": padre,
+                "code": seccion.codigo,
+                "description": seccion.nombre,
+                "notas": "Seccion",
+                "sort_order": sort_order,
                 "mat_unitario": 0,
                 "mo_unitario": 0,
-                "notas": None,
-                "sort_order": sort_order,
             }
-            calculated = price_item(calc_item_totals(item_row), config)
-            db.table("budget_items").insert(calculated).execute()
-            items_created += 1
+            section_result = db.table("budget_items").insert(section_row).execute()
+            section_id = section_result.data[0]["id"]
+            section_ids.setdefault(code, section_id)
+            sections_created += 1
             sort_order += 1
 
-    # 3. Build summary
+            # Create child items under this section
+            for ii, item in enumerate(seccion.items):
+                listo = preparados.get((si, ii))
+                cantidad = item.cantidad or 0
+                if listo is None:
+                    item_row = trabajo_row(budget_id, org_id, section_id, item.codigo, item.descripcion,
+                                           item.unidad or "", cantidad, sort_order)
+                    db.table("budget_items").insert(price_item(item_row, config)).execute()
+                else:
+                    trabajo = db.table("budget_items").insert(trabajo_row(
+                        budget_id, org_id, section_id, item.codigo, listo["descripcion"], listo["unidad"], cantidad,
+                        sort_order,
+                    )).execute().data[0]
+                    for row in listo["rows"]:
+                        row["item_id"] = str(trabajo["id"])
+                    write_applied(db, org_id, str(listo["template"]["id"]), trabajo, listo["rows"], listo["params"])
+                    for key, falta in listo["faltantes"].items():
+                        faltantes.setdefault(key, falta)
+                items_created += 1
+                sort_order += 1
+        if preparados:
+            # The same full recalculation as adding a work with its fórmula, once for the whole budget
+            _run_cascade(db, org_id, budget, _budget_items(db, budget_id, org_id), strict=True)
+    except Exception as exc:
+        logger.exception("Creating budget %s failed; deleting it", budget_id)
+        db.table("budgets").delete().eq("id", budget_id).eq("org_id", org_id).execute()
+        raise HTTPException(500, {"codigo": "NO_SE_CREO", "mensaje": NO_SE_CREO}) from exc
+
+    # 4. Build summary
     all_items = _get_items(budget_id, org_id)
     summary = calc_budget_summary(all_items, pct_or_default(config, "iva_pct", 21))
 
@@ -181,6 +253,9 @@ async def create_full_budget(payload: CreateFullBudget, user: dict = Depends(req
         "budget": budget,
         "sections_created": sections_created,
         "items_created": items_created,
+        "con_formula": len(preparados),
+        "sin_formula": sin_formula,
+        "precios_faltantes": list(faltantes.values()),
         "summary": summary,
     }
 
@@ -238,7 +313,11 @@ async def update_budget(
 
 
 @router.delete("/{budget_id}")
-async def delete_budget(budget_id: UUID, user: dict = Depends(require_admin)):
+async def delete_budget(budget_id: UUID, user: dict = Depends(require_editor)):
+    """Delete a budget for good (admin and "Carga y edita": the screen asks to type its name first).
+
+    Its rubros, works, resources and versions go with it (ON DELETE CASCADE in the database).
+    """
     db = get_data_db()
     result = (
         db.table("budgets")
@@ -472,7 +551,10 @@ async def get_item_resources(
         .eq("org_id", org_id)
         .execute()
     )
-    return result.data or []
+    # Precio viejo (E13): how old each price is, and whether it is older than the company's limit
+    dias, hoy = precio_viejo_dias(load_org_config(db, org_id)), today()
+    return [{**r, "precio_dias": precio_dias(r, hoy), "precio_viejo": es_precio_viejo(r, dias, hoy)}
+            for r in result.data or []]
 
 
 @router.get("/{budget_id}/items/{item_id}/precios-faltantes")
@@ -571,6 +653,45 @@ def _remove_new(db, org_id: str, budget_id: str, item_id: str | None, rubro_id: 
         return False
 
 
+def prepare_trabajo(
+    db, org_id: str, budget: dict, template: dict, cantidad: float | None, descripcion: str | None,
+    unidad: str | None, factor: float | None, book: PriceBook | None = None,
+) -> dict:
+    """Everything a new work with its fórmula needs, before anything is written.
+
+    The one rule of POST /budgets/{id}/trabajos and of create-full (Trabajos típicos with ``plantilla``):
+    the fórmula's name and unit when the work does not bring them, the unit conversion (409
+    FALTA_CONVERSION), the fórmula's parameters and its resources priced with the oficial list at the
+    budget's date (build_rows; 422 for a bad formula). Returns {descripcion, unidad, factor, params,
+    rows, faltantes}.
+    """
+    descripcion = (descripcion or "").strip() or _oracion(template.get("nombre"))
+    unidad = (unidad or "").strip() or template.get("unidad")
+    factor = conversion_factor(template, descripcion, unidad, factor)
+    params = merge_params(param_defaults(_json_list(template.get("parametros"))), {})
+    rows, faltantes = build_rows(db, org_id, budget, template, None, float(cantidad or 0), params, factor, book)
+    return {"descripcion": descripcion, "unidad": unidad, "factor": factor, "params": params, "rows": rows,
+            "faltantes": faltantes}
+
+
+def trabajo_row(budget_id: str, org_id: str, parent_id: str | None, code: str | None, descripcion: str,
+                unidad: str | None, cantidad: float | None, sort_order: int) -> dict:
+    """budget_items row of a new work (its costs come from its resources, or stay at 0)."""
+    return calc_item_totals({
+        "budget_id": budget_id,
+        "org_id": org_id,
+        "parent_id": parent_id,
+        "code": code,
+        "description": descripcion,
+        "unidad": unidad,
+        "cantidad": cantidad,
+        "mat_unitario": 0,
+        "mo_unitario": 0,
+        "notas": None,
+        "sort_order": sort_order,
+    })
+
+
 @router.post("/{budget_id}/trabajos")
 async def create_trabajo(
     budget_id: UUID,
@@ -599,16 +720,14 @@ async def create_trabajo(
     template = templates[0]
     check_factor(payload.factor)
 
-    descripcion = (payload.descripcion or "").strip() or _oracion(template.get("nombre"))
-    unidad = (payload.unidad or "").strip() or template.get("unidad")
     items = _budget_items(db, bid, org_id)
     categoria = _oracion(template.get("categoria")) or RUBRO_SIN_CATEGORIA
     rubro = _rubro_for(items, payload.parent_id, categoria)
 
     # Everything that can say no goes before creating anything: conversion and formulas
-    factor = conversion_factor(template, descripcion, unidad, payload.factor)
-    params = merge_params(param_defaults(_json_list(template.get("parametros"))), {})
-    rows, faltantes = build_rows(db, org_id, budget, template, None, payload.cantidad, params, factor)
+    nuevo = prepare_trabajo(db, org_id, budget, template, payload.cantidad, payload.descripcion, payload.unidad,
+                            payload.factor)
+    rows, faltantes, params = nuevo["rows"], nuevo["faltantes"], nuevo["params"]
 
     rubro_creado = rubro is None
     next_sort = max((i.get("sort_order") or 0 for i in items), default=-1) + 1
@@ -629,19 +748,10 @@ async def create_trabajo(
             if not rubro:
                 raise RuntimeError("No se creó el rubro")
             next_sort += 1
-        trabajo = (db.table("budget_items").insert(calc_item_totals({
-            "budget_id": bid,
-            "org_id": org_id,
-            "parent_id": str(rubro["id"]),
-            "code": _next_item_code(rubro, items),
-            "description": descripcion,
-            "unidad": unidad,
-            "cantidad": payload.cantidad,
-            "mat_unitario": 0,
-            "mo_unitario": 0,
-            "notas": None,
-            "sort_order": next_sort,
-        })).execute().data or [None])[0]
+        trabajo = (db.table("budget_items").insert(trabajo_row(
+            bid, org_id, str(rubro["id"]), _next_item_code(rubro, items), nuevo["descripcion"], nuevo["unidad"],
+            payload.cantidad, next_sort,
+        )).execute().data or [None])[0]
         if not trabajo:
             raise RuntimeError("No se creó el trabajo")
         for row in rows:
@@ -673,7 +783,9 @@ async def get_budget_missing_prices(budget_id: UUID, user: dict = Depends(get_cu
     """How many codes without a price each item has, and how many resources it has (the dot
     of the editor's table), with the rule of GET .../items/{item_id}/precios-faltantes.
     Resources are read in bulk. The resource count is real: a formula can leave no resources
-    (an empty formula, or all of them deleted later), and that item is not "listo"."""
+    (an empty formula, or all of them deleted later), and that item is not "listo".
+    ``viejos``: per item, how many resources have a price older than the company's "precio viejo"
+    (``precio_viejo_dias``, 90 by default). It never blocks anything."""
     db = get_data_db()
     org_id = user["org_id"]
     bid = str(budget_id)
@@ -689,9 +801,12 @@ async def get_budget_missing_prices(budget_id: UUID, user: dict = Depends(get_cu
             .eq("org_id", org_id).in_("item_id", chunk).order("id")
         ):
             por_item.setdefault(str(r["item_id"]), []).append(r)
+    dias, hoy = precio_viejo_dias(load_org_config(db, org_id)), today()
     return {
         "por_item": {i: len(precios_faltantes(rs)) for i, rs in por_item.items()},
         "recursos_por_item": {i: len(rs) for i, rs in por_item.items()},
+        "viejos": {i: sum(1 for r in rs if es_precio_viejo(r, dias, hoy)) for i, rs in por_item.items()},
+        "precio_viejo_dias": dias,
     }
 
 

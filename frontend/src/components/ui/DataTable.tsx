@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { FileText, Pencil, Loader2, Trash2 } from 'lucide-react'
+import { FileText, Pencil, Loader2, Trash2, Library } from 'lucide-react'
 import type { BudgetItem } from '../../types'
 import { fmtCurrency, fmtNumber } from '../../lib/format'
 import { ESTILO } from '../../lib/semaforo'
@@ -12,6 +12,9 @@ interface Props {
   onDeleteItem?: (itemId: string, description: string) => void
   // Punto de color de cada trabajo (null: no se sabe, sin punto)
   semaforo?: (item: BudgetItem) => { estado: Semaforo; frase: string } | null
+  // Trabajo sin fórmula (en rojo): el renglón ofrece «Elegir fórmula»
+  necesitaFormula?: (item: BudgetItem) => boolean
+  onElegirFormula?: (item: BudgetItem) => void
 }
 
 type EditableField = 'cantidad' | 'mat_unitario' | 'mo_unitario'
@@ -23,7 +26,7 @@ interface CellState {
   hasAudit: boolean
 }
 
-export default function DataTable({ items, onEditItem, onViewDetail, onDeleteItem, semaforo }: Props) {
+export default function DataTable({ items, onEditItem, onViewDetail, onDeleteItem, semaforo, necesitaFormula, onElegirFormula }: Props) {
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [editing, setEditing] = useState<{ id: string; field: EditableField } | null>(null)
   const [editValue, setEditValue] = useState('')
@@ -239,6 +242,16 @@ export default function DataTable({ items, onEditItem, onViewDetail, onDeleteIte
                   })()}
                   <span className="font-medium text-gray-800 line-clamp-2" title={item.description ?? undefined}>{item.description}</span>
                 </span>
+                {onElegirFormula && necesitaFormula?.(item) && (
+                  <button
+                    type="button"
+                    onClick={() => onElegirFormula(item)}
+                    data-testid="elegir-formula-renglon"
+                    className="mt-1 ml-3.5 inline-flex items-center gap-1 text-[11px] font-semibold text-red-700 bg-white border border-red-200 hover:bg-red-50 rounded-full px-2 py-0.5"
+                  >
+                    <Library size={11} /> Elegir fórmula
+                  </button>
+                )}
               </td>
               <td className="px-3 py-2.5 text-gray-400 text-[10px] uppercase whitespace-nowrap">{item.unidad}</td>
               {renderEditableCell(item, 'cantidad', (v) => fmtNumber(v, 0))}

@@ -154,8 +154,9 @@ class TestAnalizar:
         assert res.status_code == 200, res.text
         body = res.json()
         assert set(body) == {"archivo", "titulo_dudoso", "planilla_simple", "catalogo_oficial", "excel_con_precios", "titulo",
-                             "fecha_precios", "resumen", "tareas", "precios", "recetas", "correcciones_excel",
-                             "listo"}
+                             "hoja", "sin_formula_sin_precio", "fecha_precios", "resumen", "tareas", "precios",
+                             "recetas", "correcciones_excel", "listo"}
+        assert (body["hoja"], body["sin_formula_sin_precio"]) == ("01_C&P", 0)
         assert body["catalogo_oficial"] is False
         assert body["excel_con_precios"] is True
         assert body["titulo_dudoso"] is False  # "obra.xlsx": nothing to compare the title with
@@ -167,7 +168,7 @@ class TestAnalizar:
         for t in body["tareas"]:
             assert set(t) == {"clave", "descripcion", "unidad", "veces", "cantidad_total", "total_excel", "codigos",
                               "estado", "motivo_rojo", "receta", "sugerencias", "pregunta", "avisos",
-                              "precios_faltantes"}
+                              "precios_faltantes", "sin_precio"}
         tareas = _tareas(body)
 
         telgopor = tareas[TELGOPOR]
@@ -423,7 +424,7 @@ class TestAnalizar:
         res = client.post("/obras/analizar", files={"file": ("otra.xlsx", _excel(wb), XLSX)})
         assert res.status_code == 400
         detail = res.json()["detail"]
-        assert "no tiene la hoja 01_C&P" in detail and "Hoja1, Cómputo" in detail
+        assert "No encontré el cómputo" in detail and "01_C&P o CYP" in detail and "Hoja1, Cómputo" in detail
 
     def test_rejects_other_files(self, client, db):
         res = client.post("/obras/analizar", files={"file": ("obra.csv", b"a,b", "text/csv")})
@@ -1079,7 +1080,7 @@ class TestDiferenciasAlNivel:
 # ── Excel sin precios ────────────────────────────────────────────────────────
 
 LIMPIEZA = "LIMPIEZA FINAL DE OBRA | gl"
-SIN_RECETA_Y_SIN_PRECIO = "Hay {n} trabajos sin fórmula y sin precio en el Excel: elegí una fórmula antes de cargar"
+SIN_RECETA_Y_SIN_PRECIO = "Hay {n} trabajos sin fórmula y sin precio en el Excel: elegí una fórmula o cargalos sin precio ($0)"
 
 
 def _workbook_sin_precios():
@@ -1142,7 +1143,7 @@ class TestExcelSinPrecios:
         res = cargar(client, wb=_workbook_sin_precios(), asignaciones={ARISTAS: {"plantillas": [["6.9", 1]]}})
         assert res.status_code == 409
         assert res.json()["detail"] == {
-            "mensaje": "Hay 1 trabajo sin fórmula y sin precio en el Excel: elegí una fórmula antes de cargar",
+            "mensaje": "Hay 1 trabajo sin fórmula y sin precio en el Excel: elegí una fórmula o cargalo sin precio ($0)",
             "rojos": [OBRADOR]}
 
         elegidas = {ARISTAS: {"plantillas": [["6.9", 1]]}, OBRADOR: {"plantillas": [["5.1.4", 1]]}}

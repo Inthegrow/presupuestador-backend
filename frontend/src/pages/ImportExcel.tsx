@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import { Upload, CheckCircle } from 'lucide-react'
+import { Upload, CheckCircle, ClipboardCheck } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
-import { budgetApi, textoDeError } from '../lib/api'
+import { budgetApi, esCargarObra, textoDeError } from '../lib/api'
+import { dejarArchivoParaCargarObra } from '../lib/archivoPendiente'
 import { fmtPesos } from '../lib/format'
 import { useAuth } from '../contexts/AuthContext'
 import FileUpload from '../components/ui/FileUpload'
@@ -29,24 +30,40 @@ export default function ImportExcel() {
   const [file, setFile] = useState<File | null>(null)
   const [importing, setImporting] = useState(false)
   const [error, setError] = useState('')
+  // 422 CARGAR_OBRA: el Excel trae el cómputo sin precios; no se creó nada y va por Cargar obra
+  const [paraCargarObra, setParaCargarObra] = useState<string | null>(null)
   const [result, setResult] = useState<Awaited<ReturnType<typeof budgetApi.importExcel>> | null>(null)
 
   function handleFile(f: File) {
     setFile(f)
     setError('')
+    setParaCargarObra(null)
     setResult(null)
+  }
+
+  // El mismo archivo, ya elegido, en Cargar obra
+  function irACargarObra() {
+    if (!file) return
+    dejarArchivoParaCargarObra(file)
+    navigate('/app/cargar-obra')
   }
 
   async function handleImport() {
     if (!file) return
     setImporting(true)
     setError('')
+    setParaCargarObra(null)
     const formData = new FormData()
     formData.append('file', file)
     try {
       const res = await budgetApi.importExcel(formData)
       setResult(res)
     } catch (e) {
+      if (esCargarObra(e)) {
+        setParaCargarObra(e.detail.mensaje?.trim()
+          || 'Este Excel trae el cómputo sin precios. Para que la app lo calcule con las fórmulas, cargalo en Cargar obra.')
+        return
+      }
       setError(`No se pudo importar: ${textoDeError(e, 'probá de nuevo.')}`)
     } finally {
       setImporting(false)
@@ -81,7 +98,7 @@ export default function ImportExcel() {
 
       <div className="max-w-3xl">
         {/* File upload */}
-        {!result && (
+        {!result && !paraCargarObra && (
           <div className="mb-6">
             <FileUpload
               accept=".xlsx,.xls"
@@ -98,8 +115,38 @@ export default function ImportExcel() {
           </div>
         )}
 
+        {/* El Excel no trae precios: no se creó nada, va por Cargar obra con el mismo archivo */}
+        {file && !result && paraCargarObra && (
+          <div role="status" data-testid="ir-a-cargar-obra" className="bg-white rounded-xl border border-sky-200 shadow-sm p-4 md:p-5 fade-in">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 bg-sky-50 rounded-lg flex items-center justify-center flex-shrink-0">
+                <ClipboardCheck size={20} className="text-sky-700" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="font-semibold text-gray-900 text-sm break-all">{file.name}</div>
+                <p className="text-sm text-gray-800 mt-1 whitespace-pre-line" data-testid="mensaje-cargar-obra">{paraCargarObra}</p>
+                <p className="text-xs text-gray-500 mt-1">No se creó ningún presupuesto ni lista de precios.</p>
+              </div>
+            </div>
+            <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 mt-4">
+              <button
+                onClick={irACargarObra}
+                className="min-h-11 sm:min-h-0 justify-center bg-[#2D8D68] hover:bg-[#1B5E4B] text-white font-semibold px-5 py-2.5 rounded-lg text-sm transition-colors flex items-center gap-2"
+              >
+                <ClipboardCheck size={16} /> Cargarlo en Cargar obra
+              </button>
+              <button
+                onClick={() => { setFile(null); setParaCargarObra(null) }}
+                className="min-h-11 sm:min-h-0 bg-white border text-gray-600 px-5 py-2.5 rounded-lg text-sm hover:bg-gray-50 transition-colors"
+              >
+                Elegir otro Excel
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* File selected — show import button */}
-        {file && !result && (
+        {file && !result && !paraCargarObra && (
           <div className="bg-white rounded-xl border p-5 fade-in">
             <div className="flex items-center gap-3 mb-4">
               <div className="w-10 h-10 bg-green-50 rounded-lg flex items-center justify-center">
@@ -115,7 +162,7 @@ export default function ImportExcel() {
               La app va a:
               <ul className="mt-1 space-y-0.5 ml-3 list-disc">
                 <li>Leer las listas de precios (00_Mat, 00_MO, 00_Eq, 00_Sub)</li>
-                <li>Copiar los trabajos de la hoja 01_C&amp;P</li>
+                <li>Copiar los trabajos de la hoja del cómputo (01_C&amp;P o CYP)</li>
                 <li>Leer las hojas de detalle: los recursos de cada trabajo</li>
                 <li>Corregir solos los códigos que Excel convirtió en fechas</li>
               </ul>
@@ -227,7 +274,8 @@ export default function ImportExcel() {
           <p className="font-semibold mb-2">Formatos compatibles</p>
           <ul className="space-y-1 text-gray-600">
             <li>Listas de precios (00_Mat, 00_MO, 00_Eq, 00_Sub) → van a <strong>Lista de precios</strong></li>
-            <li>01_C&amp;P → arma los <strong>rubros y trabajos</strong> con sus costos</li>
+            <li>01_C&amp;P o CYP → arma los <strong>rubros y trabajos</strong> con sus costos</li>
+            <li>Un cómputo con cantidades y sin precios → va por <strong>Cargar obra</strong>, que lo calcula con las fórmulas</li>
             <li>Hojas de detalle (1.1, 1.2, etc.) → arman los <strong>recursos de cada trabajo</strong></li>
             <li>Códigos que Excel convirtió en fechas → se <strong>corrigen solos</strong></li>
           </ul>

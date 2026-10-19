@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { Edit3, ChevronRight, ChevronDown, ChevronUp, Plus, CheckCircle, AlertCircle, X, Loader2, LayoutGrid, MousePointerClick, Command, RefreshCw, Sparkles, GitCompare, Download, FilePlus2 } from 'lucide-react'
-import { budgetApi, mensajeDeError } from '../lib/api'
+import { Edit3, ChevronRight, ChevronDown, ChevronUp, Plus, CheckCircle, AlertCircle, X, Loader2, LayoutGrid, MousePointerClick, Command, RefreshCw, Sparkles, GitCompare, Download, FilePlus2, Trash2 } from 'lucide-react'
+import { ApiError, budgetApi, mensajeDeError } from '../lib/api'
 import { useAuth } from '../contexts/AuthContext'
 import { fmtCurrency, fmtNumber, fmtPesos } from '../lib/format'
 import { escaleraDe, indirectosCompletos, pctsEscalera } from '../lib/cascada'
@@ -14,7 +14,9 @@ import ViewModeSelector from '../components/ui/ViewModeSelector'
 import AddItemForm from '../components/ui/AddItemForm'
 import AgregarTrabajo from '../components/ui/AgregarTrabajo'
 import type { AgregarTrabajoResult } from '../lib/api'
-import { estadoEnTabla } from '../lib/semaforo'
+import { estadoEnTabla, precioPorUnidad } from '../lib/semaforo'
+import ElegirFormula from '../components/ui/ElegirFormula'
+import ConfirmarBorrado from '../components/ConfirmarBorrado'
 import { regroupItems } from '../lib/viewModes'
 import type { ViewMode } from '../lib/viewModes'
 import { usePantalla } from '../lib/pantalla'
@@ -86,6 +88,11 @@ export default function Editor() {
   const [allItems, setAllItems] = useState<BudgetItem[]>([])
   const [items, setItems] = useState<BudgetItem[]>([])
   const [loading, setLoading] = useState(true)
+  // No se pudo leer el presupuesto (nunca se muestra «todavía no tiene trabajos» si no se pudo leer)
+  const [errorCarga, setErrorCarga] = useState<string | null>(null)
+  // «Elegir fórmula» en el renglón de un trabajo sin fórmula, y «Borrar el presupuesto» del menú
+  const [eligiendoFormula, setEligiendoFormula] = useState<BudgetItem | null>(null)
+  const [borrandoPresupuesto, setBorrandoPresupuesto] = useState(false)
   const [toasts, setToasts] = useState<Toast[]>([])
   const [viewMode, setViewMode] = useState<ViewMode>('rubro')
   const [originalTree, setOriginalTree] = useState<TreeNode[]>([])
@@ -238,8 +245,11 @@ export default function Editor() {
     return null
   }, [originalTree])
 
-  useEffect(() => {
+  // El presupuesto y sus trabajos; si el servidor no contesta, se dice por qué y se puede reintentar
+  const cargarPresupuesto = useCallback(() => {
     if (!id) return
+    setLoading(true)
+    setErrorCarga(null)
     refreshData()
       .then((data) => {
         if (!data) return
@@ -250,8 +260,19 @@ export default function Editor() {
           setItems(getItemsForNode(firstNode, data.items))
         }
       })
-      .catch(() => {/* keep empty state */})
+      .catch((err) => {
+        const porDefecto = err instanceof ApiError
+          ? `el servidor contestó con un error (${err.status}). Probá de nuevo en un rato.`
+          : 'el servidor no contestó. Probá de nuevo en un rato.'
+        const motivo = mensajeDeError(err, porDefecto)
+        setErrorCarga(motivo.charAt(0).toLowerCase() + motivo.slice(1))
+      })
       .finally(() => setLoading(false))
+  }, [id, refreshData, cargarFaltantes, getItemsForNode])
+
+  useEffect(() => {
+    if (!id) return
+    cargarPresupuesto()
     setUltimaVersion(undefined)
     budgetApi.getVersions(id)
       .then((vs) => {
@@ -264,7 +285,7 @@ export default function Editor() {
       if (config) setIndirectConfig(config)
       else setIndirectFallo(true)
     }).catch(() => setIndirectFallo(true))
-  }, [id, refreshData, getItemsForNode, cargarFaltantes])
+  }, [id, cargarPresupuesto])
 
   // Recálculo completo: la misma cuenta que "Recalcular" de Coeficiente de pase (fórmulas, desperdicio, redondeo e
   // indirectos). Si falla, o si alguna fórmula no se pudo calcular, queda escrito en rojo arriba de la tabla.
@@ -562,6 +583,27 @@ export default function Editor() {
     }
   }
 
+  // Después de aplicar la fórmula desde «Elegir fórmula»: árbol, tabla y puntos con lo que guardó el servidor
+  const handleFormulaAplicada = async () => {
+    const item = eligiendoFormula
+    const data = await refreshData()
+    if (!data) return
+    cargarFaltantes(data.items)
+    if (selectedNode) setItems(getItemsForNode(selectedNode, data.items))
+    if (item) {
+      setRecienAgregado(item.id)
+      addToast(`Fórmula aplicada: ${[item.code, item.description].filter(Boolean).join(' ')}`)
+    }
+  }
+
+  // Un trabajo sin fórmula y sin materiales ni mano de obra (en rojo): el renglón ofrece «Elegir fórmula»
+  const necesitaFormula = useCallback((item: BudgetItem): boolean => {
+    if (!puedeEditar || item.notas === 'Seccion' || item.template_id) return false
+    const recursos = faltantes && faltantes.ids.has(item.id) ? faltantes.recursosPorItem[item.id] : undefined
+    if (typeof recursos === 'number') return recursos === 0
+    return precioPorUnidad(item) === 0
+  }, [puedeEditar, faltantes])
+
   // Los botones del encabezado: los que no entran van a "Más" (en el celular, todos)
   const acciones: Accion[] = [
     ...(puedeEditar ? [{
@@ -583,6 +625,16 @@ export default function Editor() {
       prioridad: 2,
     }] : []),
     { key: 'exportar', label: 'Exportar', icon: Download, onClick: () => navigate(`/app/budgets/${id ?? '1'}/export`), prioridad: 4 },
+    ...(puedeEditar && budget ? [{
+      key: 'borrar',
+      label: 'Borrar el presupuesto',
+      icon: Trash2,
+      onClick: () => setBorrandoPresupuesto(true),
+      title: 'Pide escribir el nombre para confirmar',
+      prioridad: 0,
+      siempreEnMas: true,
+      peligro: true,
+    }] : []),
   ]
   const minIzquierda = () => {
     const natural = tituloRef.current?.scrollWidth ?? 0
@@ -670,7 +722,8 @@ export default function Editor() {
     </div>
   )
 
-  const escaleraBloque = loading ? null
+  // Sin el presupuesto (no se pudo leer) no se muestra nada que parezca un presupuesto vacío
+  const escaleraBloque = loading || errorCarga ? null
     : celular
       ? escaleraAbierta
         ? escaleraCompleta(true, true)
@@ -799,7 +852,21 @@ export default function Editor() {
     />
   ) : null
 
-  const sinTrabajosEnLaObra = items.length === 0 && !loading && puedeEditar && !allItems.some((i) => i.notas !== 'Seccion')
+  const sinTrabajosEnLaObra = items.length === 0 && !loading && !errorCarga && puedeEditar && !allItems.some((i) => i.notas !== 'Seccion')
+
+  const avisoErrorCarga = errorCarga && !loading && (
+    <div role="alert" data-testid="error-presupuesto" className={`mb-3 flex items-start gap-2 bg-red-50 border border-red-200 text-red-700 rounded-xl px-4 py-3 ${celular ? 'text-[14px] flex-wrap' : 'text-sm'}`}>
+      <AlertCircle size={16} className="flex-shrink-0 mt-0.5 text-red-500" />
+      <p className="flex-1 min-w-0 [overflow-wrap:anywhere]">No pude traer el presupuesto: {errorCarga}</p>
+      <button
+        type="button"
+        onClick={cargarPresupuesto}
+        className={`flex-shrink-0 inline-flex items-center gap-1.5 bg-white border border-red-200 text-red-700 font-semibold rounded-lg hover:bg-red-100 ${celular ? 'min-h-10 px-3.5 w-full justify-center' : 'px-3 py-1.5 text-xs'}`}
+      >
+        <RefreshCw size={14} /> Reintentar
+      </button>
+    </div>
+  )
 
   const vacioObra = (
     <div className="py-12 px-8 text-center">
@@ -965,6 +1032,8 @@ export default function Editor() {
         </div>
       )}
 
+      {avisoErrorCarga}
+
       {recalcError && (
         <div role="alert" data-testid="error-recalculo" className="mb-3 flex items-start gap-2 bg-red-50 border border-red-200 text-red-700 rounded-xl px-4 py-3 text-xs max-md:text-[13px] max-md:flex-wrap">
           <AlertCircle size={15} className="flex-shrink-0 mt-0.5 text-red-500" />
@@ -988,7 +1057,7 @@ export default function Editor() {
       {escaleraBloque}
 
       {/* View Mode Selector - top level tabs */}
-      <div className={celular ? 'mb-3 -mx-4 px-4' : 'mb-3 [@media(max-height:800px)]:mb-2'}>
+      {!errorCarga && <div className={celular ? 'mb-3 -mx-4 px-4' : 'mb-3 [@media(max-height:800px)]:mb-2'}>
         <ViewModeSelector
           mode={viewMode}
           onChange={(m) => {
@@ -998,9 +1067,9 @@ export default function Editor() {
             setViewMode(m)
           }}
         />
-      </div>
+      </div>}
 
-      {celular ? (
+      {errorCarga ? null : celular ? (
         <>
           {/* El árbol, en una hoja desde abajo */}
           <button
@@ -1024,7 +1093,7 @@ export default function Editor() {
             {sinTrabajosEnLaObra ? (
               <div className="bg-white rounded-2xl border border-gray-100">{vacioObra}</div>
             ) : items.length === 0 ? (
-              !loading && (
+              !loading && !errorCarga && (
                 <div className="bg-white rounded-2xl border border-gray-100 py-10 px-6 text-center">
                   <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gray-100 mb-3">
                     <LayoutGrid size={24} className="text-gray-300" />
@@ -1048,6 +1117,8 @@ export default function Editor() {
                 onViewDetail={(itemId) => navigate(`/app/budgets/${id}/item/${itemId}`)}
                 onDeleteItem={puedeEditar ? borrarTrabajo : undefined}
                 resaltar={recienAgregado}
+                necesitaFormula={necesitaFormula}
+                onElegirFormula={setEligiendoFormula}
               />
             )}
           </div>
@@ -1112,7 +1183,7 @@ export default function Editor() {
           {agregarTrabajo}
 
           <div className="flex-1 min-h-0 overflow-y-auto">
-          {sinTrabajosEnLaObra ? vacioObra : items.length === 0 ? (
+          {sinTrabajosEnLaObra ? vacioObra : items.length === 0 ? (errorCarga ? null :
             <div className="py-16 px-8 text-center">
               <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gray-100 mb-4">
                 <LayoutGrid size={28} className="text-gray-300" />
@@ -1143,6 +1214,8 @@ export default function Editor() {
               onEditItem={puedeEditar ? handleEditItem : undefined}
               onViewDetail={(itemId) => navigate(`/app/budgets/${id}/item/${itemId}`)}
               onDeleteItem={!puedeEditar ? undefined : borrarTrabajo}
+              necesitaFormula={necesitaFormula}
+              onElegirFormula={setEligiendoFormula}
             />
           )}
 
@@ -1153,6 +1226,31 @@ export default function Editor() {
           </div>
         </div>
       </div>
+      )}
+
+      {eligiendoFormula && id && (
+        <ElegirFormula
+          budgetId={id}
+          itemId={eligiendoFormula.id}
+          reemplaza={false}
+          recursosCargados={0}
+          descripcion={eligiendoFormula.description ?? ''}
+          unidad={eligiendoFormula.unidad ?? null}
+          onApplied={handleFormulaAplicada}
+          onClose={() => setEligiendoFormula(null)}
+        />
+      )}
+
+      {borrandoPresupuesto && id && budget && (
+        <ConfirmarBorrado
+          nombre={budget.name}
+          onConfirmar={async () => {
+            await budgetApi.remove(id)
+            setBorrandoPresupuesto(false)
+            navigate('/app/dashboard', { replace: true, state: { borrado: budget.name } })
+          }}
+          onCerrar={() => setBorrandoPresupuesto(false)}
+        />
       )}
 
       {hojaArbol && (

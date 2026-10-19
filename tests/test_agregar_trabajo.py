@@ -314,8 +314,10 @@ class TestMissingPricesOfTheBudget:
         ]
         r = self._get(client)
         assert r.status_code == 200, r.text
-        assert r.json() == {"por_item": {ITEM: 2, "i31": 0, "i32": 0},
-                            "recursos_por_item": {ITEM: 4, "i31": 2, "i32": 0}}
+        body = r.json()
+        assert set(body) == {"por_item", "recursos_por_item", "viejos", "precio_viejo_dias"}
+        assert (body["por_item"], body["recursos_por_item"]) == ({ITEM: 2, "i31": 0, "i32": 0},
+                                                                 {ITEM: 4, "i31": 2, "i32": 0})
 
     def test_reads_the_resources_in_bulk(self, client, db):
         for n in range(5):

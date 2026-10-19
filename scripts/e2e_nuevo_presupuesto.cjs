@@ -22,16 +22,25 @@ const precioServidor = (cfg) => Number(execFileSync('python3', ['-c',
   'print(calc_cascade_indirects({"directo_total": 100}, json.loads(sys.argv[1]))["total_final"])',
   JSON.stringify(cfg), ROOT]).toString().trim())
 const pesosANumero = (t) => Number(t.replace(/[^\d,]/g, '').replace(',', '.'))
+// Trabajos típicos: el modelo de Terrac (GET /modelo-terrac, entrega 11). [código del rubro, código del trabajo, cantidad]
+// Sin cantidad, el trabajo entra con 0 (la pone Sol después)
 const TILDES = [
-  ['Tareas Preliminares', 'Obrador e instalaciones provisorias', null],
-  ['Tareas Preliminares', 'Limpieza y preparación del terreno', null],
-  ['Tareas Preliminares', 'Cerco perimetral de obra', '40'],
-  ['Albañilería', 'Contrapiso', '120'],
-  ['Albañilería', 'Revoques gruesos', '300'],
+  ['1', '1.1', null],
+  ['1', '1.2', null],
+  ['1', '1.10', '40'],
+  ['5', '5.1.4', '120'],
+  ['5', '5.5.4', '300'],
 ]
+const filaTipica = (page, codigo) => page.locator(`[data-testid=trabajo-tipico][data-codigo="${codigo}"]`)
 
 ;(async () => {
   const generalAntes = await j('GET', '/indirects/general')
+  // Los nombres de los rubros y trabajos, como los manda el modelo de Terrac
+  const modelo = await j('GET', '/modelo-terrac')
+  const rubrosModelo = Array.isArray(modelo) ? modelo : modelo.rubros
+  const nombreRubro = Object.fromEntries(rubrosModelo.map((r) => [String(r.codigo), String(r.nombre).trim()]))
+  const trabajosModelo = rubrosModelo.flatMap((r) => [...(r.trabajos || []), ...(r.pisos || []).flatMap((p) => p.trabajos || [])])
+  const descDe = (codigo) => String(trabajosModelo.find((t) => t.codigo === codigo)?.descripcion ?? codigo).trim()
   const b = await chromium.launch()
   const page = await b.newPage({ viewport: { width: 1280, height: 900 } })
   // The page scrolls inside <main>: go to the top (or to `sel`) before each capture
@@ -66,14 +75,15 @@ const TILDES = [
   // 2. Estructura: 5 trabajos en 2 rubros
   await page.getByRole('button', { name: /Siguiente/ }).click(); await page.waitForTimeout(500)
   check(await page.getByRole('button', { name: /Subir un plano/ }).count() === 1 && await page.getByRole('button', { name: /Importar un archivo \(\.json\)/ }).count() === 1, 'siguen "Subir un plano" e "Importar un archivo (.json)"')
-  for (const [, desc, cant] of TILDES) {
-    await page.getByRole('checkbox', { name: desc, exact: true }).click()
-    if (cant) await page.getByLabel(`Cantidad de ${desc}`, { exact: true }).fill(cant)
+  await page.getByTestId('trabajos-tipicos').waitFor({ timeout: 20000 })
+  for (const [, codigo, cant] of TILDES) {
+    await filaTipica(page, codigo).getByRole('checkbox').click()
+    if (cant) await filaTipica(page, codigo).getByLabel(/^Cantidad de /).fill(cant)
   }
   await page.waitForTimeout(300)
-  check(/Se van a crear 2 rubros con 5 trabajos/.test(await page.getByTestId('resumen-estructura').textContent()), 'resumen: 2 rubros con 5 trabajos')
+  check(/Se van a crear 2 rubros \(2 pisos\) con 5 trabajos/.test(await page.getByTestId('resumen-estructura').textContent()), 'resumen: 2 rubros (2 pisos del modelo) con 5 trabajos')
   await shot('02_estructura')
-  await shot('02b_estructura_tildados', 'text=Revoques gruesos')
+  await shot('02b_estructura_tildados', '[data-testid=trabajo-tipico][data-codigo="5.5.4"]')
 
   // 3. Indirectos: los de la empresa, los nueve
   await page.getByRole('button', { name: /Siguiente/ }).click(); await page.waitForTimeout(1000)
@@ -91,14 +101,14 @@ const TILDES = [
   // 4. Ir y volver: lo tildado y las cantidades siguen
   await page.getByRole('button', { name: /Anterior/ }).click(); await page.waitForTimeout(400)
   let tildados = 0
-  for (const [, desc] of TILDES) if (await page.getByRole('checkbox', { name: desc, exact: true }).getAttribute('aria-checked') === 'true') tildados++
+  for (const [, codigo] of TILDES) if (await filaTipica(page, codigo).getByRole('checkbox').getAttribute('aria-checked') === 'true') tildados++
   check(tildados === 5, `al volver a Estructura siguen tildados ${tildados} de 5`)
-  check(await page.getByLabel('Cantidad de Contrapiso', { exact: true }).inputValue() === '120', 'la cantidad del contrapiso sigue en 120')
+  check(await filaTipica(page, '5.1.4').getByLabel(/^Cantidad de /).inputValue() === '120', 'la cantidad de 5.1.4 (ladrillo hueco del 18) sigue en 120')
   await page.getByRole('button', { name: /Anterior/ }).click(); await page.waitForTimeout(400)
   check(await page.getByLabel(/Nombre del presupuesto/).inputValue() === NOMBRE, 'el nombre sigue en Datos')
   await page.getByRole('button', { name: /Siguiente/ }).click(); await page.waitForTimeout(400)
-  check(/2 rubros con 5 trabajos/.test(await page.getByTestId('resumen-estructura').textContent()), 'ida y vuelta: siguen 2 rubros con 5 trabajos')
-  await shot('04_estructura_al_volver', 'text=Cerco perimetral de obra')
+  check(/2 rubros \(2 pisos\) con 5 trabajos/.test(await page.getByTestId('resumen-estructura').textContent()), 'ida y vuelta: siguen 2 rubros (2 pisos) con 5 trabajos')
+  await shot('04_estructura_al_volver', '[data-testid=trabajo-tipico][data-codigo="1.10"]')
   await page.getByRole('button', { name: /Siguiente/ }).click(); await page.waitForTimeout(400)
 
   // 5. Beneficio 20 %: vale solo para este presupuesto
@@ -133,11 +143,17 @@ const TILDES = [
   const bud = budgets[0]
   const items = await j('GET', `/budgets/${bud.id}/items`)
   const rubros = Object.fromEntries(items.filter((i) => !i.parent_id).map((i) => [i.description, i.id]))
-  check(Object.keys(rubros).sort().join('|') === 'Albañilería|Tareas Preliminares', `rubros: ${Object.keys(rubros).join(', ')}`)
-  for (const [rubro, desc, cant] of TILDES) {
-    const it = items.find((i) => i.description === desc)
-    check(!!it && it.parent_id === rubros[rubro] && (!cant || Number(it.cantidad) === Number(cant)),
-      `"${desc}" queda dentro de "${rubro}"${cant ? ` con cantidad ${cant}` : ''}`)
+  check(Object.keys(rubros).sort().join('|') === [nombreRubro['1'], nombreRubro['5']].sort().join('|'), `rubros: ${Object.keys(rubros).join(', ')}`)
+  for (const [rubro, codigo, cant] of TILDES) {
+    const it = items.find((i) => i.code === codigo)
+    const desc = descDe(codigo)
+    // Un trabajo de un piso del modelo (5.1.4 en 5.1 Mampostería) cuelga de ese piso, y el piso del rubro
+    const piso = it && items.find((i) => i.id === it.parent_id && i.parent_id)
+    const dentro = it && (codigo.split('.').length === 3
+      ? !!piso && piso.code === codigo.split('.').slice(0, 2).join('.') && piso.parent_id === rubros[nombreRubro[rubro]]
+      : it.parent_id === rubros[nombreRubro[rubro]])
+    check(!!it && it.description === desc && dentro && Number(it.cantidad) === Number(cant ?? 0),
+      `"${codigo} ${desc}" queda dentro de "${nombreRubro[rubro]}"${piso ? ` (piso ${piso.code} ${piso.description})` : ''} con cantidad ${cant ?? '0 (vacía)'}`)
   }
   const ind = bud.indirectos || {}
   check(ind.beneficio_pct === 20, `el presupuesto guardó beneficio 20 (guardó ${ind.beneficio_pct})`)
@@ -200,7 +216,7 @@ const TILDES = [
     check(rub['Demolición']?.code === '1' && rub['Estructura']?.code === '2', `códigos de rubro: Demolición ${rub['Demolición']?.code}, Estructura ${rub['Estructura']?.code}`)
   }
 
-  // 11. Usuario que no es administrador (no puede borrar presupuestos): nunca queda un presupuesto escondido ni duplicado
+  // 11. Usuario que no puede borrar presupuestos (403): nunca queda un presupuesto escondido ni duplicado
   await page.route(/\/budgets\/[0-9a-f-]{36}$/, (r) => r.request().method() === 'DELETE'
     ? r.fulfill({ status: 403, contentType: 'application/json', body: '{"detail":"Esta acción es solo para administradores"}' })
     : r.continue())
@@ -208,7 +224,8 @@ const TILDES = [
     await page.goto(`${B}/app/new-project`); await page.waitForTimeout(1500)
     await page.getByLabel(/Nombre del presupuesto/).fill(nombre)
     await page.getByRole('button', { name: /Siguiente/ }).click(); await page.waitForTimeout(400)
-    await page.getByRole('checkbox', { name: 'Contrapiso', exact: true }).click()
+    await page.getByTestId('trabajos-tipicos').waitFor({ timeout: 20000 })
+    await filaTipica(page, '5.1.4').getByRole('checkbox').click()
     await page.getByRole('button', { name: /Subir un plano/ }).click()
     await page.locator('input[type=file]').setInputFiles({ name: 'plano.png', mimeType: 'image/png', buffer: png })
     await page.getByRole('button', { name: /Siguiente/ }).click(); await page.waitForTimeout(800)
@@ -228,7 +245,7 @@ const TILDES = [
   await conPlano('Plano editor cancela')
   await page.getByRole('button', { name: 'Analizar plano y crear' }).click(); await page.waitForTimeout(1500)
   await page.getByRole('button', { name: /Cancelar \(no se crea nada\)/ }).click(); await page.waitForTimeout(800)
-  check(await page.getByRole('alert').filter({ hasText: /solo un administrador puede borrarlo/ }).count() === 1, 'editor, Cancelar: explica que no se puede borrar y qué hacer')
+  check(await page.getByRole('alert').filter({ hasText: /tu usuario no puede borrarlo/ }).count() === 1, 'editor, Cancelar: explica que no se puede borrar y qué hacer')
   await page.getByRole('button', { name: 'Destildar todos' }).last().click()
   await page.screenshot({ path: `${SHOTS}/13_editor_no_puede_cancelar.png` })
   await page.getByRole('button', { name: 'Crear sin los trabajos del plano' }).click(); await page.waitForTimeout(1500)

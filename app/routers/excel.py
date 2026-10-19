@@ -3,21 +3,24 @@
 Import understands multiple formats:
   - Las Heras: numeric codes (0.1, 1.1, etc.)
   - Lugones/El Encuentro: date-encoded codes (2025-01-01 = 1.1, day=section, month=item)
-  - All share: catalog sheets (00_*), computation sheet (01_C&P), detail sheets
+  - The TERRAC model: cómputo in "CYP", rubro and piso titles in column A ("4 -1 FUNDACIONES")
+  - All share: catalog sheets (00_*), computation sheet (01_C&P / CYP), detail sheets
 
-Auto-detects format based on code column content.
+The cómputo is found and read like Cargar obra does it (app/obra_import.py: find_computo, parse_obra).
 """
 
 from __future__ import annotations
 
-import json
+import logging
 import os
-from datetime import datetime, timezone
+import warnings
+from datetime import date, datetime, timezone
 from io import BytesIO
 from typing import Literal
 from urllib.parse import quote
 from uuid import UUID
 
+import openpyxl
 import pandas as pd
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
@@ -33,43 +36,22 @@ from app.calculations import (
     sale_totals,
 )
 from app.db import get_data_db
+from app.obra_import import SIMPLE_SHEET, find_computo, is_simple_sheet, parse_obra
 from app.routers.catalogs import insert_entries, start_history, update_entries
 from app.terrac_export import FMT_PESOS as TERRAC_FMT_PESOS
 from app.terrac_export import terrac_bytes
-from app.tree import get_parent_candidates, normalize_item_code, safe_float
+from app.tree import normalize_item_code, safe_float
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
-# Column offsets for 01_C&P (based on Las Heras Excel structure)
-# Row 7+ data columns:
-COL_ITEM = 0
-COL_DESC = 1
-COL_UNIDAD = 2
-COL_CANTIDAD = 3
-# Direct costs (unit prices)
-COL_MAT_UNIT = 4
-COL_MO_UNIT = 9  # MO total unitario
-COL_DIRECTO_UNIT = 10  # General unitario directo
-# Direct costs (general/total)
-COL_MAT_TOTAL = 11
-COL_MO_GENERAL = 12
-COL_DIRECTO_GENERAL = 13
-# Indirect costs (general)
-COL_IND_MAT = 14
-COL_IND_MO = 15
-COL_IND_GENERAL = 16
-# Benefits (general)
-COL_BEN_MAT = 17
-COL_BEN_MO = 18
-COL_BEN_GENERAL = 19
-# Net total (unit)
-COL_NETO_UNIT_MAT = 20
-COL_NETO_UNIT_MO = 21
-COL_NETO_UNIT_GEN = 22
-# Net total (general)
-COL_NETO_MAT = 23
-COL_NETO_MO = 24
-COL_NETO_GENERAL = 25
+# Columns of the TERRAC cómputo (01_C&P / CYP, 1 = A) that the import keeps besides the ones
+# obra_import.parse_obra reads (E materials and J M.O. per unit, N direct total, Z net total)
+COL_MAT_TOTAL = 12  # L
+COL_MO_GENERAL = 13  # M
+COL_IND_GENERAL = 17  # Q
+COL_BEN_GENERAL = 20  # T
+COL_NETO_GENERAL = 26  # Z
 
 # Catalog sheet config: (sheet_name, tipo, header_row)
 CATALOG_SHEETS = [
@@ -129,105 +111,6 @@ def _parse_catalogs(
                 "referencia": _cell_str(df, i, 4) if tipo != "material" else None,
             })
     return entries
-
-
-def _parse_computation_sheet(
-    df: pd.DataFrame, budget_id: str, org_id: str,
-) -> list[dict]:
-    """Parse the 01_C&P sheet into budget_items rows.
-
-    Data starts at row 7 (0-indexed). Section titles have no CANTIDAD (col 3).
-    """
-    items: list[dict] = []
-    code_to_id_placeholder: dict[str, int] = {}  # code -> index for parent lookup
-
-    date_codes_corrected = 0
-
-    for i in range(7, len(df)):
-        # Read RAW value from code column to preserve Timestamps
-        code_raw_val = df.iloc[i, COL_ITEM] if df.shape[1] > COL_ITEM else None
-        code_raw = _cell_str(df, i, COL_ITEM)
-        desc = _cell_str(df, i, COL_DESC)
-        cantidad_val = safe_float(df.iloc[i, COL_CANTIDAD] if df.shape[1] > COL_CANTIDAD else None)
-
-        # Track date-code conversions
-        if isinstance(code_raw_val, (pd.Timestamp,)):
-            date_codes_corrected += 1
-
-        # Use raw value for normalization (preserves Timestamp for date-code detection)
-        code_for_normalize = code_raw_val if isinstance(code_raw_val, pd.Timestamp) else code_raw
-
-        # Skip empty rows
-        if not code_raw and not desc and not isinstance(code_raw_val, pd.Timestamp):
-            continue
-
-        # Section title (no code or no cantidad) — create as parent item
-        if cantidad_val is None:
-            if code_raw or desc or isinstance(code_raw_val, pd.Timestamp):
-                label = f"{code_raw} {desc}".strip() if desc else code_raw
-                items.append({
-                    "budget_id": budget_id,
-                    "org_id": org_id,
-                    "parent_id": None,
-                    "code": normalize_item_code(code_for_normalize) or None,
-                    "description": label,
-                    "unidad": None,
-                    "cantidad": None,
-                    "mat_unitario": 0,
-                    "mo_unitario": 0,
-                    "mat_total": 0,
-                    "mo_total": 0,
-                    "directo_total": 0,
-                    "indirecto_total": 0,
-                    "beneficio_total": 0,
-                    "neto_total": 0,
-                    "notas": "Seccion",
-                    "sort_order": len(items),
-                    "_code_norm": normalize_item_code(code_for_normalize),
-                })
-                norm = normalize_item_code(code_for_normalize)
-                if norm:
-                    code_to_id_placeholder[norm] = len(items) - 1
-            continue
-
-        # Regular item with data
-        code_norm = normalize_item_code(code_for_normalize)
-
-        # Find parent by code hierarchy
-        parent_idx = None
-        for candidate in get_parent_candidates(code_norm):
-            if candidate in code_to_id_placeholder:
-                parent_idx = code_to_id_placeholder[candidate]
-                break
-
-        mat_unit = _cell(df, i, COL_MAT_UNIT)
-        mo_unit = _cell(df, i, COL_MO_UNIT)
-
-        items.append({
-            "budget_id": budget_id,
-            "org_id": org_id,
-            "parent_id": None,  # resolved after insert by index
-            "code": code_norm or None,
-            "description": desc,
-            "unidad": _cell_str(df, i, COL_UNIDAD),
-            "cantidad": cantidad_val,
-            "mat_unitario": mat_unit,
-            "mo_unitario": mo_unit,
-            "mat_total": _cell(df, i, COL_MAT_TOTAL),
-            "mo_total": _cell(df, i, COL_MO_GENERAL),
-            "directo_total": _cell(df, i, COL_DIRECTO_GENERAL),
-            "indirecto_total": _cell(df, i, COL_IND_GENERAL),
-            "beneficio_total": _cell(df, i, COL_BEN_GENERAL),
-            "neto_total": _cell(df, i, COL_NETO_GENERAL),
-            "notas": "Importado desde Excel",
-            "sort_order": len(items),
-            "_code_norm": code_norm,
-            "_parent_idx": parent_idx,
-        })
-        if code_norm:
-            code_to_id_placeholder[code_norm] = len(items) - 1
-
-    return items, date_codes_corrected
 
 
 def _section_tipo(header: str) -> str | None:
@@ -415,27 +298,161 @@ def _save_catalog(db, org_id: str, filename: str, entries: list[dict]) -> dict: 
 # ── Endpoints ────────────────────────────────────────────────────────────────
 
 
+CARGAR_OBRA = "CARGAR_OBRA"
+SIN_PRECIOS = ("Este Excel trae el cómputo sin precios. Para que la app lo calcule con las fórmulas, cargalo en "
+               "Cargar obra.")
+SIN_COMPUTO = ("No encontré el cómputo en este Excel (una solapa 01_C&P o CYP, o con las columnas Descripción y "
+               "Cantidad). Si es el cómputo de una obra, probá cargarlo en Cargar obra.")
+NO_SE_IMPORTO = "No se pudo importar el Excel (no quedó nada a medias): {exc}"
+ITEMS_BATCH = 100  # budget_items / item_resources rows per insert
+# Sheets that are never the detail of one work
+SYSTEM_SHEETS = {
+    "00_Mat", "00_MO", "00_Eq", "00_Sub", "00_JEF + ESTR",
+    "01_C&P", "01_VENTA", "01_RESUMEN VENTA",
+    "01_RESUMEN MAT.", "01_RESUMEN MAT M.O.",
+    "01_RESUMEN SERV. M.O.", "ESTRUCTURA", "TIEMPOS",
+}
+
+
+def _cargar_obra(motivo: str, mensaje: str) -> HTTPException:
+    """422 that sends the Excel to Cargar obra (the screen offers the button). Nothing was created."""
+    return HTTPException(422, {"codigo": CARGAR_OBRA, "motivo": motivo, "mensaje": mensaje})
+
+
+def _open_workbook(contents: bytes):  # type: ignore[no-untyped-def]
+    """The Excel in read-only mode: rows are streamed (the TERRAC model has 68 sheets of 1000 rows)."""
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            return openpyxl.load_workbook(BytesIO(contents), data_only=True, read_only=True)
+    except Exception as exc:
+        raise HTTPException(400, "No se pudo abrir el Excel. Si es un .xls, guardalo como .xlsx y subilo de nuevo.") \
+            from exc
+
+
+DETAIL_MAX_COL = 12  # the price lists use A..E and the detail sheets A..I
+
+
+def _frames(wb, names: list[str]) -> dict[str, pd.DataFrame]:  # type: ignore[no-untyped-def]
+    """The sheets as pd.read_excel(header=None) gives them, from the workbook already open (twice as fast)."""
+    out: dict[str, pd.DataFrame] = {}
+    for name in names:
+        rows = [list(r) for r in wb[name].iter_rows(max_col=DETAIL_MAX_COL, values_only=True)]
+        while rows and all(v is None for v in rows[-1]):
+            rows.pop()
+        out[name] = pd.DataFrame(rows)
+    return out
+
+
+def _sheet_rows(ws, max_col: int) -> dict[int, tuple]:  # type: ignore[no-untyped-def]
+    return {r: row for r, row in enumerate(ws.iter_rows(min_row=1, max_col=max_col, values_only=True), start=1)}
+
+
+def _raw(values: dict[int, tuple], row: int, col: int) -> object:
+    line = values.get(row) or ()
+    return line[col - 1] if col - 1 < len(line) else None
+
+
+def _excel_value(values: dict[int, tuple], row: int, col: int) -> float:
+    return safe_float(_raw(values, row, col)) or 0.0
+
+
+def _computo_rows(values: dict[int, tuple], parsed: dict, budget_id: str, org_id: str) -> list[dict]:
+    """budget_items rows of the cómputo (rubros, pisos and works, in order), with "_orden" and "_parent".
+
+    Same rubros, pisos and codes as Cargar obra (parse_obra); a work keeps the Excel's prices
+    (E, J and its totals L, M, N, Q, T, Z), which the budget's cascade prices again. ``values``:
+    the cómputo sheet's rows by number (_sheet_rows).
+    """
+    rows = []
+    for f in parsed["filas"]:
+        base = {"budget_id": budget_id, "org_id": org_id, "parent_id": None, "code": f["codigo"],
+                "description": f["descripcion"], "sort_order": f["orden"], "_orden": f["orden"],
+                "_parent": f["parent"], "_nivel": f["nivel"]}
+        if f["nivel"] != "item":
+            rows.append({**base, "unidad": None, "cantidad": None, "mat_unitario": 0, "mo_unitario": 0,
+                         "mat_total": 0, "mo_total": 0, "directo_total": 0, "indirecto_total": 0,
+                         "beneficio_total": 0, "neto_total": 0, "notas": "Seccion"})
+            continue
+        r, ex = f["fila"], f["excel"]
+        rows.append({
+            **base, "unidad": f["unidad"], "cantidad": f["cantidad"],
+            "mat_unitario": ex["mat_unit"], "mo_unitario": ex["mo_unit"],
+            "mat_total": _excel_value(values, r, COL_MAT_TOTAL), "mo_total": _excel_value(values, r, COL_MO_GENERAL),
+            "directo_total": ex["directo"], "indirecto_total": _excel_value(values, r, COL_IND_GENERAL),
+            "beneficio_total": _excel_value(values, r, COL_BEN_GENERAL), "neto_total": ex["neto"],
+            "notas": "Importado desde Excel",
+            "_codigos": [c for c in (f.get("codigo_excel"), f["codigo"]) if c],
+        })
+    return rows
+
+
+def _insert_tree(db, rows: list[dict]) -> dict[int, str]:  # type: ignore[no-untyped-def]
+    """Insert rubros, then pisos, then works, in batches of ITEMS_BATCH; parents resolved by order.
+
+    Returns {orden: id}.
+    """
+    ids: dict[int, str] = {}
+    for nivel in ("rubro", "subrubro", "item"):
+        level = []
+        for row in rows:
+            if row["_nivel"] != nivel:
+                continue
+            clean = {k: v for k, v in row.items() if not k.startswith("_")}
+            clean["parent_id"] = ids.get(row["_parent"]) if row["_parent"] is not None else None
+            level.append(clean)
+        for start in range(0, len(level), ITEMS_BATCH):
+            batch = level[start:start + ITEMS_BATCH]
+            saved = db.table("budget_items").insert(batch).execute().data or []
+            if len(saved) != len(batch):
+                raise RuntimeError("No se pudieron guardar todos los trabajos")
+            for row in saved:
+                ids[int(row["sort_order"])] = row["id"]
+    return ids
+
+
 @router.post("/import-excel")
-async def import_excel(
+def import_excel(
     file: UploadFile = File(...),
     user: dict = Depends(require_editor),
 ):
-    """Import a construction budget Excel (Las Heras format)."""
-    if not file.filename or not file.filename.lower().endswith((".xlsx", ".xls")):
+    """Import a construction budget Excel with its prices (TERRAC format: 01_C&P or CYP + 00_* + detail sheets).
+
+    The cómputo is found like Cargar obra does it (obra_import.find_computo) and read with the same
+    rules for rubros, pisos and codes. An Excel without a cómputo, or whose cómputo has no price at all
+    (E, J, N and Z empty or 0 in every work), is not imported: 422 CARGAR_OBRA and nothing is created
+    (no budget, no price list). A plain ``def``: FastAPI runs it in a thread, so a big Excel does not
+    stop the other requests.
+    """
+    if not file.filename or not file.filename.lower().endswith((".xlsx", ".xls", ".xlsm")):
         raise HTTPException(400, "Subí un archivo de Excel (.xlsx o .xls)")
 
-    contents = await file.read()
-    df_dict = pd.read_excel(BytesIO(contents), sheet_name=None, header=None)
+    contents = file.file.read()
+    wb = _open_workbook(contents)
+    info = find_computo(wb)
     # The app's own simple sheet is not a budget to copy: it is loaded in Cargar obra (it used to create an
     # empty budget and answer "Excel importado")
-    if "01_C&P" not in df_dict and "Presupuesto" in df_dict:
-        primera = [str(v).strip() for v in df_dict["Presupuesto"].iloc[0].tolist()] if len(df_dict["Presupuesto"]) else []
-        if "Codigo" in primera and ("Precio sin IVA" in primera or "Neto Total" in primera):
-            raise HTTPException(
-                400,
-                "Este Excel es la planilla simple que baja la app (Exportar). Para volver a armar el presupuesto "
-                "con ella, subila en Cargar obra.",
-            )
+    if is_simple_sheet(wb) and (info is None or info["hoja"] == SIMPLE_SHEET):
+        raise HTTPException(
+            400,
+            "Este Excel es la planilla simple que baja la app (Exportar). Para volver a armar el presupuesto "
+            "con ella, subila en Cargar obra.",
+        )
+    if info is None:
+        raise _cargar_obra("sin_computo", SIN_COMPUTO)
+    parsed = parse_obra(wb, info=info)
+    works = [f for f in parsed["filas"] if f["nivel"] == "item"]
+    if not info.get("precios") or not any(v for f in works for v in f["excel"].values()):
+        raise _cargar_obra("sin_precios", SIN_PRECIOS)
+
+    # The price lists and the detail sheets of each work (named with its code: 4.1.1, 3.1-1)
+    detail_names = [
+        s for s in wb.sheetnames
+        if s not in SYSTEM_SHEETS and s != info["hoja"] and not s.startswith(("00_", "01_"))
+    ]
+    wanted = [s for s, _, _ in CATALOG_SHEETS if s in wb.sheetnames] + detail_names
+    df_dict = _frames(wb, wanted)
+    values = _sheet_rows(wb[info["hoja"]], COL_NETO_GENERAL)
 
     db = get_data_db()
     org_id = user["org_id"]
@@ -462,68 +479,45 @@ async def import_excel(
     # The Excel brings the direct cost; the price is the cascade of this budget, like everywhere
     config = budget_config(db, org_id, budget.data[0])
 
-    # 4. Parse 01_C&P computation sheet
-    items_inserted = 0
-    resources_inserted = 0
+    # 4. The cómputo: rubros, pisos and works
     neto_excel = 0.0
     neto_app = 0.0
+    code_col = info["columnas"].get("codigo")
+    date_codes_corrected = sum(
+        1 for f in works if code_col and isinstance(_raw(values, f["fila"], code_col), (datetime, date))
+    )
+    rows = _computo_rows(values, parsed, budget_id, org_id)
+    for row in rows:
+        if is_section(row):
+            continue
+        neto_excel += float(row.get("neto_total") or 0)
+        price_item(row, config)
+        neto_app += float(row.get("neto_total") or 0)
 
-    if "01_C&P" in df_dict:
-        parsed_items, date_codes_corrected = _parse_computation_sheet(df_dict["01_C&P"], budget_id, org_id)
-        for item in parsed_items:
-            if is_section(item):
-                continue
-            neto_excel += float(item.get("neto_total") or 0)
-            price_item(item, config)
-            neto_app += float(item.get("neto_total") or 0)
+    resources_inserted = 0
+    try:
+        ids = _insert_tree(db, rows)
 
-        # Insert items one by one to resolve parent_id references
-        idx_to_db_id: dict[int, str] = {}
-        for idx, item in enumerate(parsed_items):
-            # Resolve parent
-            parent_idx = item.pop("_parent_idx", None)
-            code_norm = item.pop("_code_norm", "")
-            if parent_idx is not None and parent_idx in idx_to_db_id:
-                item["parent_id"] = idx_to_db_id[parent_idx]
-
-            result = db.table("budget_items").insert(item).execute()
-            if result.data:
-                db_id = result.data[0]["id"]
-                idx_to_db_id[idx] = db_id
-                items_inserted += 1
-
-        # 5. Parse detail sheets and insert item_resources
-        system_sheets = {
-            "00_Mat", "00_MO", "00_Eq", "00_Sub", "00_JEF + ESTR",
-            "01_C&P", "01_VENTA", "01_RESUMEN VENTA",
-            "01_RESUMEN MAT.", "01_RESUMEN MAT M.O.",
-            "01_RESUMEN SERV. M.O.", "ESTRUCTURA", "TIEMPOS",
-        }
-        detail_sheet_names = [
-            s for s in df_dict.keys()
-            if s not in system_sheets and not s.startswith("00_") and not s.startswith("01_")
-        ]
-
-        resources_by_code = _parse_detail_sheets(df_dict, detail_sheet_names, org_id)
-
-        # Match resources to inserted items by code
+        # 5. Detail sheets → item_resources of the work with that code (as the Excel says it, or fixed)
+        resources_by_code = _parse_detail_sheets(df_dict, detail_names, org_id)
         code_to_db_id: dict[str, str] = {}
-        for idx, item in enumerate(parsed_items):
-            code = item.get("code")
-            if code and idx in idx_to_db_id:
-                code_to_db_id[normalize_item_code(code)] = idx_to_db_id[idx]
-
+        for row in rows:
+            for code in row.get("_codigos") or []:
+                code_to_db_id[normalize_item_code(code)] = ids[row["_orden"]]
+        pending: list[dict] = []
         for code, resources in resources_by_code.items():
             item_db_id = code_to_db_id.get(code)
             if not item_db_id:
                 continue
-            for res in resources:
-                res["item_id"] = item_db_id
-            # Insert in batches
-            for batch_start in range(0, len(resources), 50):
-                batch = resources[batch_start:batch_start + 50]
-                db.table("item_resources").insert(batch).execute()
-                resources_inserted += len(batch)
+            pending += [{**res, "item_id": item_db_id} for res in resources]
+        for start in range(0, len(pending), ITEMS_BATCH):
+            batch = pending[start:start + ITEMS_BATCH]
+            db.table("item_resources").insert(batch).execute()
+            resources_inserted += len(batch)
+    except Exception as exc:
+        logger.exception("Importing %s failed; deleting budget %s", file.filename, budget_id)
+        db.table("budgets").delete().eq("id", budget_id).eq("org_id", org_id).execute()
+        raise HTTPException(500, NO_SE_IMPORTO.format(exc=exc)) from exc
 
     return {
         "message": "Excel importado",
@@ -535,9 +529,11 @@ async def import_excel(
         "precios_nuevos": catalog["precios_nuevos"],
         "budget_id": budget_id,
         "budget_name": budget_name,
-        "items_inserted": items_inserted,
+        "hoja": info["hoja"],
+        "items_inserted": len(rows),
         "resources_inserted": resources_inserted,
-        "date_codes_corrected": date_codes_corrected if "01_C&P" in df_dict else 0,
+        "date_codes_corrected": date_codes_corrected,
+        "avisos": parsed["problemas"],
         # "Tu Excel decía $X; con tu Coeficiente de pase da $Y"
         "neto_excel": round(neto_excel, 2),
         "neto_app": round(neto_app, 2),

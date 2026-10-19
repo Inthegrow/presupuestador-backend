@@ -7,8 +7,9 @@ const SECCIONES = [
   { id: 'cargar-obra', titulo: 'Cargar una obra desde el Excel' },
   { id: 'colores', titulo: 'Qué quiere decir cada color' },
   { id: 'formula', titulo: 'Cómo encuentra la app la fórmula de cada trabajo' },
-  { id: 'otro-formato', titulo: 'Si el Excel tiene otro formato' },
+  { id: 'otro-formato', titulo: 'Qué Excel acepta Cargar obra' },
   { id: 'lista-precios', titulo: 'Lista de precios: cuál se usa' },
+  { id: 'fecha-precios', titulo: 'La fecha de los precios' },
   { id: 'buscar-precio', titulo: 'Buscar un precio en internet' },
 ]
 
@@ -76,8 +77,10 @@ export default function Ayuda() {
             y clave de SOLÉ. En el menú de la izquierda (en el celular, ☰), Cargar obra.
           </li>
           <li>
-            <b>Arrastrar el Excel de la obra.</b> El de siempre, el que tiene la hoja 01_C&amp;P. No hay que agregarle
-            nada. Si se recarga la página, la app ofrece seguir donde quedaste.
+            <b>Arrastrar el Excel de la obra.</b> El de siempre, con la hoja 01_C&amp;P o CYP, o cualquier planilla con
+            las columnas Descripción y Cantidad (más abajo, en «Qué Excel acepta Cargar obra»). No hay que agregarle
+            nada. Si se recarga la página, la app ofrece seguir donde quedaste. Si probaste primero en Importar Excel y
+            el Excel no trae precios, el botón «Cargarlo en Cargar obra» lo trae acá ya elegido.
           </li>
           <li>
             <b>Leer el resumen.</b> Cuántos trabajos hay, cuántos listos (verde), para confirmar (amarillo) y en rojo.
@@ -88,7 +91,9 @@ export default function Ayuda() {
           </li>
           <li>
             <b>Mirar las tarjetas rojas que queden.</b> Si hay una pregunta, responderla. Si la fórmula no es la
-            correcta, "Cambiar". Si no hay fórmula y el trabajo se cobra con el precio del Excel, "Confirmar".
+            correcta, "Cambiar". Si no hay fórmula y el trabajo se cobra con el precio del Excel, "Confirmar". Si no
+            tiene fórmula ni precio, "Elegir fórmula" o "Cargarlo sin precio ($0)" (arriba, "Cargar los N sin fórmula
+            en $0" los carga a todos): entran en rojo y en el presupuesto cada uno tiene "Elegir fórmula".
           </li>
           <li>
             <b>Los amarillos, si hay tiempo.</b> Confirmarlos deja todo verde, pero no hace falta para cargar.
@@ -141,14 +146,30 @@ export default function Ayuda() {
         </p>
       </Seccion>
 
-      <Seccion id="otro-formato" n={4} titulo="Si el Excel tiene otro formato">
-        <p className="text-sm text-gray-700 leading-relaxed">
-          Cargar obra lee la hoja <b>01_C&amp;P</b> con el formato de Terrac: código en la columna A, descripción en B,
-          unidad en C y cantidad en D, desde la fila 8. Si el Excel no tiene esa hoja, la app avisa y no carga nada. Si
-          tiene la hoja pero con otras columnas, los trabajos salen mal: conviene pasar las cantidades a la planilla de
-          Terrac. Los precios (columnas E, J, N y Z) no son obligatorios: si no están, la app calcula todo con las
-          fórmulas y la lista de precios.
-        </p>
+      <Seccion id="otro-formato" n={4} titulo="Qué Excel acepta Cargar obra">
+        <ul className="list-disc pl-5 space-y-2.5 text-sm text-gray-700 leading-relaxed marker:text-[#2D8D68]">
+          <li>
+            <b>La hoja del cómputo.</b> Busca, en este orden, la hoja 01_C&amp;P, CYP o C&amp;P (también «01_C&amp;P obra»
+            o «CYP E1»). Si no hay ninguna, usa la primera hoja que tenga en sus primeras 15 filas un renglón de títulos
+            con <b>Descripción</b> y <b>Cantidad</b>; <b>Código</b> y <b>Unidad</b> son opcionales, con o sin tilde,
+            en mayúsculas o no. Arriba de las tarjetas dice qué solapa leyó.
+          </li>
+          <li>
+            <b>Los códigos.</b> Si Excel convirtió un código en fecha (1.1 → 1/1/2026), vuelve a ser 1.1. «3.1-1» se
+            lee 3.1.1. Un trabajo cuyo código es el de una fórmula y cuyo nombre se le parece usa esa fórmula
+            (4.1.3 Bases aisladas → fórmula 4.1.3).
+          </li>
+          <li>
+            <b>Los títulos de rubro y de piso.</b> Un renglón como «1- TAREAS PRELIMINARES», «4 -1 FUNDACIONES» o
+            «3.1- FUNDACIONES», en la columna A o en la B, es un rubro o un piso, no un trabajo. Un renglón sin código,
+            sin cantidad y sin unidad («Replicar puntos…») es una nota: aparece como aviso.
+          </li>
+          <li>
+            <b>Los precios no son obligatorios.</b> Si el Excel trae precios (columnas E, J, N y Z del formato de
+            Terrac), se comparan con los de la app. Si no, la app calcula todo con las fórmulas y la lista de precios.
+            Un Excel sin precios no se puede copiar con Importar Excel: va por Cargar obra.
+          </li>
+        </ul>
       </Seccion>
 
       <Seccion id="lista-precios" n={5} titulo="Lista de precios: cuál se usa">
@@ -160,7 +181,27 @@ export default function Ayuda() {
         </p>
       </Seccion>
 
-      <Seccion id="buscar-precio" n={6} titulo="Buscar un precio en internet">
+      <Seccion id="fecha-precios" n={6} titulo="La fecha de los precios">
+        <Pasos>
+          <li>
+            <b>Un presupuesto es una foto.</b> Guarda los precios del día en que se creó (dice «Precios al …»). Si
+            después cambia un precio en la Lista de precios, el presupuesto no cambia solo: así no se mueve un número
+            que ya le pasaste al cliente.
+          </li>
+          <li>
+            <b>Traer los precios de hoy.</b> En el presupuesto, Versiones → «Actualizar a precios de hoy». La app guarda antes
+            una versión con los precios viejos, recalcula todo con los de la lista y cambia la fecha de «Precios al».
+            Si algo sale distinto, la versión anterior queda para comparar.
+          </li>
+          <li>
+            <b>Precio viejo.</b> En Lista de precios se elige después de cuántos días un precio es viejo (por defecto,
+            90). Los más viejos se marcan en ámbar, «Precio de hace N días», en la lista, en el detalle de cada trabajo
+            y al exportar. No frena nada: es un aviso para actualizarlos.
+          </li>
+        </Pasos>
+      </Seccion>
+
+      <Seccion id="buscar-precio" n={7} titulo="Buscar un precio en internet">
         <Pasos>
           <li>
             <b>Dónde están los botones.</b> En <b>Lista de precios</b>: "Buscar un precio", arriba, para uno que todavía

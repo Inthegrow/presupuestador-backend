@@ -9,6 +9,7 @@ import { fmtCurrency, fmtDate, fmtPesos, todayIso } from '../lib/format'
 import BuscarPrecio, { EstadoBuscadorChip, IconoBuscarInternet } from '../components/BuscarPrecio'
 import type { PrecioGuardado } from '../components/BuscarPrecio'
 import OrigenPrecio from '../components/OrigenPrecio'
+import PrecioViejo, { avisarPrecioViejoDias, diasDesde, esViejo, usePrecioViejoDias } from '../components/PrecioViejo'
 import type { Budget, CatalogEntry, CatalogPriceHistory, PriceCatalog } from '../types'
 
 // ─── Subir una lista desde un archivo (.csv) ───────────────────────────────────
@@ -558,6 +559,7 @@ function CatalogRow({
   abrir?: number
 }) {
   const { puedeEditar, esAdmin } = useAuth()
+  const umbralViejo = usePrecioViejoDias()
   const [open, setOpen] = useState(false)
   const [entries, setEntries] = useState<CatalogEntry[]>([])
   const [filtered, setFiltered] = useState<CatalogEntry[]>([])
@@ -909,6 +911,12 @@ function CatalogRow({
                               </div>
                               <div className="text-gray-800 [overflow-wrap:anywhere]">{e.descripcion}</div>
                               <OrigenPrecio entrada={e} className="mt-0.5" />
+                              {(() => {
+                                const dias = diasDesde(e.fecha_precio)
+                                return e.precio_sin_iva && dias !== null && esViejo(dias, umbralViejo)
+                                  ? <div className="mt-1"><PrecioViejo dias={dias} /></div>
+                                  : null
+                              })()}
                               {entryError?.id === e.id && (
                                 <p role="alert" className="mt-1 text-[10px] text-red-600">{entryError.mensaje}</p>
                               )}
@@ -1098,6 +1106,86 @@ function CatalogRow({
 
 // ─── Main page ─────────────────────────────────────────────────────────────────
 
+// ─── «Un precio es viejo después de N días» (de la empresa) ────────────────────
+
+function PrecioViejoConfig() {
+  // Lo cambia quien administra (es de la empresa, como el Coeficiente de pase); los demás lo ven
+  const { esAdmin } = useAuth()
+  const dias = usePrecioViejoDias()
+  const [texto, setTexto] = useState<string | null>(null)
+  const [guardando, setGuardando] = useState(false)
+  const [estado, setEstado] = useState<{ ok: boolean; texto: string } | null>(null)
+  const idCampo = useId()
+  const valor = texto ?? String(dias)
+  const n = Number(valor.replace(',', '.'))
+  const valido = Number.isInteger(n) && n >= 1 && n <= 3650
+  const cambio = valido && n !== dias
+
+  async function guardar() {
+    if (!cambio || guardando) return
+    setGuardando(true)
+    setEstado(null)
+    try {
+      const r = await budgetApi.updateGeneralIndirects({ precio_viejo_dias: n })
+      const guardado = Number((r as { precio_viejo_dias?: unknown } | null)?.precio_viejo_dias) || n
+      avisarPrecioViejoDias(guardado)
+      setTexto(null)
+      setEstado({ ok: true, texto: 'Guardado' })
+    } catch (err) {
+      setEstado({ ok: false, texto: mensajeDeError(err, 'No se pudo guardar. Probá de nuevo.') })
+    } finally {
+      setGuardando(false)
+    }
+  }
+
+  return (
+    <div className="max-w-3xl mb-4 rounded-xl border border-amber-200 bg-amber-50/60 px-3 py-2.5 text-xs text-amber-900" data-testid="precio-viejo-config">
+      {esAdmin ? (
+        <form
+          onSubmit={(e) => { e.preventDefault(); void guardar() }}
+          className="flex flex-wrap items-center gap-x-2 gap-y-2"
+        >
+          <label htmlFor={idCampo} className="font-semibold">Un precio es viejo después de</label>
+          <input
+            id={idCampo}
+            type="number"
+            inputMode="numeric"
+            min={1}
+            max={3650}
+            step={1}
+            value={valor}
+            onChange={(e) => { setTexto(e.target.value); setEstado(null) }}
+            aria-describedby={`${idCampo}-ayuda`}
+            className={`w-20 h-10 md:h-8 px-2 text-base md:text-sm text-right tabular-nums bg-white border rounded-lg outline-none focus:ring-2 focus:ring-amber-200 ${valido ? 'border-amber-300' : 'border-red-400'}`}
+          />
+          <span className="font-semibold">días</span>
+          {cambio && (
+            <button
+              type="submit"
+              disabled={guardando}
+              className="min-h-10 md:min-h-0 px-3 py-1.5 rounded-lg bg-[#2D8D68] hover:bg-[#1B5E4B] text-white font-semibold disabled:opacity-60"
+            >
+              {guardando ? 'Guardando…' : 'Guardar'}
+            </button>
+          )}
+          {estado && (
+            <span role={estado.ok ? 'status' : 'alert'} className={estado.ok ? 'text-[#1B5E4B] font-semibold' : 'text-red-700'}>{estado.texto}</span>
+          )}
+          {!valido && <span role="alert" className="text-red-700">Escribí un número de días entre 1 y 3650.</span>}
+          <p id={`${idCampo}-ayuda`} className="w-full text-amber-800/90">
+            Los precios más viejos se marcan en ámbar acá, en el detalle de cada trabajo y al exportar. No frena nada: es un aviso para actualizarlos.
+          </p>
+        </form>
+      ) : (
+        <p>
+          <span className="font-semibold">Un precio es viejo después de {dias} días.</span>{' '}
+          Los más viejos se marcan en ámbar acá, en el detalle de cada trabajo y al exportar.
+        </p>
+      )}
+    </div>
+  )
+}
+
 export default function Catalogs() {
   const { puedeEditar } = useAuth()
   const [catalogs, setCatalogs] = useState<PriceCatalog[]>([])
@@ -1199,6 +1287,8 @@ export default function Catalogs() {
           Cada lista tiene el precio, la fecha y de dónde salió cada uno. La app calcula con la lista <strong>oficial</strong>; las demás son solo para consultar.
         </p>
       </div>
+
+      <PrecioViejoConfig />
 
       {/* Upload link: panels start collapsed */}
       {puedeEditar && (

@@ -18,6 +18,7 @@ from app.budget_prices import (
     fetch_all,
     general_indirects,
     load_org_config,
+    precio_viejo_dias,
     save_org_config,
 )
 from app.calculations import CASCADE_FIELDS, cascade_factors
@@ -29,6 +30,10 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+FALTA_MIGRACION_013 = ("Falta la migración 013: pedile a quien administra la base que la corra para guardar "
+                       "cuándo un precio es viejo.")
+
+
 def _response(org_config: dict) -> dict:
     general = general_indirects(org_config)
     return {
@@ -36,7 +41,18 @@ def _response(org_config: dict) -> dict:
         **general,
         **cascade_factors(general),
         "desperdicio_pct": org_config.get("desperdicio_pct"),
+        # Lista de precios: a price older than this many days is "viejo" (90 until the company sets it)
+        "precio_viejo_dias": precio_viejo_dias(org_config),
     }
+
+
+def _save_precio_viejo(db, org_id: str, dias: int | None) -> dict:  # type: ignore[no-untyped-def]
+    """Save "precio viejo" (days) alone: it reprices nothing. 409 while migration 013 is missing."""
+    try:
+        return save_org_config(db, org_id, {"precio_viejo_dias": dias})
+    except Exception as exc:
+        logger.warning("No se pudo guardar precio_viejo_dias (¿falta correr migrations/013?)", exc_info=True)
+        raise HTTPException(409, {"codigo": "FALTA_MIGRACION", "mensaje": FALTA_MIGRACION_013}) from exc
 
 
 def _changes(payload: GeneralIndirectsUpdate) -> dict:
@@ -86,10 +102,18 @@ async def update_general_indirects(
     user: dict = Depends(require_admin),
 ):
     """Save the general values. With ``aplicar: true``, also reprice the budgets that
-    follow them (see /general/afectados) and say how many (``actualizados``)."""
+    follow them (see /general/afectados) and say how many (``actualizados``).
+
+    ``precio_viejo_dias`` (Lista de precios: a price older than that is "viejo") is saved on its own and
+    reprices nothing; without migration 013 it answers 409 FALTA_MIGRACION.
+    """
     db = get_data_db()
     org_id = user["org_id"]
     data = _changes(payload)
+    if "precio_viejo_dias" in data:
+        saved = _save_precio_viejo(db, org_id, data.pop("precio_viejo_dias"))
+        if not data:
+            return _response(saved)
     if not payload.aplicar:
         return _response(save_org_config(db, org_id, data))
 

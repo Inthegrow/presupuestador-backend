@@ -57,6 +57,37 @@ def fetch_all(make_query, page_size: int = PAGE_SIZE) -> list[dict]:
 # ── Indirectos ──────────────────────────────────────────────────────────────
 
 
+# ── Precio viejo (entrega 11, E13) ──────────────────────────────────────────
+
+# A price older than this many days is "viejo" (amber): each company sets it in Lista de precios
+# (indirect_config.precio_viejo_dias, migration 013). It never blocks anything.
+PRECIO_VIEJO_DIAS = 90
+
+
+def precio_viejo_dias(org_config: dict | None) -> int:
+    """The company's "precio viejo" days; 90 when it never set it (or migration 013 is not run yet)."""
+    try:
+        dias = int((org_config or {}).get("precio_viejo_dias") or 0)
+    except (TypeError, ValueError):
+        dias = 0
+    return dias if dias > 0 else PRECIO_VIEJO_DIAS
+
+
+def precio_dias(resource: dict, hoy: date | None = None) -> int | None:
+    """Days since the date of the price a resource uses (precio_fecha); None without a date."""
+    try:
+        fecha = parse_fecha(resource.get("precio_fecha"))
+    except ValueError:
+        return None
+    return None if fecha is None else ((hoy or today()) - fecha).days
+
+
+def es_precio_viejo(resource: dict, dias: int, hoy: date | None = None) -> bool:
+    """True when the resource's price is older than ``dias`` days (precio_viejo_dias)."""
+    edad = precio_dias(resource, hoy)
+    return edad is not None and edad > dias
+
+
 def general_indirects(org_config: dict | None) -> dict[str, float]:
     """The organization's values, with defaults for the missing ones."""
     org_config = org_config or {}
