@@ -81,7 +81,7 @@ const filaTipica = (page, codigo) => page.locator(`[data-testid=trabajo-tipico][
     if (cant) await filaTipica(page, codigo).getByLabel(/^Cantidad de /).fill(cant)
   }
   await page.waitForTimeout(300)
-  check(/Se van a crear 2 rubros con 5 trabajos/.test(await page.getByTestId('resumen-estructura').textContent()), 'resumen: 2 rubros con 5 trabajos')
+  check(/Se van a crear 2 rubros \(2 pisos\) con 5 trabajos/.test(await page.getByTestId('resumen-estructura').textContent()), 'resumen: 2 rubros (2 pisos del modelo) con 5 trabajos')
   await shot('02_estructura')
   await shot('02b_estructura_tildados', '[data-testid=trabajo-tipico][data-codigo="5.5.4"]')
 
@@ -107,7 +107,7 @@ const filaTipica = (page, codigo) => page.locator(`[data-testid=trabajo-tipico][
   await page.getByRole('button', { name: /Anterior/ }).click(); await page.waitForTimeout(400)
   check(await page.getByLabel(/Nombre del presupuesto/).inputValue() === NOMBRE, 'el nombre sigue en Datos')
   await page.getByRole('button', { name: /Siguiente/ }).click(); await page.waitForTimeout(400)
-  check(/2 rubros con 5 trabajos/.test(await page.getByTestId('resumen-estructura').textContent()), 'ida y vuelta: siguen 2 rubros con 5 trabajos')
+  check(/2 rubros \(2 pisos\) con 5 trabajos/.test(await page.getByTestId('resumen-estructura').textContent()), 'ida y vuelta: siguen 2 rubros (2 pisos) con 5 trabajos')
   await shot('04_estructura_al_volver', '[data-testid=trabajo-tipico][data-codigo="1.10"]')
   await page.getByRole('button', { name: /Siguiente/ }).click(); await page.waitForTimeout(400)
 
@@ -147,8 +147,13 @@ const filaTipica = (page, codigo) => page.locator(`[data-testid=trabajo-tipico][
   for (const [rubro, codigo, cant] of TILDES) {
     const it = items.find((i) => i.code === codigo)
     const desc = descDe(codigo)
-    check(!!it && it.description === desc && it.parent_id === rubros[nombreRubro[rubro]] && Number(it.cantidad) === Number(cant ?? 0),
-      `"${codigo} ${desc}" queda dentro de "${nombreRubro[rubro]}" con cantidad ${cant ?? '0 (vacía)'}`)
+    // Un trabajo de un piso del modelo (5.1.4 en 5.1 Mampostería) cuelga de ese piso, y el piso del rubro
+    const piso = it && items.find((i) => i.id === it.parent_id && i.parent_id)
+    const dentro = it && (codigo.split('.').length === 3
+      ? !!piso && piso.code === codigo.split('.').slice(0, 2).join('.') && piso.parent_id === rubros[nombreRubro[rubro]]
+      : it.parent_id === rubros[nombreRubro[rubro]])
+    check(!!it && it.description === desc && dentro && Number(it.cantidad) === Number(cant ?? 0),
+      `"${codigo} ${desc}" queda dentro de "${nombreRubro[rubro]}"${piso ? ` (piso ${piso.code} ${piso.description})` : ''} con cantidad ${cant ?? '0 (vacía)'}`)
   }
   const ind = bud.indirectos || {}
   check(ind.beneficio_pct === 20, `el presupuesto guardó beneficio 20 (guardó ${ind.beneficio_pct})`)
