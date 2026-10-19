@@ -505,7 +505,7 @@ const nombreDe = (t) => (t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLow
     await fila514.locator('input[type=number]').fill('80')
     await fila11.getByRole('checkbox').click()
     await shot(page, 'E10_trabajos_tipicos')
-    check(/3 rubros con 3 trabajos/.test(await page.getByTestId('resumen-estructura').innerText()), `E10: resumen: 3 rubros con 3 trabajos ("${(await page.getByTestId('resumen-estructura').innerText()).trim()}")`)
+    check(/3 rubros \(2 pisos\) con 3 trabajos/.test(await page.getByTestId('resumen-estructura').innerText()), `E10: resumen: 3 rubros (2 pisos) con 3 trabajos ("${(await page.getByTestId('resumen-estructura').innerText()).trim()}")`)
     await page.getByRole('button', { name: /Siguiente/ }).click()
     await page.getByRole('button', { name: 'Crear presupuesto' }).waitFor({ timeout: 15000 })
     const pedido = page.waitForRequest((r) => r.url().includes('/budgets/create-full'), { timeout: 30000 })
@@ -514,7 +514,8 @@ const nombreDe = (t) => (t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLow
     const enviados = body.secciones.flatMap((s) => s.items.map((i) => ({ ...i, rubro: s.codigo })))
     const e413 = enviados.find((i) => i.codigo === '4.1.3'), e514 = enviados.find((i) => i.codigo === '5.1.4'), e11 = enviados.find((i) => i.codigo === '1.1')
     check(e413?.plantilla === '4.1.3' && e514?.plantilla === '5.1.4' && !e11?.plantilla, `E10: se manda la fórmula de cada trabajo (${JSON.stringify(enviados.map((i) => [i.codigo, i.plantilla ?? null]))})`)
-    check(e413?.rubro === '4' && e514?.rubro === '5' && e11?.rubro === '1' && e11?.cantidad === 0, `E10: con los códigos de Terrac y la cantidad vacía en 0 (1.1 cantidad ${e11?.cantidad})`)
+    check(e413?.rubro === '4.1' && e514?.rubro === '5.1' && e11?.rubro === '1' && e11?.cantidad === 0, `E10: con los códigos de Terrac, cada trabajo en su piso del modelo (4.1.3 en ${e413?.rubro}) y la cantidad vacía en 0 (1.1 cantidad ${e11?.cantidad})`)
+    check(body.secciones.some((s) => s.codigo === '4') && body.secciones.some((s) => s.codigo === '4.1'), 'E10: se manda el rubro 4 y su piso 4.1 Fundaciones')
     await page.getByTestId('trabajos-creados').waitFor({ timeout: 60000 })
     idTipicos = (await presupuestos()).find((x) => x.name === nombre)?.id ?? null
     const items = idTipicos ? (await api('GET', `/budgets/${idTipicos}/items`)).data : []
@@ -522,6 +523,8 @@ const nombreDe = (t) => (t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLow
     check(!!i413?.template_id && Number(i413.neto_total) > 0 && Number(i413.cantidad) === 12, `E10: 4.1.3 entra con su fórmula y sus precios (fórmula ${!!i413?.template_id}, $${Math.round(i413?.neto_total ?? 0)})`)
     check(!!i514?.template_id && Number(i514.neto_total) > 0 && Number(i514.cantidad) === 80, `E10: 5.1.4 también (fórmula ${!!i514?.template_id}, $${Math.round(i514?.neto_total ?? 0)})`)
     check(!!i11 && !i11.template_id && Number(i11.cantidad) === 0, 'E10: 1.1 entra sin fórmula y con cantidad 0')
+    const s4 = items.find((i) => i.notas === 'Seccion' && i.code === '4'), s41 = items.find((i) => i.notas === 'Seccion' && i.code === '4.1')
+    check(!!s41 && s41.parent_id === s4?.id && i413?.parent_id === s41.id, `E10: 4.1.3 cuelga del piso 4.1 y el piso del rubro 4 (${s41?.description ?? 'sin piso'})`)
     // En el editor: el precio de 4.1.3 y «Elegir fórmula» en 1.1
     await page.getByRole('button', { name: 'Abrir el presupuesto' }).click()
     await page.waitForURL(/\/editor$/, { timeout: 15000 })

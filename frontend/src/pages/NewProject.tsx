@@ -271,8 +271,9 @@ function armarRubros(
   // los demás se numeran después del último
   const rubros: { codigo: string | null; nombre: string; items: (Omit<Item, 'codigo'> & { codigo: string | null })[] }[] = []
   function rubro(nombre: string, codigo: string | null = null) {
+    // Los del modelo se buscan por su código (dos pisos pueden llamarse igual en rubros distintos)
     const clave = normNombre(nombre)
-    let r = rubros.find((x) => normNombre(x.nombre) === clave)
+    let r = codigo ? rubros.find((x) => x.codigo === codigo) : rubros.find((x) => normNombre(x.nombre) === clave)
     if (!r) {
       r = { codigo, nombre: nombre.trim(), items: [] }
       rubros.push(r)
@@ -281,7 +282,10 @@ function armarRubros(
   }
 
   for (const t of trabajosElegidos(seleccion, modelo)) {
-    rubro(t.rubroNombre, t.rubroCodigo || null).items.push({
+    const r = rubro(t.rubroNombre, t.rubroCodigo || null)
+    // Un trabajo de un piso del modelo (4.1.3 en 4.1 Fundaciones) va en ese piso: el servidor lo cuelga del rubro 4
+    const destino = t.grupoCodigo && t.grupoNombre ? rubro(t.grupoNombre, t.grupoCodigo) : r
+    destino.items.push({
       codigo: t.codigo || null,
       descripcion: t.descripcion,
       unidad: t.unidad,
@@ -338,6 +342,9 @@ function armarRubros(
   })
   return { secciones, error: null }
 }
+
+// Rubros de primer nivel: los pisos del modelo (4.1) van dentro de su rubro y no se cuentan
+const rubrosDe = (secciones: { codigo: string }[]) => secciones.filter((s) => !s.codigo.includes('.')).length
 
 // ─── Main Component ────────────────────────────────────────────────────────────
 
@@ -673,7 +680,7 @@ export default function NewProject() {
     setError('')
     try {
       const res = await budgetApi.createFull(data)
-      setResult({ budgetId: res.budget.id, sectionsCount: res.sections_created, itemsCount: res.items_created })
+      setResult({ budgetId: res.budget.id, sectionsCount: rubrosDe(data.secciones), itemsCount: res.items_created })
       setStep(PASO_RESULTADO)
     } catch (e) {
       setError(`No se pudo crear el presupuesto: ${errorText(e)}`)
@@ -694,7 +701,7 @@ export default function NewProject() {
     try {
       // analyze-plan needs an existing budget: create it with everything else first
       const res = await budgetApi.createFull(data)
-      creado = { budgetId: res.budget.id, sectionsCount: res.sections_created, itemsCount: res.items_created }
+      creado = { budgetId: res.budget.id, sectionsCount: rubrosDe(data.secciones), itemsCount: res.items_created }
     } catch (e) {
       setError(`No se pudo crear el presupuesto: ${errorText(e)}`)
       setCreating(false)
@@ -708,7 +715,7 @@ export default function NewProject() {
       // The plan's rubros go after the ones already created: number them from the highest code
       const reviewItems: AIReviewItem[] = []
       let keyIdx = 0
-      const ultimoRubro = Math.max(creado.sectionsCount, ...data.secciones.map((sec) => Number(sec.codigo) || 0))
+      const ultimoRubro = Math.max(0, ...data.secciones.map((sec) => (/^\d+$/.test(sec.codigo) ? Number(sec.codigo) : 0)))
       aiRes.secciones.forEach((sec, si) => {
         const codigoRubro = String(ultimoRubro + si + 1)
         sec.items.forEach((item, ii) => {
@@ -1173,6 +1180,9 @@ function StepEstructura({
   secciones: Secciones
 }) {
   const totalTrabajos = secciones.reduce((s, r) => s + r.items.length, 0)
+  // Los pisos del modelo (4.1 Fundaciones) se crean dentro de su rubro: se cuentan aparte
+  const pisosDelModelo = secciones.filter((r) => r.codigo.includes('.')).length
+  const rubrosArriba = secciones.length - pisosDelModelo
   return (
     <div className="fade-in space-y-4">
       <div className="bg-white rounded-xl border p-4 md:p-6">
@@ -1216,7 +1226,8 @@ function StepEstructura({
         <div data-testid="resumen-estructura" className="mb-4 bg-[#E8F5EE] rounded-lg px-4 py-2.5 border border-green-200 text-sm text-[#143D34]">
           {totalTrabajos > 0 || secciones.length > 0 ? (
             <>
-              Se van a crear <strong>{secciones.length} {secciones.length === 1 ? 'rubro' : 'rubros'}</strong> con{' '}
+              Se van a crear <strong>{rubrosArriba} {rubrosArriba === 1 ? 'rubro' : 'rubros'}</strong>
+              {pisosDelModelo > 0 && <> ({pisosDelModelo} {pisosDelModelo === 1 ? 'piso' : 'pisos'})</>} con{' '}
               <strong>{totalTrabajos} {totalTrabajos === 1 ? 'trabajo' : 'trabajos'}</strong>
               {trabajosTipicos > 0 && structureOption !== 'template' && (
                 <span className="text-gray-500"> ({trabajosTipicos} de trabajos típicos)</span>

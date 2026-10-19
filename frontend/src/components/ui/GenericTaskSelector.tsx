@@ -11,6 +11,9 @@ import type { ModeloRubro, ModeloTrabajo } from '../../lib/api'
 export interface SelectedTask {
   rubroCodigo: string
   rubroNombre: string
+  // Piso del modelo (4.1 Fundaciones); null si el trabajo va directo en el rubro
+  grupoCodigo: string | null
+  grupoNombre: string | null
   codigo: string
   descripcion: string
   unidad: string
@@ -68,6 +71,8 @@ export function trabajosElegidos(selection: SelectionState, modelo: ModeloRubro[
         tasks.push({
           rubroCodigo: rubro.codigo,
           rubroNombre: rubro.nombre,
+          grupoCodigo: g.codigo,
+          grupoNombre: g.nombre,
           codigo: t.codigo,
           descripcion: t.descripcion,
           unidad: t.unidad || 'gl',

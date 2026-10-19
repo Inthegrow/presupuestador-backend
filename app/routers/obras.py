@@ -1,13 +1,16 @@
 """Cargar una obra desde la app: subir el Excel, revisar, corregir y cargar.
 
-1. POST /obras/analizar: lee la hoja 01_C&P, cruza cada ítem con una receta del
+1. POST /obras/analizar: lee el cómputo (01_C&P, CYP o la primera solapa con los títulos
+   Descripción y Cantidad: obra_import.find_computo), cruza cada ítem con una receta del
    Maestro (plantillas cargadas en la app) y busca el precio de cada recurso en
    los catálogos de la app, con la misma regla que "Actualizar precios" (Fase 4).
    Devuelve cada trabajo (misma descripción + unidad) con un semáforo: verde
    (listo), amarillo (confirmar algo) o rojo (no se puede cargar así), y los
    precios que faltan. La receta de cada trabajo sale, en este orden, de lo que
-   se eligió en la pantalla, de lo que se eligió en otra obra (memoria) o de la
-   regla por descripción (MAPEO). Las sugerencias por parecido nunca son la receta:
+   se eligió en la pantalla, de lo que se eligió en otra obra (memoria), del código
+   de la fórmula cuando la descripción se le parece (código del modelo) o de la
+   regla por descripción (MAPEO). Un trabajo sin fórmula y sin precio se puede
+   cargar en $0 ({"sin_precio": true}). Las sugerencias por parecido nunca son la receta:
    se ofrecen para elegir ("Quizás sea"). No escribe nada.
 2. Las correcciones de precios se hacen en los catálogos (endpoints de /catalogs):
    así quedan guardadas en el Maestro de la app para las próximas obras.
@@ -80,10 +83,12 @@ MEMORY = "obra_recetas_memoria"
 # ── Lectura ──────────────────────────────────────────────────────────────────
 
 
-async def _read_workbook(file: UploadFile):  # type: ignore[no-untyped-def]
+# Plain def (not async) here and in analizar/cargar: FastAPI runs them in a thread, so a big Excel does not hold
+# up the other requests (Emilia, 19/10: "No pude traer la lista de fórmulas" while an Excel was being read)
+def _read_workbook(file: UploadFile):  # type: ignore[no-untyped-def]
     if not file.filename or not file.filename.lower().endswith((".xlsx", ".xlsm")):
         raise HTTPException(400, "Subí el Excel de la obra (.xlsx)")
-    content = await file.read()
+    content = file.file.read()
     if len(content) > MAX_BYTES:
         raise HTTPException(400, "El archivo es muy grande (máximo 15 MB)")
     try:
@@ -625,13 +630,13 @@ def _public(result: dict) -> dict:
 
 
 @router.post("/analizar")
-async def analizar_obra(
+def analizar_obra(
     file: UploadFile = File(...),
     asignaciones: str | None = Form(None),
     user: dict = Depends(require_editor),
 ):
     """Revisa el Excel de la obra. No escribe nada."""
-    wb = await _read_workbook(file)
+    wb = _read_workbook(file)
     db = get_data_db()
     org_id = user["org_id"]
     templates = _templates(db, org_id)
@@ -756,7 +761,7 @@ def _save_memory(db, org_id: str, result: dict, elegidas: dict, memoria: dict[st
 
 
 @router.post("/cargar")
-async def cargar_obra(
+def cargar_obra(
     file: UploadFile = File(...),
     nombre: str = Form(...),
     asignaciones: str | None = Form(None),
@@ -770,7 +775,7 @@ async def cargar_obra(
     nombre = " ".join((nombre or "").split())
     if not nombre:
         raise HTTPException(400, "Poné un nombre para el presupuesto")
-    wb = await _read_workbook(file)
+    wb = _read_workbook(file)
     db = get_data_db()
     org_id = user["org_id"]
     templates = _templates(db, org_id)

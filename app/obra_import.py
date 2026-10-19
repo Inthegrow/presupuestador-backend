@@ -1,4 +1,4 @@
-"""Fase 5: cargar el cómputo de una obra real (hoja 01_C&P) usando las recetas del Maestro.
+"""Fase 5: cargar el cómputo de una obra real (01_C&P, CYP u otra solapa: find_computo) con las recetas del Maestro.
 
 Del Excel de la obra se toman solo la estructura (rubros, pisos, ítems) y las
 cantidades. El precio de cada ítem con receta lo calcula el sistema con la
