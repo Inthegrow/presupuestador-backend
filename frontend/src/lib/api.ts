@@ -254,8 +254,9 @@ export const budgetApi = {
     get<{ precios_faltantes: PrecioFaltante[] }>(`/budgets/${budgetId}/items/${itemId}/precios-faltantes`),
 
   // Cuántos precios faltan en cada trabajo del presupuesto, todos juntos (para el punto de color de la tabla)
+  // `viejos`: cuántos precios viejos (más días que «precio viejo» de la empresa) hay en cada trabajo
   preciosFaltantesPorItem: (budgetId: string) =>
-    get<{ por_item: Record<string, number>; recursos_por_item?: Record<string, number> }>(`/budgets/${budgetId}/precios-faltantes`),
+    get<{ por_item: Record<string, number>; recursos_por_item?: Record<string, number>; viejos?: Record<string, number> | number; precio_viejo_dias?: number }>(`/budgets/${budgetId}/precios-faltantes`),
 
   // Agregar un trabajo con su fórmula ya aplicada, dentro del rubro de la fórmula (o de `parent_id`).
   // Si la unidad no es la de la fórmula y falta `factor`: 409 FALTA_CONVERSION y no se crea nada.
@@ -357,9 +358,100 @@ export interface CreateFullPayload {
   secciones: {
     codigo: string
     nombre: string
-    items: { codigo: string; descripcion: string; unidad: string; cantidad: number }[]
+    // plantilla: el código de la fórmula (Trabajos típicos del modelo de Terrac): el trabajo se crea con esa fórmula
+    // y los precios de la lista oficial
+    items: { codigo: string; descripcion: string; unidad: string; cantidad: number; plantilla?: string | null }[]
   }[]
   indirectos?: Partial<IndirectosPct>
+}
+
+// ─── Modelo de Terrac (Trabajos típicos del asistente) ─────────────────────────
+
+export interface ModeloTrabajo {
+  codigo: string
+  descripcion: string
+  unidad: string | null
+  // Código de la fórmula de la empresa que usa este trabajo (null: entra sin fórmula) y su nombre
+  plantilla: string | null
+  plantillaNombre?: string | null
+}
+
+export interface ModeloGrupo {
+  // Piso del modelo (4.1 Fundaciones); null = los trabajos van directo en el rubro
+  codigo: string | null
+  nombre: string | null
+  trabajos: ModeloTrabajo[]
+}
+
+export interface ModeloRubro {
+  codigo: string
+  nombre: string
+  grupos: ModeloGrupo[]
+}
+
+type Crudo = Record<string, unknown>
+const texto = (v: unknown): string => (typeof v === 'string' ? v.trim() : typeof v === 'number' ? String(v) : '')
+
+function leerTrabajo(t: unknown): ModeloTrabajo | null {
+  if (!t || typeof t !== 'object') return null
+  const o = t as Crudo
+  const descripcion = texto(o.descripcion ?? o.nombre ?? o.description)
+  if (!descripcion) return null
+  const plantilla = texto(o.plantilla ?? o.formula ?? o.template)
+  return {
+    codigo: texto(o.codigo ?? o.code),
+    descripcion,
+    unidad: texto(o.unidad) || null,
+    plantilla: plantilla || null,
+    plantillaNombre: texto(o.plantilla_nombre) || null,
+  }
+}
+
+function leerTrabajos(lista: unknown): ModeloTrabajo[] {
+  return Array.isArray(lista) ? lista.map(leerTrabajo).filter((t): t is ModeloTrabajo => t !== null) : []
+}
+
+/** El modelo como lo mande el servidor ({rubros: [...]} o la lista; pisos adentro de cada rubro o no), en una forma fija. */
+export function leerModeloTerrac(crudo: unknown): ModeloRubro[] {
+  const lista = Array.isArray(crudo) ? crudo : crudo && typeof crudo === 'object' ? (crudo as Crudo).rubros : null
+  if (!Array.isArray(lista)) throw new Error('El servidor mandó el modelo de Terrac en otro formato.')
+  const rubros: ModeloRubro[] = []
+  for (const r of lista) {
+    if (!r || typeof r !== 'object') continue
+    const o = r as Crudo
+    const grupos: ModeloGrupo[] = []
+    const sueltos = leerTrabajos(o.trabajos ?? o.items)
+    if (sueltos.length) grupos.push({ codigo: null, nombre: null, trabajos: sueltos })
+    if (Array.isArray(o.pisos)) {
+      for (const p of o.pisos) {
+        if (!p || typeof p !== 'object') continue
+        const po = p as Crudo
+        const trabajos = leerTrabajos(po.trabajos ?? po.items)
+        grupos.push({ codigo: texto(po.codigo ?? po.code) || null, nombre: texto(po.nombre ?? po.descripcion) || null, trabajos })
+      }
+    }
+    rubros.push({ codigo: texto(o.codigo ?? o.code), nombre: texto(o.nombre ?? o.descripcion), grupos })
+  }
+  // En el orden de Terrac: 1 Tareas preliminares … 9 Cubierta (los que no tienen número, al final)
+  const num = (r: ModeloRubro) => (/^\d+$/.test(r.codigo) ? Number(r.codigo) : Number.MAX_SAFE_INTEGER)
+  return rubros.map((r, i) => ({ r, i })).sort((a, b) => num(a.r) - num(b.r) || a.i - b.i).map((x) => x.r)
+}
+
+export const modeloApi = {
+  // Rubros, pisos y trabajos del modelo de presupuestación de Terrac, con el código de la fórmula de cada uno
+  terrac: () => get<unknown>('/modelo-terrac').then(leerModeloTerrac),
+}
+
+// 422 de Importar Excel: el Excel trae el cómputo sin precios (o no trae cómputo): va por Cargar obra
+export interface CargarObraDetalle {
+  codigo: 'CARGAR_OBRA'
+  mensaje: string
+}
+
+export function esCargarObra(err: unknown): err is ApiError & { detail: CargarObraDetalle } {
+  if (!(err instanceof ApiError) || err.status !== 422) return false
+  const d = err.detail as { codigo?: unknown } | null
+  return !!d && typeof d === 'object' && d.codigo === 'CARGAR_OBRA'
 }
 
 export interface CreateFullResult {
@@ -583,6 +675,10 @@ export interface ObraAnalisis {
   excel_con_precios: boolean
   // true when the file is the app's own simple sheet (Exportar), not the obra's cómputo (01_C&P)
   planilla_simple?: boolean
+  // La solapa que leyó (01_C&P, CYP, Hoja1…)
+  hoja?: string | null
+  // Trabajos sin fórmula y sin precio en el Excel (se pueden cargar en $0)
+  sin_formula_sin_precio?: number
   resumen: {
     rubros: number
     pisos: number
@@ -706,8 +802,9 @@ export interface ObraDiferencias {
   trabajos: ObraDiferenciaTrabajo[]
 }
 
-// Lo que Sol decidió por trabajo: { clave: { plantillas: [[codigo, factor], ...], confirmada? } } ([] = sin fórmula)
-export type ObraAsignaciones = Record<string, { plantillas: [string, number][]; confirmada?: boolean }>
+// Lo que Sol decidió por trabajo: { clave: { plantillas: [[codigo, factor], ...], confirmada? } } ([] = sin fórmula).
+// sin_precio: sin fórmula y sin precio en el Excel, se carga en $0 (después se le elige la fórmula en el editor)
+export type ObraAsignaciones = Record<string, { plantillas: [string, number][]; confirmada?: boolean; sin_precio?: boolean }>
 
 function obraForm(file: File, asignaciones: ObraAsignaciones, extra: Record<string, string> = {}) {
   const formData = new FormData()

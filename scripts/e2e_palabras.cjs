@@ -139,8 +139,10 @@ async function cargarGinkgo() {
   await page.getByRole('button', { name: /Siguiente/ }).click(); await page.waitForTimeout(500)
   check(/2\s*Trabajos/.test(await page.getByTestId('pasos').locator('li[aria-current=step]').innerText()), 'al seguir, la pastilla actual es "2 Trabajos"')
   check(await page.getByTestId('pasos').locator('li').first().locator('svg').count() === 1, 'el paso hecho ("Datos") lleva la tilde')
-  await page.getByRole('checkbox', { name: 'Contrapiso', exact: true }).click()
-  await page.getByLabel('Cantidad de Contrapiso', { exact: true }).fill('85')
+  // Trabajos típicos del modelo de Terrac (entrega 11): 5.2.3 Contrapiso de cascote
+  const contrapiso = () => page.locator('[data-testid=trabajo-tipico][data-codigo="5.2.3"]')
+  await contrapiso().getByRole('checkbox').click()
+  await contrapiso().getByLabel(/^Cantidad de /).fill('85')
   await shot('03_asistente_pastillas')
   await page.waitForTimeout(900) // el borrador se guarda medio segundo después del último cambio
   // "cerrar" el asistente: otra pestaña del mismo navegador
@@ -156,8 +158,8 @@ async function cargarGinkgo() {
   await page.screenshot({ path: `${SHOTS}/04_borrador_a_medias.png` })
   await aviso.getByRole('button', { name: 'Seguir' }).click(); await page.waitForTimeout(500)
   check(/2\s*Trabajos/.test(await page.getByTestId('pasos').locator('li[aria-current=step]').innerText()), 'Seguir: vuelve al paso "Trabajos"')
-  check(await page.getByRole('checkbox', { name: 'Contrapiso', exact: true }).getAttribute('aria-checked') === 'true' &&
-    await page.getByLabel('Cantidad de Contrapiso', { exact: true }).inputValue() === '85', 'Seguir: el contrapiso sigue tildado con 85')
+  check(await contrapiso().getByRole('checkbox').getAttribute('aria-checked') === 'true' &&
+    await contrapiso().getByLabel(/^Cantidad de /).inputValue() === '85', 'Seguir: el contrapiso sigue tildado con 85')
   await page.getByRole('button', { name: /Anterior/ }).click(); await page.waitForTimeout(300)
   check(await page.getByLabel(/Nombre del presupuesto/).inputValue() === NOMBRE && await page.getByLabel('Descripción').inputValue() === 'PH con patio', 'Seguir: el nombre y la descripción siguen')
   await page.getByRole('button', { name: /Siguiente/ }).click(); await page.waitForTimeout(300)

@@ -242,6 +242,33 @@ def _con_alternativa(rule: dict, templates: dict | None) -> dict:
 
 
 
+NOTA_A_MANO = "Fórmula elegida a mano al cargar la obra."
+NOTA_CODIGO = "Fórmula con el mismo código que el trabajo (código del modelo)."
+CODIGO_PARECIDO = 0.5  # suggest_recipes score from which the description "se le parece" to the fórmula
+
+
+def code_recipe(fila: dict, templates: dict[str, dict]) -> str | None:
+    """Regla «código del modelo»: the fórmula whose code is the work's code, when its name looks like
+    the description (the same measure as "Quizás sea", suggest_recipes) and the units are not different.
+
+    The TERRAC model (hoja CYP) numbers its works with the codes of its fórmulas (4.1.3 Bases aisladas).
+    The code as the Excel says it counts too (before fixing it to its piso). None when there is none.
+    """
+    by_code = {normalize_item_code(c): c for c in templates}
+    for raw in (fila.get("codigo"), fila.get("codigo_excel")):
+        codigo = by_code.get(normalize_item_code(raw)) if raw else None
+        if codigo is None:
+            continue
+        tmpl = templates[codigo]
+        uf, ut = unit_key(tmpl.get("unidad")), unit_key(fila.get("unidad"))
+        if uf and ut and uf != ut:
+            continue
+        found = suggest_recipes(fila.get("descripcion") or "", {codigo: tmpl}, top=1)
+        if found and found[0][1] >= CODIGO_PARECIDO:
+            return codigo
+    return None
+
+
 def candidate(descripcion: str) -> str:
     key = plain(descripcion)
     for patron, texto in CANDIDATOS:
@@ -343,41 +370,240 @@ def _num(value: object) -> float | None:
 
 
 def _code(value: object) -> str:
-    """Item code: dates (1.1 guardado como 01/01/2026) and 4.2-1 → 4.2.1."""
-    if isinstance(value, datetime):
-        return normalize_date_code(value) or ""
+    """Item code: dates (1.1 guardado como 01/01/2026, día.mes) and 4.2-1 → 4.2.1."""
+    if isinstance(value, (datetime, date)):
+        return normalize_date_code(datetime(value.year, value.month, value.day)) or ""
     return normalize_item_code(value)
 
 
-_SECTION_RE = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*[-.]?\s+(.*)$")
+# ── Dónde está el cómputo ────────────────────────────────────────────────────
+
+# Sheets of the cómputo, in this order: the exact names, then the names that start like them
+# ("CYP E1", "01_C&P (2)"), then the first sheet with a column titles row (find_computo)
+COMPUTO_NAMES = ("01_C&P", "CYP", "C&P")
+COMPUTO_PREFIXES = ("01_C&P", "CYP")
+HEADER_ROWS = 15  # the column titles row is looked for in the first rows of each sheet
+_HEADER_MAX_COL = 30
+# Column titles (plain(), without accents, in capitals)
+_HEADER_CODIGO = {"CODIGO", "COD", "COD.", "ITEM", "ITEMS", "NRO", "NRO.", "N°", "Nº", "NO", "NUMERO"}
+_HEADER_UNIDAD = {"UNIDAD", "UNIDADES", "UNID", "UNID.", "UN", "UN.", "U", "UM", "U.M."}
 
 
-def parse_obra(wb, sheet: str = SHEET) -> dict:  # type: ignore[no-untyped-def]
-    """Rubros, pisos (subrubros) e ítems de la hoja 01_C&P, en orden.
+def _header_text(value: object) -> str:
+    return plain(value).rstrip(":").strip() if isinstance(value, str) else ""
 
-    Returns {"titulo", "filas": [...], "problemas": [...]}. Each fila:
+
+def _header_columns(row: list) -> dict[str, int] | None:
+    """Columns (1 = A) of a column titles row: Descripción and Cantidad are a must, Código and Unidad optional."""
+    texts = [_header_text(v) for v in row]
+    desc = next((i for i, t in enumerate(texts) if t.startswith("DESCRIPCION")), None)
+    cant = next((i for i, t in enumerate(texts) if t.startswith("CANTIDAD")), None)
+    if desc is None or cant is None:
+        return None
+    cols = {"descripcion": desc + 1, "cantidad": cant + 1}
+    codigo = next((i for i, t in enumerate(texts) if t in _HEADER_CODIGO or t.startswith("CODIGO")), None)
+    unidad = next((i for i, t in enumerate(texts) if t in _HEADER_UNIDAD), None)
+    if codigo is not None:
+        cols["codigo"] = codigo + 1
+    if unidad is not None:
+        cols["unidad"] = unidad + 1
+    return cols
+
+
+def _find_header(ws) -> tuple[int, dict[str, int]] | None:  # type: ignore[no-untyped-def]
+    """(row, columns) of the column titles row in the first HEADER_ROWS rows, or None."""
+    for r, row in enumerate(ws.iter_rows(min_row=1, max_row=HEADER_ROWS, max_col=_HEADER_MAX_COL,
+                                         values_only=True), start=1):
+        cols = _header_columns(list(row))
+        if cols:
+            return r, cols
+    return None
+
+
+_TERRAC_COLS = {"codigo": COL_ITEM, "descripcion": COL_DESC, "unidad": COL_UNIDAD, "cantidad": COL_CANTIDAD}
+# Price columns of the TERRAC layout (01_C&P / CYP): E, J, N and Z
+_TERRAC_PRICES = {"mat_unit": COL_MAT_UNIT, "mo_unit": COL_MO_UNIT, "directo": COL_DIR_TOTAL, "neto": COL_NETO_TOTAL}
+
+
+def _sheet_name_rank(name: str) -> int | None:
+    """0..2 for the exact names of COMPUTO_NAMES, 3 for a name that starts like one, else None."""
+    key = " ".join(str(name).upper().split())
+    if key in COMPUTO_NAMES:
+        return COMPUTO_NAMES.index(key)
+    if key.startswith(COMPUTO_PREFIXES):
+        return len(COMPUTO_NAMES)
+    return None
+
+
+def _computo_info(ws, nombrada: bool) -> dict | None:  # type: ignore[no-untyped-def]
+    """Where the works of one sheet are: header row, first data row, columns and price columns.
+
+    A sheet named like the cómputo (01_C&P, CYP, C&P) without a titles row keeps the fixed
+    TERRAC layout (data from row 8, A..D). Its price columns (E/J/N/Z) are read when it is the
+    TERRAC layout: a sheet named like the cómputo with Código, Descripción, Unidad and Cantidad
+    in A..D, or a titles row whose column E says "SUBTOTAL" (gastos directos).
+    """
+    found = _find_header(ws)
+    if found is None:
+        if not nombrada:
+            return None
+        return {"hoja": ws.title, "fila_titulos": None, "primera_fila": FIRST_ROW,
+                "columnas": dict(_TERRAC_COLS), "precios": dict(_TERRAC_PRICES)}
+    row, cols = found
+    titulo_e = _header_text(ws.cell(row, COL_MAT_UNIT).value)
+    terrac_layout = all(cols.get(k) == v for k, v in _TERRAC_COLS.items() if k in cols) \
+        and cols.get("descripcion") == COL_DESC and (nombrada or titulo_e.startswith("SUBTOTAL"))
+    return {"hoja": ws.title, "fila_titulos": row, "primera_fila": row + 1, "columnas": cols,
+            "precios": dict(_TERRAC_PRICES) if terrac_layout else None}
+
+
+def find_computo(wb, sheet: str | None = None) -> dict | None:  # type: ignore[no-untyped-def]
+    """The sheet of the cómputo and how to read it, or None when the Excel has none.
+
+    In this order: 01_C&P, CYP, C&P, a sheet whose name starts with 01_C&P or CYP, and else the
+    first sheet with a column titles row (Descripción and Cantidad; Código and Unidad optional,
+    with or without accents, in capitals or not) in its first 15 rows. The price lists (00_*) and
+    the detail sheets of each work ("4.1.1", "3.1-1") are never the cómputo.
+
+    Returns {"hoja", "fila_titulos" (None = fixed TERRAC layout), "primera_fila",
+    "columnas": {codigo?, descripcion, cantidad, unidad?} (1 = A),
+    "precios": {mat_unit, mo_unit, directo, neto} (columns E/J/N/Z) or None}.
+    """
+    names = list(getattr(wb, "sheetnames", []))
+    if sheet is not None:
+        return _computo_info(wb[sheet], _sheet_name_rank(sheet) is not None) if sheet in names else None
+    ranked = sorted((rank, i, name) for i, name in enumerate(names)
+                    if (rank := _sheet_name_rank(name)) is not None)
+    if ranked:
+        return _computo_info(wb[ranked[0][2]], True)
+    for name in names:
+        title = str(name).strip()
+        if title.upper().startswith("00_") or _DETAIL_SHEET.match(title):
+            continue
+        info = _computo_info(wb[name], False)
+        if info is not None:
+            return info
+    return None
+
+
+# ── Títulos de rubro y piso, códigos y notas ─────────────────────────────────
+
+# "1- X", "1 - X", "4 -1 X", "4-2 X", "3.1- X", "4. X", "7 X": the number (its parts joined by "." or "-"),
+# then the name, which must have a letter
+_SECTION_RE = re.compile(r"^\s*(\d+(?:\s*[.\-]\d+)*)\s*(?:[-.]\s*|\s+)(.*\S)\s*$")
+_CODE_RE = re.compile(r"^\d+(?:\.\d+)*$")
+
+
+def section_title(text: object) -> tuple[str, str] | None:
+    """(código, nombre) of a rubro or piso title: '4 -1 FUNDACIONES' → ('4.1', 'FUNDACIONES'). None if it is not one."""
+    if not isinstance(text, str):
+        return None
+    m = _SECTION_RE.match(text)
+    if not m or not re.search(r"[^\W\d_]", m.group(2)):
+        return None
+    code = re.sub(r"\s*[.\-]\s*", ".", m.group(1)).strip(".")
+    return code, " ".join(m.group(2).split())
+
+
+def _is_code(value: object) -> bool:
+    """A work code (1.1, 4.2-1, a date, a number), not a text like '4 -1 FUNDACIONES' or 'TOTAL'."""
+    if isinstance(value, (datetime, date, int, float)) and not isinstance(value, bool):
+        return True
+    return bool(_CODE_RE.match(_code(value))) if isinstance(value, str) else False
+
+
+def _is_titles_row(desc: str, cantidad: object) -> bool:
+    """The column titles row (CODIGO / DESCRIPCIÓN / UNIDAD / CANTIDAD) is never a work."""
+    return plain(desc).startswith("DESCRIPCION") and _header_text(cantidad).startswith("CANTIDAD")
+
+
+def computo_rows(ws, info: dict) -> list[dict]:  # type: ignore[no-untyped-def]
+    """Every row of the cómputo that says something, classified with the title rules.
+
+    Each one: {"tipo": "titulo" | "item" | "nota", "fila" (Excel row), and for a title "codigo",
+    "nombre"; for a work "codigo" (normalized), "codigo_excel" (as written), "descripcion",
+    "unidad", "cantidad" (None when empty), "excel": {mat_unit, mo_unit, directo, neto}; for a note
+    "descripcion"}.
+
+    - A rubro or piso title (section_title) can be in the code column (with nothing in the
+      description, like the CYP of the TERRAC model: "4 -1 FUNDACIONES") or in the description
+      column, without code and without unit or quantity ("3.1- FUNDACIONES").
+    - A code with a name but without unit, quantity or price is a title too ("1" | "ALBAÑILERÍA").
+    - A row without code whose text is not a title and that has no unit or no quantity is a note
+      ("Replicar puntos del subsuelo", "Dejar un item libre"): it is not loaded, it is reported.
+    - Dates as codes come back as día.mes (01/02/2026 → 1.2) and 3.1-1 as 3.1.1.
+    """
+    cols, precios = info["columnas"], info.get("precios") or {}
+    c_code, c_desc = cols.get("codigo"), cols["descripcion"]
+    c_unit, c_qty = cols.get("unidad"), cols["cantidad"]
+    max_col = max([*cols.values(), *precios.values()])
+    out: list[dict] = []
+    for r, row in enumerate(ws.iter_rows(min_row=info["primera_fila"], max_col=max_col, values_only=True),
+                            start=info["primera_fila"]):
+        def cell(col: int | None) -> object:
+            return row[col - 1] if col and col - 1 < len(row) else None
+
+        raw_code = cell(c_code)
+        if isinstance(raw_code, str) and not raw_code.strip():
+            raw_code = None
+        desc = " ".join(str(cell(c_desc) or "").split())
+        unidad = " ".join(str(cell(c_unit) or "").split()) or None
+        cantidad = _num(cell(c_qty))
+        if not desc:
+            # A title written in the code column (A), with the description empty
+            title = section_title(raw_code) if raw_code is not None and not _is_code(raw_code) else None
+            if title:
+                out.append({"tipo": "titulo", "fila": r, "codigo": title[0], "nombre": title[1]})
+            continue
+        if _is_titles_row(desc, cell(c_qty)):
+            continue
+        if raw_code is None and (cantidad is None or unidad is None):
+            title = section_title(desc)
+            if title:
+                out.append({"tipo": "titulo", "fila": r, "codigo": title[0], "nombre": title[1]})
+            else:
+                out.append({"tipo": "nota", "fila": r, "descripcion": desc})
+            continue
+        excel = {k: _num(cell(col)) or 0.0 for k, col in
+                 (("mat_unit", precios.get("mat_unit")), ("mo_unit", precios.get("mo_unit")),
+                  ("directo", precios.get("directo")), ("neto", precios.get("neto")))}
+        codigo = _code(raw_code) if raw_code is not None else ""
+        if cantidad is None and unidad is None and not any(excel.values()) and _CODE_RE.match(codigo):
+            # Code in A and name in B, with nothing to price: a rubro or piso title ("1" | "ALBAÑILERÍA")
+            out.append({"tipo": "titulo", "fila": r, "codigo": codigo, "nombre": desc})
+            continue
+        out.append({
+            "tipo": "item", "fila": r, "codigo": codigo, "codigo_excel": raw_code, "descripcion": desc,
+            "unidad": unidad, "cantidad": cantidad, "excel": excel,
+        })
+    return out
+
+
+def parse_obra(wb, sheet: str | None = None, info: dict | None = None) -> dict:  # type: ignore[no-untyped-def]
+    """Rubros, pisos (subrubros) e ítems del cómputo (01_C&P, CYP o la solapa que encuentra find_computo), en orden.
+
+    Returns {"titulo", "hoja", "filas": [...], "problemas": [...]}. Each fila:
     {"orden", "nivel" (rubro/subrubro/item), "codigo", "parent" (orden del padre),
      "descripcion", "unidad", "cantidad", "excel": {mat_unit, mo_unit, directo, neto},
-     "fila" (Excel row), "notas": []}
+     "fila" (Excel row), "notas": []}; an item also has "codigo_excel" (its code as the Excel says it,
+     normalized, before fixing it to its piso).
     """
-    ws = wb[sheet]
+    info = info or find_computo(wb, sheet)
+    if info is None:
+        raise ValueError("El Excel no tiene el cómputo")
+    ws = wb[info["hoja"]]
     filas: list[dict] = []
     problemas: list[str] = []
     rubro = subrubro = None
 
-    for r in range(FIRST_ROW, ws.max_row + 1):
-        raw_code = ws.cell(r, COL_ITEM).value
-        desc = " ".join(str(ws.cell(r, COL_DESC).value or "").split())
-        cantidad = _num(ws.cell(r, COL_CANTIDAD).value)
-        if not desc:
+    for row in computo_rows(ws, info):
+        r = row["fila"]
+        if row["tipo"] == "nota":
+            problemas.append(f"Fila {r}: '{row['descripcion'][:60]}' es una nota, no un trabajo (no tiene código "
+                             "y le falta la unidad o la cantidad): no se cargó.")
             continue
-
-        if cantidad is None and raw_code in (None, ""):
-            m = _SECTION_RE.match(desc)
-            if not m:
-                problemas.append(f"Fila {r}: título sin código ('{desc}'), no se cargó.")
-                continue
-            code, name = m.group(1).rstrip("."), m.group(2).strip()
+        if row["tipo"] == "titulo":
+            code, name = row["codigo"], row["nombre"]
             nivel = "subrubro" if "." in code else "rubro"
             fila = {"orden": len(filas), "nivel": nivel, "codigo": code, "descripcion": name,
                     "unidad": None, "cantidad": None, "excel": None, "fila": r, "notas": []}
@@ -390,35 +616,32 @@ def parse_obra(wb, sheet: str = SHEET) -> dict:  # type: ignore[no-untyped-def]
             filas.append(fila)
             continue
 
-        code = _code(raw_code)
+        raw_code, desc, cantidad = row["codigo_excel"], row["descripcion"], row["cantidad"]
+        code = excel_code = row["codigo"]
         notas: list[str] = []
         parent = subrubro or rubro
         if parent and code and not code.startswith(parent["codigo"] + "."):
             fixed = parent["codigo"] + "." + code.split(".", 2)[-1] if code.count(".") >= 2 else code
             if fixed != code:
-                notas.append(f"El Excel dice {raw_code} pero está en {parent['codigo']}: se cargó como {fixed}.")
-                problemas.append(f"Fila {r}: código {raw_code} dentro de {parent['codigo']} → {fixed}.")
+                shown = excel_code if isinstance(raw_code, (datetime, date)) else raw_code
+                notas.append(f"El Excel dice {shown} pero está en {parent['codigo']}: se cargó como {fixed}.")
+                problemas.append(f"Fila {r}: código {shown} dentro de {parent['codigo']} → {fixed}.")
                 code = fixed
         if cantidad is None:
             problemas.append(f"Fila {r}: '{desc[:50]}' sin cantidad, se cargó con 0.")
             cantidad = 0.0
 
-        unidad = " ".join(str(ws.cell(r, COL_UNIDAD).value or "").split()) or None
         filas.append({
             "orden": len(filas), "nivel": "item", "codigo": code or None,
             "parent": parent["orden"] if parent else None,
-            "descripcion": desc, "unidad": unidad, "cantidad": cantidad,
-            "excel": {
-                "mat_unit": _num(ws.cell(r, COL_MAT_UNIT).value) or 0.0,
-                "mo_unit": _num(ws.cell(r, COL_MO_UNIT).value) or 0.0,
-                "directo": _num(ws.cell(r, COL_DIR_TOTAL).value) or 0.0,
-                "neto": _num(ws.cell(r, COL_NETO_TOTAL).value) or 0.0,
-            },
-            "fila": r, "notas": notas,
+            "descripcion": desc, "unidad": row["unidad"], "cantidad": cantidad,
+            "excel": row["excel"], "fila": r, "notas": notas, "codigo_excel": excel_code or None,
         })
 
     _fill_units(filas, problemas)
-    return {"titulo": str(ws.cell(1, 1).value or "").strip(), "filas": filas, "problemas": problemas}
+    # The title of the obra is A1, unless A1 is already the column titles row
+    titulo = str(ws.cell(1, 1).value or "").strip() if info.get("fila_titulos") != 1 else ""
+    return {"titulo": titulo, "hoja": ws.title, "filas": filas, "problemas": problemas}
 
 
 # ── La planilla simple que baja la app (Exportar → Planilla simple) ───────────────────
@@ -516,12 +739,20 @@ def parse_simple(wb) -> dict:  # type: ignore[no-untyped-def]
         })
 
     _fill_units(filas, problemas)
-    return {"titulo": "", "filas": filas, "problemas": problemas}
+    return {"titulo": "", "hoja": SIMPLE_SHEET, "filas": filas, "problemas": problemas, "planilla_simple": True}
 
 
 def parse_any(wb) -> dict:  # type: ignore[no-untyped-def]
-    """The cómputo of the obra (01_C&P) or, if it is not there, the app's simple sheet."""
-    return parse_obra(wb) if SHEET in wb.sheetnames else parse_simple(wb)
+    """The cómputo of the obra (01_C&P, CYP, C&P...), else the app's simple sheet, else the first sheet
+    with Descripción and Cantidad (find_computo)."""
+    if any(_sheet_name_rank(name) is not None for name in wb.sheetnames) or not is_simple_sheet(wb):
+        return parse_obra(wb)
+    return parse_simple(wb)
+
+
+def has_computo(wb) -> bool:  # type: ignore[no-untyped-def]
+    """True when parse_any can read something: a cómputo sheet or the app's simple sheet."""
+    return is_simple_sheet(wb) or find_computo(wb) is not None
 
 
 def _fill_units(filas: list[dict], problemas: list[str]) -> None:
@@ -829,7 +1060,11 @@ def rule_for(fila: dict, templates: dict[str, dict], asignaciones: dict | None =
         if not pares:
             return None
         same = auto and [c for c, _ in auto["plantillas"]] == [c for c, _, _ in pares]
-        rule = dict(auto) if same else {"patron": None, "nota": "Fórmula elegida a mano al cargar la obra."}
+        rule = dict(auto) if same else {"patron": None, "nota": NOTA_A_MANO}
+        if elegida.get("nota"):
+            # Who proposed it says why (código del modelo), not the description rule's note
+            rule["nota"] = elegida["nota"]
+            rule.pop("porque", None)
 
     plantillas, falta, origenes = [], [], []
     for codigo, factor, automatica in pares:
@@ -896,13 +1131,19 @@ def build_plan(parsed: dict, templates: dict[str, dict], asignaciones: dict | No
             "plantillas_faltantes": sorted(faltan)}
 
 
+# A work loaded without fórmula and without price (Cargar obra, "Cargarlo sin precio ($0)")
+NOTA_SIN_PRECIO = "Sin fórmula y sin precio: completalo."
+
+
 def item_notes(item: dict) -> str:
     """Text for budget_items.notas: where the price comes from and what to review."""
     ex = item.get("excel") or {}
     parts: list[str] = []
     if item["nivel"] != "item":
         return "Seccion"
-    if item.get("plantilla"):
+    if item.get("sin_precio"):
+        parts.append(NOTA_SIN_PRECIO)
+    elif item.get("plantilla"):
         parts.append("Fórmula del Maestro: " + " + ".join(item["plantillas"]) + ".")
         parts.append(f"Excel de la obra: {_money(ex.get('mat_unit', 0) + ex.get('mo_unit', 0))} directo por unidad.")
         if item.get("nota_cruce"):

@@ -77,6 +77,10 @@ export interface ItemResource {
   redondear?: boolean
   unidad_compra?: number
   cantidad_redondeo?: number
+  // Días desde la fecha del precio (null: sin fecha). Con más que «precio viejo» de la empresa, se marca en ámbar
+  precio_dias?: number | null
+  // Lo dice el servidor con los días de la empresa (si no viene, se calcula con precio_dias)
+  precio_viejo?: boolean
 }
 
 export interface PriceCatalog {
@@ -155,6 +159,7 @@ export interface IndirectConfig {
   imp_cheque_pct?: number
   iva_pct?: number
   desperdicio_pct?: number | null // desperdicio general de la organización
+  precio_viejo_dias?: number | null // un precio es viejo después de estos días (de la empresa; por defecto 90)
   general?: Partial<IndirectConfig> // valores generales, para comparar
   propios?: boolean // true = la obra tiene sus propios %
   indirecto_pct?: number // suma de los 5 conceptos de indirectos (lo calcula el servidor)
