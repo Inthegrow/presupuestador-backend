@@ -7,3 +7,6 @@ venv/
 dist/
 *.egg-info/
 .DS_Store
+
+# Veredictos de la auditoría con Codex (CLI)
+.auditoria/

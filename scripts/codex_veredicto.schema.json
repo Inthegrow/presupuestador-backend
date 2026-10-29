@@ -1,0 +1,27 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["semaforo", "commit_auditado", "resumen", "hallazgos", "que_probar"],
+  "properties": {
+    "semaforo": { "type": "string", "enum": ["verde", "amarillo", "rojo"] },
+    "commit_auditado": { "type": "string" },
+    "resumen": { "type": "string" },
+    "hallazgos": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["gravedad", "archivo", "linea", "problema", "como_reproducir", "sugerencia"],
+        "properties": {
+          "gravedad": { "type": "string", "enum": ["bloqueante", "importante", "menor"] },
+          "archivo": { "type": "string" },
+          "linea": { "type": ["integer", "null"] },
+          "problema": { "type": "string" },
+          "como_reproducir": { "type": "string" },
+          "sugerencia": { "type": "string" }
+        }
+      }
+    },
+    "que_probar": { "type": "array", "items": { "type": "string" } }
+  }
+}
