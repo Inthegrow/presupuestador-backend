@@ -19,6 +19,7 @@ Codex audita cada cambio antes de que Carlos lo vea. El pase se hace con un coma
      Codex, iniciar sesión, la clave) o cuál es el hallazgo que no se pudo cerrar. Nunca presentar el PR
      como auditado.
    - **4 cambió el código** → commitear y volver al paso 2.
+   - **6 nada que auditar** → la rama no tiene cambios contra `main`. No es un verde: no hay nada que presentar.
 4. El límite es una auditoría inicial más dos vueltas de corrección. Para una tarea nueva en la misma rama:
    `scripts/auditar_con_codex.sh --reiniciar`.
 5. Un verde vale solo para ese commit: si después cambia el código, se vuelve a auditar.

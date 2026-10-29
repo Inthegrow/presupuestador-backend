@@ -14,6 +14,7 @@
 #   3 auditoría falló  -> Codex no está, no tiene sesión o no terminó bien
 #   4 cambió el código -> el commit se movió durante la auditoría o hay cambios sin commitear
 #   5 límite de rondas -> ya hubo 1 auditoría + 2 correcciones: parar y avisar a Carlos
+#   6 nada que auditar -> el commit no tiene cambios contra la base (no es un verde)
 
 set -uo pipefail
 
@@ -31,16 +32,18 @@ RAMA="$(git branch --show-current)"
 RONDAS_ARCH="$DIR/rondas-${RAMA//\//_}"
 [[ $REINICIAR == 1 ]] && rm -f "$RONDAS_ARCH"
 
-# 1. El código auditado tiene que ser exactamente un commit.
-if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
-  echo "▲ Hay cambios sin commitear. Commitealos antes de auditar."; exit 4
+# 1. El código auditado tiene que ser exactamente un commit: nada sin commitear ni archivos
+#    nuevos sin agregar (las pruebas y Codex los leerían aunque no estén en el commit).
+if [[ -n "$(git status --porcelain)" ]]; then
+  git status --short
+  echo "▲ Hay cambios o archivos nuevos fuera del commit. Commitealos (o ignoralos) antes de auditar."; exit 4
 fi
 SHA="$(git rev-parse HEAD)"
 
-git fetch -q origin "$BASE" 2>/dev/null || true
-if git rev-parse -q --verify "origin/$BASE" >/dev/null; then REF_BASE="origin/$BASE"; else REF_BASE="$BASE"; fi
+git fetch -q origin "$BASE" || { echo "▲ No pude traer la versión actual de $BASE desde GitHub."; exit 3; }
+REF_BASE="origin/$BASE"
 DESDE="$(git merge-base "$REF_BASE" HEAD)" || { echo "▲ No encuentro la rama base $BASE."; exit 3; }
-if [[ "$DESDE" == "$SHA" ]]; then echo "○ No hay cambios contra $BASE."; exit 0; fi
+if [[ "$DESDE" == "$SHA" ]]; then echo "○ No hay cambios contra $BASE: nada que auditar (no es un verde)."; exit 6; fi
 
 # 2. Límite de rondas.
 RONDA=$(( $(cat "$RONDAS_ARCH" 2>/dev/null || echo 0) + 1 ))
@@ -57,7 +60,7 @@ tail -1 "$DIR/pruebas.log"
 
 if git diff --name-only "$DESDE" HEAD | grep -q '^frontend/'; then
   echo "● Armado de la pantalla (frontend)…"
-  [[ -d frontend/node_modules ]] || npm --prefix frontend ci --silent >>"$DIR/pruebas.log" 2>&1
+  npm --prefix frontend ci --silent >>"$DIR/pruebas.log" 2>&1 || { tail -30 "$DIR/pruebas.log"; echo "▲ No se pudieron instalar las dependencias de la pantalla."; exit 2; }
   npm --prefix frontend run build >>"$DIR/pruebas.log" 2>&1 || { tail -30 "$DIR/pruebas.log"; echo "▲ La pantalla no arma."; exit 2; }
 fi
 
@@ -92,7 +95,7 @@ CODEX_RC=$?
 if [[ $CODEX_RC -ne 0 || ! -s "$SALIDA" ]]; then
   tail -20 "$DIR/codex.log"; echo "▲ La auditoría no terminó bien (código $CODEX_RC)."; exit 3
 fi
-if [[ "$(git rev-parse HEAD)" != "$SHA" || -n "$(git status --porcelain --untracked-files=no)" ]]; then
+if [[ "$(git rev-parse HEAD)" != "$SHA" || -n "$(git status --porcelain)" ]]; then
   echo "▲ El código cambió durante la auditoría. Hay que volver a auditar."; exit 4
 fi
 
