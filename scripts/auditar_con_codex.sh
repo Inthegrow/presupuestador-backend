@@ -43,7 +43,8 @@ SHA="$(git rev-parse HEAD)"
 git fetch -q origin "$BASE" || { echo "▲ No pude traer la versión actual de $BASE desde GitHub."; exit 3; }
 REF_BASE="origin/$BASE"
 DESDE="$(git merge-base "$REF_BASE" HEAD)" || { echo "▲ No encuentro la rama base $BASE."; exit 3; }
-if [[ "$DESDE" == "$SHA" ]]; then echo "○ No hay cambios contra $BASE: nada que auditar (no es un verde)."; exit 6; fi
+# Se comparan contenidos, no commits: un commit vacío o que revierte todo tampoco tiene nada que auditar.
+if git diff --quiet "$DESDE" "$SHA"; then echo "○ No hay cambios contra $BASE: nada que auditar (no es un verde)."; exit 6; fi
 
 # 2. Límite de rondas.
 RONDA=$(( $(cat "$RONDAS_ARCH" 2>/dev/null || echo 0) + 1 ))
@@ -75,7 +76,6 @@ if ! codex login status >/dev/null 2>&1; then
 fi
 
 # 5. Auditoría independiente, en modo solo lectura.
-echo "${RONDA}" >"$RONDAS_ARCH"
 SALIDA="$DIR/$SHA.json"
 rm -f "$SALIDA"
 PEDIDO="Sos el auditor de este repositorio. Seguí las reglas de AGENTS.md.
@@ -99,14 +99,29 @@ if [[ "$(git rev-parse HEAD)" != "$SHA" || -n "$(git status --porcelain)" ]]; th
   echo "▲ El código cambió durante la auditoría. Hay que volver a auditar."; exit 4
 fi
 
-# 6. Veredicto legible para el PR.
-python3 - "$SALIDA" "$DIR/$SHA.md" "$SHA" "$RONDA" "$MAX_RONDAS" <<'PY' || exit 3
+# 6. Semáforo. Sale de la gravedad de los hallazgos y nunca es más benigno que el que declaró
+#    Codex: un "verde" con un hallazgo bloqueante o importante no aprueba nada.
+SEMAFORO="$(python3 - "$SALIDA" "$SHA" <<'PY'
 import json, sys
-src, dst, sha, ronda, maxr = sys.argv[1:]
+v = json.load(open(sys.argv[1]))
+if v.get("commit_auditado") != sys.argv[2]:
+    sys.exit(1)
+orden = ["verde", "amarillo", "rojo"]
+gravedades = {h["gravedad"] for h in v["hallazgos"]}
+calculado = "rojo" if "bloqueante" in gravedades else "amarillo" if "importante" in gravedades else "verde"
+print(max(v["semaforo"], calculado, key=orden.index))
+PY
+)" || { echo "▲ Codex auditó otro commit o devolvió un veredicto ilegible."; exit 3; }
+
+# Recién con un veredicto válido del commit actual se cuenta la ronda.
+echo "${RONDA}" >"$RONDAS_ARCH"
+
+# 7. Veredicto legible para el PR.
+python3 - "$SALIDA" "$DIR/$SHA.md" "$SHA" "$RONDA" "$MAX_RONDAS" "$SEMAFORO" <<'PY' || exit 3
+import json, sys
+src, dst, sha, ronda, maxr, semaforo = sys.argv[1:]
 v = json.load(open(src))
-if v.get("commit_auditado") != sha:
-    print("▲ Codex auditó otro commit:", v.get("commit_auditado")); sys.exit(1)
-icono = {"verde": "🟢", "amarillo": "🟡", "rojo": "🔴"}[v["semaforo"]]
+icono = {"verde": "🟢", "amarillo": "🟡", "rojo": "🔴"}[semaforo]
 forma = {"bloqueante": "▲", "importante": "◆", "menor": "●"}
 lineas = [f"## {icono} Auditoría Codex (CLI) · commit `{sha[:7]}` · ronda {ronda} de {maxr}", "", v["resumen"], ""]
 if v["hallazgos"]:
@@ -122,7 +137,7 @@ open(dst, "w").write("\n".join(lineas) + "\n")
 print("\n".join(lineas))
 PY
 
-case "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["semaforo"])' "$SALIDA")" in
+case "$SEMAFORO" in
   verde) rm -f "$DIR/ultima-respuesta.md"; exit 0 ;;
   *) exit 1 ;;
 esac
