@@ -29,7 +29,8 @@ DIR=".auditoria"
 mkdir -p "$DIR"
 
 RAMA="$(git branch --show-current)"
-RONDAS_ARCH="$DIR/rondas-${RAMA//\//_}"
+# Un archivo por nombre completo de rama (hash): "a/b" y "a_b" no comparten rondas.
+RONDAS_ARCH="$DIR/rondas-$(printf '%s' "$RAMA" | git hash-object --stdin)"
 [[ $REINICIAR == 1 ]] && rm -f "$RONDAS_ARCH"
 
 # 1. El código auditado tiene que ser exactamente un commit: nada sin commitear ni archivos
@@ -113,11 +114,9 @@ print(max(v["semaforo"], calculado, key=orden.index))
 PY
 )" || { echo "▲ Codex auditó otro commit o devolvió un veredicto ilegible."; exit 3; }
 
-# Recién con un veredicto válido del commit actual se cuenta la ronda.
-echo "${RONDA}" >"$RONDAS_ARCH"
-
-# 7. Veredicto legible para el PR.
-python3 - "$SALIDA" "$DIR/$SHA.md" "$SHA" "$RONDA" "$MAX_RONDAS" "$SEMAFORO" <<'PY' || exit 3
+# 7. Veredicto legible para el PR. Si el JSON está incompleto, falla acá sin consumir ronda.
+rm -f "$DIR/$SHA.md"
+python3 - "$SALIDA" "$DIR/$SHA.md" "$SHA" "$RONDA" "$MAX_RONDAS" "$SEMAFORO" <<'PY' || { echo "▲ El veredicto de Codex vino incompleto."; exit 3; }
 import json, sys
 src, dst, sha, ronda, maxr, semaforo = sys.argv[1:]
 v = json.load(open(src))
@@ -136,6 +135,9 @@ if v["que_probar"]:
 open(dst, "w").write("\n".join(lineas) + "\n")
 print("\n".join(lineas))
 PY
+
+# Recién con el informe armado del commit actual se cuenta la ronda.
+echo "${RONDA}" >"$RONDAS_ARCH"
 
 case "$SEMAFORO" in
   verde) rm -f "$DIR/ultima-respuesta.md"; exit 0 ;;
