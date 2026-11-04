@@ -648,7 +648,15 @@ def _item_row(item: dict, budget_id: str, org_id: str, templates: dict[str, dict
     qty = item["cantidad"]
     mat = float(ex.get("mat_unit", 0)) if sin else 0.0
     mo = float(ex.get("mo_unit", 0)) if sin else 0.0
-    directo = round(mat * (qty or 0), 2) + round(mo * (qty or 0), 2)
+    if sin and qty:
+        # The per-unit prices of the planilla are rounded to cents; its direct cost (N) is the
+        # real total. When they differ only by that rounding, the cost per unit keeps every
+        # decimal so that unit × quantity gives the planilla's total to the cent.
+        exacto = float(ex.get("directo") or 0)
+        mat_total = round(mat * qty, 2)
+        if exacto > 0 and abs(exacto - mat_total - round(mo * qty, 2)) <= 0.01 * qty + 0.01:
+            mo = (exacto - mat_total) / qty
+    directo = round(round(mat * (qty or 0), 2) + round(mo * (qty or 0), 2), 2)
     notas = item_notes(item)
     if es_item and item.get("clave") in amarillas:
         notas = f"{notas} {PARA_CONFIRMAR}" if notas else PARA_CONFIRMAR

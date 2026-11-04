@@ -200,6 +200,26 @@ class TestClientMaterial:
         assert item["mat_total"] == 500
 
 
+class TestItemFromResources:
+    """The direct cost is the real sum of the resources, never rebuilt from the rounded unit."""
+
+    @pytest.mark.parametrize("cantidad, mat, mo", [
+        (1000, 1, 0), (3, 100, 200), (7, 1234.56, 789.01), (123457, 2333.31, 8856000)])
+    def test_totals_are_the_sum(self, cantidad, mat, mo):
+        resources = [{"tipo": "material", "subtotal": mat}, {"tipo": "mano_obra", "subtotal": mo}]
+        item = calc_item_from_resources({"cantidad": cantidad}, resources)
+        assert (item["mat_total"], item["mo_total"]) == (mat, mo)
+        assert item["directo_total"] == round(mat + mo, 2)
+        assert item["mat_unitario"] == round(mat / cantidad, 2)
+
+    @pytest.mark.parametrize("cantidad", [0, None])
+    def test_quantity_zero_is_zero(self, cantidad):
+        item = calc_item_from_resources(
+            {"cantidad": cantidad, "mat_unitario": 5}, [{"tipo": "material", "subtotal": 100}])
+        assert (item["mat_total"], item["mo_total"], item["directo_total"]) == (0, 0, 0)
+        assert item["mat_unitario"] == 5  # nothing to divide: the saved one stays
+
+
 class TestPurchaseRounding:
     def _row(self, item_id, efectiva, precio=100, **kw):
         return {"item_id": item_id, "tipo": "material", "codigo": "CEM", "descripcion": "Cemento",

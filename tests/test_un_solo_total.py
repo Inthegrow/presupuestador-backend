@@ -269,6 +269,35 @@ class TestItemPatch:
         assert numbers(db) == antes  # the same number as «Recálculo completo»
         check(client, db)
 
+    @pytest.mark.parametrize("cantidad", [1000, 3, 123457])
+    def test_cantidad_keeps_the_real_sum_of_the_resources(self, client, db, cantidad):
+        # Codex (PR 52): $1 over 1000 units is $0,00 per unit; the total must still be $1.
+        # 3 and 123457 do not divide $1 nor $2333,31 exactly.
+        r = next(x for x in db.tables["item_resources"] if x["id"] == R31)
+        r.update(cantidad=1, precio_unitario=1)
+        assert client.patch(url(B1, "items", W3, "resources", R31), json={"cantidad": 1}).status_code == 200
+        assert client.patch(url(B1, "items", W3), json={"cantidad": cantidad}).status_code == 200
+        assert item(db, W3)["directo_total"] == 1
+        assert item(db, W3)["mat_total"] == 1
+        assert item(db, W3)["neto_total"] > 1
+        antes = numbers(db)
+        assert client.post(f"/budgets/{B1}/cascade-recalculate").status_code == 200
+        assert numbers(db) == antes
+        check(client, db)
+
+    def test_cantidad_large_and_not_exact(self, client, db):
+        assert client.patch(url(B1, "items", W3), json={"cantidad": 123457}).status_code == 200
+        assert item(db, W3)["directo_total"] == pytest.approx(7 * 333.33, abs=0.005)
+        assert client.post(f"/budgets/{B1}/cascade-recalculate").status_code == 200
+        assert item(db, W3)["directo_total"] == pytest.approx(7 * 333.33, abs=0.005)
+
+    def test_cantidad_zero_costs_nothing(self, client, db):
+        # Quantity 0 = the work is not quoted: $0, not the sum of its resources as if it were 1
+        assert client.patch(url(B1, "items", W3), json={"cantidad": 0}).status_code == 200
+        w = item(db, W3)
+        assert (w["mat_total"], w["mo_total"], w["directo_total"], w["neto_total"]) == (0, 0, 0, 0)
+        check(client, db)
+
     def test_cantidad_with_formula_resources(self, client, db):
         r = client.patch(url(B1, "items", W2), json={"cantidad": 40})
         assert r.status_code == 200, r.text

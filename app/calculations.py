@@ -228,15 +228,23 @@ def calc_item_from_resources(item: dict, resources: list[dict]) -> dict:
     mat_ind_sum = sum(float(r.get("subtotal") or 0) for r in resources if r.get("tipo") == "mo_material")
     sub_sum = sum(float(r.get("subtotal") or 0) for r in resources if r.get("tipo") == "subcontrato")
 
-    qty = float(item.get("cantidad") or 1)
-    if qty == 0:
-        qty = 1  # avoid division by zero
+    qty = float(item.get("cantidad") or 0)
+    if qty <= 0:
+        # Quantity 0: the work is not quoted. It costs $0 (like unit price × 0 when the
+        # quantity is edited), and there is no cost per unit to derive: those stay as saved.
+        item["mat_total"] = item["mo_total"] = item["directo_total"] = 0.0
+        return item
 
-    item["mat_unitario"] = round(mat_sum / qty, 2)
-    item["mo_unitario"] = round((mo_sum + eq_sum + mat_ind_sum + sub_sum) / qty, 2)
-    item["mat_total"] = round(item["mat_unitario"] * qty, 2)
-    item["mo_total"] = round(item["mo_unitario"] * qty, 2)
-    item["directo_total"] = round(item["mat_total"] + item["mo_total"], 2)
+    # The totals are the real sum of the resources. The cost per unit is only what the
+    # editor shows (rounded to cents): rebuilding the total from it lost money, ej.
+    # $1 over 1000 units → $0,00 per unit → $0 total.
+    mat_total = round(mat_sum, 2)
+    mo_total = round(mo_sum + eq_sum + mat_ind_sum + sub_sum, 2)
+    item["mat_unitario"] = round(mat_total / qty, 2)
+    item["mo_unitario"] = round(mo_total / qty, 2)
+    item["mat_total"] = mat_total
+    item["mo_total"] = mo_total
+    item["directo_total"] = round(mat_total + mo_total, 2)
 
     return item
 
