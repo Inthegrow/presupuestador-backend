@@ -23,7 +23,18 @@ from app.recipes import expand_resource, merge_params, param_defaults
 from app.tree import normalize_date_code, normalize_item_code
 
 SHEET = "01_C&P"
+# The same cómputo y presupuesto, same columns, as TERRAC's Maestro names it ("MODELO DE
+# PRESUPUESTACION RESUMEN.xlsx" has CYP and no 01_C&P). Read only when 01_C&P is missing.
+SHEET_ALIASES = ("CYP",)
 FIRST_ROW = 8
+
+
+def obra_sheet(wb) -> str | None:  # type: ignore[no-untyped-def]
+    """Name of the sheet with the obra's cómputo (01_C&P, or CYP), or None."""
+    for name in (SHEET, *SHEET_ALIASES):
+        if name in wb.sheetnames:
+            return name
+    return None
 
 # Columnas de 01_C&P (1 = A)
 COL_ITEM, COL_DESC, COL_UNIDAD, COL_CANTIDAD = 1, 2, 3, 4
@@ -350,9 +361,12 @@ def _code(value: object) -> str:
 
 
 _SECTION_RE = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*[-.]?\s+(.*)$")
+# CYP writes the titles in column A, B empty: "1- TAREAS PRELIMINARES", "4 -1 FUNDACIONES",
+# "4-2 SUBSUELO", "7 TERMINACIONES" (same pattern as app.maestro_recipes._HEADER_RE)
+_A_TITLE_RE = re.compile(r"^(\d+)\s*(?:-\s*(\d+))?\s*[-\s]\s*([A-Za-zÁÉÍÓÚÑáéíóúñ].*)$")
 
 
-def parse_obra(wb, sheet: str = SHEET) -> dict:  # type: ignore[no-untyped-def]
+def parse_obra(wb, sheet: str | None = None) -> dict:  # type: ignore[no-untyped-def]
     """Rubros, pisos (subrubros) e ítems de la hoja 01_C&P, en orden.
 
     Returns {"titulo", "filas": [...], "problemas": [...]}. Each fila:
@@ -360,15 +374,32 @@ def parse_obra(wb, sheet: str = SHEET) -> dict:  # type: ignore[no-untyped-def]
      "descripcion", "unidad", "cantidad", "excel": {mat_unit, mo_unit, directo, neto},
      "fila" (Excel row), "notas": []}
     """
-    ws = wb[sheet]
+    ws = wb[sheet or obra_sheet(wb) or SHEET]
     filas: list[dict] = []
     problemas: list[str] = []
     rubro = subrubro = None
 
-    for r in range(FIRST_ROW, ws.max_row + 1):
-        raw_code = ws.cell(r, COL_ITEM).value
-        desc = " ".join(str(ws.cell(r, COL_DESC).value or "").split())
-        cantidad = _num(ws.cell(r, COL_CANTIDAD).value)
+    # One streaming pass (works with read_only workbooks: a big Excel opened whole used
+    # ~450 MB and took the 512 MB server down, "Failed to fetch" in the browser)
+    titulo: object = None
+    for r, row in enumerate(ws.iter_rows(min_row=1, max_col=COL_NETO_TOTAL, values_only=True), start=1):
+        if r == 1:
+            titulo = row[0] if row else None
+        if r < FIRST_ROW:
+            continue
+        row = tuple(row) + (None,) * (COL_NETO_TOTAL - len(row))
+
+        def cell(col: int, row: tuple = row) -> object:
+            return row[col - 1]
+
+        raw_code = cell(COL_ITEM)
+        desc = " ".join(str(cell(COL_DESC) or "").split())
+        cantidad = _num(cell(COL_CANTIDAD))
+        if not desc and cantidad is None and isinstance(raw_code, str):
+            title = _A_TITLE_RE.match(raw_code.strip())
+            if title:
+                code = f"{title.group(1)}.{title.group(2)}" if title.group(2) else title.group(1)
+                desc, raw_code = f"{code} {' '.join(title.group(3).split())}", None
         if not desc:
             continue
 
@@ -403,22 +434,22 @@ def parse_obra(wb, sheet: str = SHEET) -> dict:  # type: ignore[no-untyped-def]
             problemas.append(f"Fila {r}: '{desc[:50]}' sin cantidad, se cargó con 0.")
             cantidad = 0.0
 
-        unidad = " ".join(str(ws.cell(r, COL_UNIDAD).value or "").split()) or None
+        unidad = " ".join(str(cell(COL_UNIDAD) or "").split()) or None
         filas.append({
             "orden": len(filas), "nivel": "item", "codigo": code or None,
             "parent": parent["orden"] if parent else None,
             "descripcion": desc, "unidad": unidad, "cantidad": cantidad,
             "excel": {
-                "mat_unit": _num(ws.cell(r, COL_MAT_UNIT).value) or 0.0,
-                "mo_unit": _num(ws.cell(r, COL_MO_UNIT).value) or 0.0,
-                "directo": _num(ws.cell(r, COL_DIR_TOTAL).value) or 0.0,
-                "neto": _num(ws.cell(r, COL_NETO_TOTAL).value) or 0.0,
+                "mat_unit": _num(cell(COL_MAT_UNIT)) or 0.0,
+                "mo_unit": _num(cell(COL_MO_UNIT)) or 0.0,
+                "directo": _num(cell(COL_DIR_TOTAL)) or 0.0,
+                "neto": _num(cell(COL_NETO_TOTAL)) or 0.0,
             },
             "fila": r, "notas": notas,
         })
 
     _fill_units(filas, problemas)
-    return {"titulo": str(ws.cell(1, 1).value or "").strip(), "filas": filas, "problemas": problemas}
+    return {"titulo": str(titulo or "").strip(), "filas": filas, "problemas": problemas}
 
 
 # ── La planilla simple que baja la app (Exportar → Planilla simple) ───────────────────
@@ -521,7 +552,7 @@ def parse_simple(wb) -> dict:  # type: ignore[no-untyped-def]
 
 def parse_any(wb) -> dict:  # type: ignore[no-untyped-def]
     """The cómputo of the obra (01_C&P) or, if it is not there, the app's simple sheet."""
-    return parse_obra(wb) if SHEET in wb.sheetnames else parse_simple(wb)
+    return parse_obra(wb) if obra_sheet(wb) else parse_simple(wb)
 
 
 def _fill_units(filas: list[dict], problemas: list[str]) -> None:
