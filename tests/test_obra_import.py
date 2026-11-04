@@ -569,3 +569,55 @@ def test_excel_prices_without_lists_or_details() -> None:
     assert precios["RE-PLI20"]["otros"] == [{"precio": 140000.0, "hoja": "5.1-3"}]
     assert "CEM" not in precios
     assert excel_prices(_workbook()) == {}  # only the cómputo: nothing, and no failure
+
+
+# ── Excel del Maestro: hoja CYP (sin 01_C&P), títulos en la columna A, abierto read_only ──
+
+
+def _cyp_workbook_bytes() -> bytes:
+    from io import BytesIO
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "CYP"
+    ws["A1"] = "EDIFICIO LAS HERAS"
+    rows = [
+        ("1- TAREAS PRELIMINARES", None, None, None, None),
+        ("1.1", "OBRADOR", "mes", 1, 1500),
+        ("4 - ESTRUCTURA", None, None, None, None),
+        ("4 -1 FUNDACIONES", None, None, None, None),
+        ("4.1.1", "Pilotes", "m³", 5, 900),
+        ("4-2 SUBSUELO", None, None, None, None),
+        ("4.2.1", "Losas", "m³", 57, 57000),
+        ("7 TERMINACIONES", None, None, None, None),
+        ("7.1.1", "Revestimiento", "m²", 10, 100),
+    ]
+    for r, (a, b, c, d, z) in enumerate(rows, start=8):
+        ws.cell(r, 1, a)
+        ws.cell(r, 2, b)
+        ws.cell(r, 3, c)
+        ws.cell(r, 4, d)
+        ws.cell(r, 26, z)
+    out = BytesIO()
+    wb.save(out)
+    return out.getvalue()
+
+
+def test_cyp_sheet_read_only_with_titles_in_column_a() -> None:
+    from io import BytesIO
+
+    from app.obra_import import obra_sheet, parse_any
+
+    wb = openpyxl.load_workbook(BytesIO(_cyp_workbook_bytes()), data_only=True, read_only=True)
+    assert obra_sheet(wb) == "CYP"
+    parsed = parse_any(wb)
+    assert parsed["titulo"] == "EDIFICIO LAS HERAS"
+    assert parsed["problemas"] == []
+    filas = {f["codigo"]: f for f in parsed["filas"]}
+    assert [(f["nivel"], f["codigo"]) for f in parsed["filas"]] == [
+        ("rubro", "1"), ("item", "1.1"), ("rubro", "4"), ("subrubro", "4.1"), ("item", "4.1.1"),
+        ("subrubro", "4.2"), ("item", "4.2.1"), ("rubro", "7"), ("item", "7.1.1"),
+    ]
+    assert filas["4.2"]["descripcion"] == "SUBSUELO"
+    assert filas["4.2.1"]["parent"] == filas["4.2"]["orden"]
+    assert filas["4.2.1"]["excel"]["neto"] == 57000
