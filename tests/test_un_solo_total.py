@@ -246,11 +246,28 @@ class TestReference:
 
 class TestItemPatch:
     def test_cantidad(self, client, db):
+        # Fixed resources (no formula): the direct cost is still their sum, like the Excel
+        # and like the full recalculation; only the cost per unit follows the new quantity
         r = client.patch(url(B1, "items", W3), json={"cantidad": 7})
         assert r.status_code == 200, r.text
-        assert item(db, W3)["directo_total"] == pytest.approx(7 * item(db, W3)["mat_unitario"])
+        assert item(db, W3)["directo_total"] == pytest.approx(7 * 333.33, abs=0.05)
+        assert item(db, W3)["mat_unitario"] == pytest.approx(333.33)
         check(client, db)
         assert r.json()["item"]["neto_total"] == item(db, W3)["neto_total"]
+
+    def test_cantidad_item_saved_at_zero_takes_its_resources(self, client, db):
+        # Bases aisladas (Ginkgo): imported from the Excel at $0 (#VALOR!) with its resources
+        # loaded; changing the quantity left it at $0 while the ficha showed the resources
+        w = item(db, W3)
+        w.update(dict.fromkeys(NUMBERS[1:], 0))
+        r = client.patch(url(B1, "items", W3), json={"cantidad": 5})
+        assert r.status_code == 200, r.text
+        assert item(db, W3)["directo_total"] == pytest.approx(7 * 333.33, abs=0.05)
+        assert item(db, W3)["neto_total"] > 0
+        antes = numbers(db)
+        assert client.post(f"/budgets/{B1}/cascade-recalculate").status_code == 200
+        assert numbers(db) == antes  # the same number as «Recálculo completo»
+        check(client, db)
 
     def test_cantidad_with_formula_resources(self, client, db):
         r = client.patch(url(B1, "items", W2), json={"cantidad": 40})
@@ -657,7 +674,7 @@ class TestVersions:
     def test_each_version_has_its_price(self, client, db):
         assert client.post(url(B1, "versions"), json={}).status_code == 200
         primero = client.get(url(B1, "full")).json()["analysis"]["neto_total"]
-        assert client.patch(url(B1, "items", W3), json={"cantidad": 70}).status_code == 200
+        assert client.patch(url(B1, "items", W3, "resources", R31), json={"precio_unitario": 999}).status_code == 200
         assert client.post(url(B1, "versions"), json={}).status_code == 200
         segundo = check(client, db)["neto_total"]
         assert segundo > primero
