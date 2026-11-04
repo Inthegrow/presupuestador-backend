@@ -285,6 +285,24 @@ class TestItemPatch:
         assert numbers(db) == antes
         check(client, db)
 
+    @pytest.mark.parametrize("edita, otro", [("mo_unitario", "mat_total"), ("mat_unitario", "mo_total")])
+    def test_editing_one_unit_keeps_the_other_total(self, client, db, edita, otro):
+        # Codex (PR 52, 2ª ronda): 1000 units, $1 of materials ($0,00 per unit); editing the
+        # mano de obra to $1 per unit used to rebuild materials from $0,00 → $1000, not $1001
+        tipo = "material" if otro == "mat_total" else "mano_obra"
+        r = next(x for x in db.tables["item_resources"] if x["id"] == R31)
+        r.update(tipo=tipo, cantidad=1, precio_unitario=1, trabajadores=1, dias=1, cargas_sociales_pct=0)
+        assert client.patch(url(B1, "items", W3, "resources", R31), json={"cantidad": 1}).status_code == 200
+        assert client.patch(url(B1, "items", W3), json={"cantidad": 1000}).status_code == 200
+        assert item(db, W3)[otro] == 1
+        r2 = client.patch(url(B1, "items", W3), json={edita: 1})
+        assert r2.status_code == 200, r2.text
+        w = item(db, W3)
+        assert w[otro] == 1
+        assert w["mo_total" if otro == "mat_total" else "mat_total"] == 1000
+        assert w["directo_total"] == 1001
+        check(client, db)
+
     def test_cantidad_large_and_not_exact(self, client, db):
         assert client.patch(url(B1, "items", W3), json={"cantidad": 123457}).status_code == 200
         assert item(db, W3)["directo_total"] == pytest.approx(7 * 333.33, abs=0.005)

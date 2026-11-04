@@ -320,6 +320,14 @@ async def update_item(
     if any(field in update_data for field in COST_FIELDS):
         config = _budget_config(db, bid, org_id)
         recalculated = calc_item_totals({**existing.data, **update_data})
+        if "cantidad" not in update_data:
+            # Editing one cost per unit never touches the other's total: the saved total is
+            # the real one (ej. $1 of materials over 1000 units is $0,00 per unit), and
+            # rebuilding it from its rounded unit lost money.
+            for unit, total in (("mat_unitario", "mat_total"), ("mo_unitario", "mo_total")):
+                if unit not in update_data and existing.data.get(total) is not None:
+                    recalculated[total] = round(float(existing.data[total]), 2)
+            recalculated["directo_total"] = round(recalculated["mat_total"] + recalculated["mo_total"], 2)
         price_item(recalculated, config)
         for field in PRICE_FIELDS:
             if field in recalculated:
