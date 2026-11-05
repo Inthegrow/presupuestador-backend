@@ -1261,3 +1261,15 @@ class TestPrecioSinFormulaAlCentavo:
         assert row["mat_total"] == 1000.0
         row = self._row(10, 100.0, 0.0, 1000.0, mat_total=-5.0)
         assert row["mat_total"] == 1000.0
+
+    @pytest.mark.parametrize("unit, total, acepta", [
+        (1.0, 1004.0, True),    # 1,004 per unit rounds to 1,00: only the rounding
+        (1.0, 1009.0, False),   # Codex (ronda 2): 1,009 rounds to 1,01 → a real difference
+        (1.0, 995.0, True),     # 0,995 → 1,00
+        (1.0, 994.0, False),    # 0,994 → 0,99
+        (0.0, 4.0, True),       # $0,00 per unit, $4 over 1000 units
+        (0.0, 6.0, False),      # 0,006 → 0,01: not a $0,00 unit
+    ])
+    def test_only_the_rounding_of_the_unit_is_accepted(self, unit, total, acepta):
+        row = self._row(1000, unit, 0.0, total, mat_total=total, mo_total=0.0)
+        assert row["mat_total"] == (total if acepta else round(unit * 1000, 2))

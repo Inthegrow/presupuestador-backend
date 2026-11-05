@@ -325,6 +325,21 @@ async def update_item(
             # By value, not by presence: the editor may send a field with the saved value
             return field in update_data and float(update_data[field] or 0) != float(existing.data.get(field) or 0)
 
+        # One source per work: a work with resources is priced from them (here, on a quantity
+        # change and in «Recálculo completo»), so a cost per unit typed by hand would be lost
+        # later without notice. It is refused before anything is written.
+        if changed("mat_unitario") or changed("mo_unitario"):
+            con_recursos = (
+                db.table("item_resources").select("id").eq("item_id", iid).eq("org_id", org_id)
+                .limit(1).execute().data
+            )
+            if con_recursos:
+                raise HTTPException(
+                    409,
+                    "Este trabajo se calcula con sus recursos: para cambiar su precio, "
+                    "cambiá los recursos en su ficha.",
+                )
+
         if not changed("cantidad"):
             # Editing one cost per unit never touches the other's total: the saved total is
             # the real one (ej. $1 of materials over 1000 units is $0,00 per unit), and

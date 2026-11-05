@@ -26,6 +26,7 @@ import re
 import time
 import warnings
 from datetime import date, datetime, timezone
+from decimal import ROUND_HALF_UP, Decimal
 from io import BytesIO
 from uuid import UUID
 
@@ -639,6 +640,11 @@ def _insert(db, table: str, rows: list[dict]) -> list[dict]:
 PARA_CONFIRMAR = "Para confirmar."
 
 
+def _centavos(value: float) -> Decimal:
+    """A planilla amount rounded to cents the way Excel does it (half up, from its shown digits)."""
+    return Decimal(repr(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
 def _item_row(item: dict, budget_id: str, org_id: str, templates: dict[str, dict],
               amarillas: set[str] | frozenset[str] = frozenset()) -> dict:
     """``amarillas``: task keys loaded without confirming; their notes end in "Para confirmar."."""
@@ -658,7 +664,9 @@ def _item_row(item: dict, budget_id: str, org_id: str, templates: dict[str, dict
         def exacto(unit: float, total: object) -> float:
             if total is None or float(total) < 0:
                 return unit
-            if abs(float(total) - round(unit * qty, 2)) <= 0.01 * qty + 0.01:
+            # Only the rounding of the unit to cents: total ÷ quantity must round to that same unit
+            # (half up, like Excel: 0,995 → 1,00, which a float round would make 0,99)
+            if _centavos(float(total) / qty) == _centavos(unit):
                 return float(total) / qty
             return unit
         mat = exacto(mat, ex.get("mat_total"))

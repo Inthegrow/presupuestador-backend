@@ -285,34 +285,55 @@ class TestItemPatch:
         assert numbers(db) == antes
         check(client, db)
 
-    @pytest.mark.parametrize("extra", [
-        {},  # only the edited unit (2ª ronda)
-        {"cantidad": 1000},  # the saved quantity sent along (3ª ronda)
-        {"cantidad": 1000.0},
-        {"otro_unitario": True},  # the other unit sent with its saved value
-        {"cantidad": 1000, "otro_unitario": True},
+    @staticmethod
+    def _sin_recursos(db, client, cantidad, mat_unitario, mo_unitario=0):
+        """W3 as a work priced by hand: no resources, its saved per-unit prices."""
+        db.tables["item_resources"] = [x for x in db.tables["item_resources"] if x["item_id"] != W3]
+        item(db, W3).update(cantidad=cantidad, mat_unitario=mat_unitario, mo_unitario=mo_unitario)
+        assert client.post(f"/budgets/{B1}/cascade-recalculate").status_code == 200
+
+    @pytest.mark.parametrize("body", [
+        {"mat_unitario": 20},
+        {"mo_unitario": 20},
+        {"cantidad": 7, "mat_unitario": 20},  # a quantity change sent together
+        {"cantidad": 3.5, "mo_unitario": 20},  # the saved quantity sent together
     ])
+    def test_a_work_with_resources_refuses_a_price_by_hand(self, client, db, body):
+        # Codex (PR 52, ronda 2): a price typed by hand on a work with resources was replaced by
+        # the sum of the resources on the next quantity change (and in «Recálculo completo»).
+        # One source per work: its resources. Refused, and nothing is written.
+        antes = numbers(db)
+        r = client.patch(url(B1, "items", W3), json=body)
+        assert r.status_code == 409, r.text
+        assert "recursos" in r.json()["detail"]
+        assert numbers(db) == antes
+        # The same unit sent with its saved value is not a change: allowed
+        same = {"mat_unitario": item(db, W3)["mat_unitario"], "notas_calculo": "ok"}
+        assert client.patch(url(B1, "items", W3), json=same).status_code == 200
+        assert numbers(db) == antes
+        # And a quantity change still takes the sum of the resources
+        assert client.patch(url(B1, "items", W3), json={"cantidad": 7}).status_code == 200
+        assert item(db, W3)["directo_total"] == pytest.approx(7 * 333.33, abs=0.005)
+        check(client, db)
+
+    @pytest.mark.parametrize("extra", [{}, {"cantidad": 3}, {"cantidad": 3.0}, {"otro_unitario": True},
+                                       {"cantidad": 3, "otro_unitario": True}])
     @pytest.mark.parametrize("edita, otro", [("mo_unitario", "mat_total"), ("mat_unitario", "mo_total")])
     def test_editing_one_unit_keeps_the_other_total(self, client, db, edita, otro, extra):
-        # Codex (PR 52): 1000 units, $1 of materials ($0,00 per unit); editing the mano de
-        # obra to $1 per unit used to rebuild materials from $0,00 → $1000, not $1001.
-        # What counts is whether a value changed, not whether it came in the request.
-        tipo = "material" if otro == "mat_total" else "mano_obra"
-        r = next(x for x in db.tables["item_resources"] if x["id"] == R31)
-        r.update(tipo=tipo, cantidad=1, precio_unitario=1, trabajadores=1, dias=1, cargas_sociales_pct=0)
-        assert client.patch(url(B1, "items", W3, "resources", R31), json={"cantidad": 1}).status_code == 200
-        assert client.patch(url(B1, "items", W3), json={"cantidad": 1000}).status_code == 200
-        assert item(db, W3)[otro] == 1
+        # A work priced by hand: editing one cost per unit never moves the other's total, and
+        # what counts is whether a value changed, not whether it came in the request
+        unit_otro = "mat_unitario" if edita == "mo_unitario" else "mo_unitario"
+        self._sin_recursos(db, client, 3, **{unit_otro: 0.5, edita: 0})
+        assert item(db, W3)[otro] == 1.5
         body = {edita: 1, **{k: v for k, v in extra.items() if k != "otro_unitario"}}
         if extra.get("otro_unitario"):
-            otro_unit = "mat_unitario" if edita == "mo_unitario" else "mo_unitario"
-            body[otro_unit] = item(db, W3)[otro_unit]  # $0,00, its saved value
+            body[unit_otro] = 0.5  # its saved value
         r2 = client.patch(url(B1, "items", W3), json=body)
         assert r2.status_code == 200, r2.text
         w = item(db, W3)
-        assert w[otro] == 1
-        assert w["mo_total" if otro == "mat_total" else "mat_total"] == 1000
-        assert w["directo_total"] == 1001
+        assert w[otro] == 1.5
+        assert w["mo_total" if otro == "mat_total" else "mat_total"] == 3
+        assert w["directo_total"] == 4.5
         check(client, db)
 
     def test_cantidad_large_and_not_exact(self, client, db):
@@ -336,6 +357,7 @@ class TestItemPatch:
         check(client, db)
 
     def test_unit_price(self, client, db):
+        self._sin_recursos(db, client, 3.5, 666.66)
         assert client.patch(url(B1, "items", W3), json={"mo_unitario": 100.5}).status_code == 200
         assert item(db, W3)["mo_total"] == pytest.approx(351.75)
         check(client, db)
