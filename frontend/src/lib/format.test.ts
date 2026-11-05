@@ -74,32 +74,54 @@ test('una cantidad positiva nunca se lee 0', () => {
   assert.equal(cuentaPorUnidad(1, 1.234567e-9).signo, '≈')
 })
 
-// Lo que se lee, de vuelta a número: "$ 1.234,5" → 1234.5
-const leer = (s: string) => Number(s.replace(/[$\s]/g, '').replace(/\./g, '').replace(',', '.'))
-const igual = (a: number, b: number) => Number(a.toPrecision(15)) === Number(b.toPrecision(15))
+// Comprobación independiente, en fracciones exactas (BigInt) — no usa el código que prueba.
+// Lo que se lee: "$ 1.234,5" → [12345n, 10n]
+function leer(s: string): [bigint, bigint] {
+  const [entera, frac = ''] = s.replace(/[$\s.]/g, '').split(',')
+  return [BigInt(entera + frac), 10n ** BigInt(frac.length)]
+}
+// Un número de JS, por su forma más corta: 1e-7 → [1n, 10000000n]
+function real(x: number): [bigint, bigint] {
+  const [m, e = '0'] = String(x).split('e')
+  const [entera, frac = ''] = m.split('.')
+  const d = frac.length - Number(e)
+  const n = BigInt(entera + frac)
+  return d >= 0 ? [n, 10n ** BigInt(d)] : [n * 10n ** BigInt(-d), 1n]
+}
+const mismaFraccion = ([a, b]: [bigint, bigint], [c, d]: [bigint, bigint]) => a * d === c * b
+const esCero = ([a]: [bigint, bigint]) => a === 0n
 
 test('con miles de casos al azar: "=" siempre es una cuenta cierta, y nada positivo se lee 0', () => {
   let semilla = 7
   const azar = () => ((semilla = (semilla * 16807) % 2147483647) / 2147483647)
-  const totales = [0.01, 1, 123, 3500, 17260023.89, 1_000_000_000.1]
+  const totales = [0.01, 1, 123, 3500, 17260023.89, 1_000_000_000.1, 10_000_000_000_000.01, 1e15 + 0.5]
   const cantidades = [1e-7, 0.004, 0.5, 1, 3, 35, 1000, 10000, 3_000_000]
   const casos: Array<[number, number]> = []
   for (const t of totales) for (const q of cantidades) casos.push([t, q])
   for (let i = 0; i < 5000; i++) {
-    const t = Math.round(azar() * 10 ** Math.floor(azar() * 11)) / 100 // $0,00 … $1.000.000.000
+    const t = Math.round(azar() * 10 ** Math.floor(azar() * 16)) / 100 // $0,00 … $10 billones
     const q = Number((azar() * 10 ** (Math.floor(azar() * 12) - 6)).toPrecision(1 + Math.floor(azar() * 8)))
     if (q > 0) casos.push([t, q])
   }
   for (const [total, cantidad] of casos) {
     const c = cuentaPorUnidad(total, cantidad)
     const [lt, lq, lu] = [leer(c.total), leer(c.cantidad), leer(c.unitario)]
-    assert.ok(lq > 0, `cantidad ${cantidad} se lee ${c.cantidad}`)
-    if (total > 0) assert.ok(lu > 0, `${total} ÷ ${cantidad}: unitario se lee ${c.unitario}`)
+    assert.ok(!esCero(lq), `cantidad ${cantidad} se lee ${c.cantidad}`)
+    if (total > 0) assert.ok(!esCero(lu), `${total} ÷ ${cantidad}: unitario se lee ${c.unitario}`)
     if (c.signo === '=') {
-      assert.ok(igual(lt, total) && igual(lq, cantidad), `${total} ÷ ${cantidad}: "=" con ${c.total} ÷ ${c.cantidad}`)
-      assert.ok(igual(lt / lq, lu), `${total} ÷ ${cantidad}: "${c.total} ÷ ${c.cantidad} = ${c.unitario}" no es cierto`)
+      // total = cantidad × unitario, con los números que se leen, y la cantidad que se lee es la real
+      assert.ok(mismaFraccion(lt, [lq[0] * lu[0], lq[1] * lu[1]]),
+        `"${c.total} ÷ ${c.cantidad} = ${c.unitario}" no es cierto`)
+      assert.ok(mismaFraccion(lq, real(cantidad)), `cantidad ${cantidad} se lee ${c.cantidad} con "="`)
     }
   }
+})
+
+test('importes de billones: «=» solo si la cuenta que se lee es cierta', () => {
+  // Codex, ronda 43fc0fa: «$10.000.000.000.000,01 ÷ 1,00 = $10.000.000.000.000»
+  assert.equal(cuentaPorUnidad(10_000_000_000_000.01, 1).signo, '≈')
+  assert.equal(cuentaPorUnidad(10_000_000_000_000, 1).signo, '=')
+  assert.equal(cuentaPorUnidad(10_000_000_000_000.5, 2).signo, '≈')
 })
 
 test('unitarioRedondeado', () => {

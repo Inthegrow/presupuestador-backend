@@ -26,17 +26,31 @@ const CIFRAS_CHICAS = 3
 const DECIMALES_CANTIDAD = 6
 const CIFRAS_CANTIDAD_CHICA = 6
 
-/** El valor que queda a la vista del costo por unidad (lo que se lee, no lo guardado). */
-function unitarioVisible(v: number): number {
-  if (v === 0) return 0
-  return Math.abs(v) < 1 ? Number(v.toPrecision(CIFRAS_CHICAS)) : Math.round(v)
+// Decimales exactos (BigInt): n / 10^d. Sin coma flotante, sin tolerancia, para cualquier tamaño.
+type Decimal = { n: bigint; d: number }
+
+/** Un número de JS como decimal exacto de lo que representa en su forma más corta (0.1 → 1/10). */
+function deNumero(x: number): Decimal {
+  const [mantisa, exp = '0'] = String(Math.abs(x)).split('e')
+  const [entera, frac = ''] = mantisa.split('.')
+  let n = BigInt(entera + frac)
+  let d = frac.length - Number(exp)
+  if (d < 0) { n *= 10n ** BigInt(-d); d = 0 }
+  return { n: x < 0 ? -n : n, d }
 }
 
-/** La cantidad que queda a la vista: menor a 1, con 6 cifras significativas (nunca "0"); si no, 6 decimales. */
-function cantidadVisible(q: number): number {
-  if (q === 0) return 0
-  return Math.abs(q) < 1 ? Number(q.toPrecision(CIFRAS_CANTIDAD_CHICA)) : Number(q.toFixed(DECIMALES_CANTIDAD))
+/** Lo que se lee en pantalla ("$ 1.234,56", "0,004") como decimal exacto. */
+function deTexto(s: string): Decimal {
+  const [entera, frac = ''] = s.replace(/[^\d,]/g, '').split(',')
+  const n = BigInt((entera + frac) || '0')
+  return { n: s.includes('-') ? -n : n, d: frac.length }
 }
+
+function iguales(a: Decimal, b: Decimal): boolean {
+  return a.n * 10n ** BigInt(b.d) === b.n * 10n ** BigInt(a.d)
+}
+
+const por = (a: Decimal, b: Decimal): Decimal => ({ n: a.n * b.n, d: a.d + b.d })
 
 /**
  * Una cantidad: menor a 1, con 6 cifras significativas (0,004 · 0,0000001: una cantidad positiva
@@ -47,15 +61,6 @@ export function fmtCantidad(value: number | null | undefined, minDecimales = 0):
   return q !== 0 && Math.abs(q) < 1
     ? q.toLocaleString('es-AR', { maximumSignificantDigits: CIFRAS_CANTIDAD_CHICA })
     : q.toLocaleString('es-AR', { minimumFractionDigits: minDecimales, maximumFractionDigits: DECIMALES_CANTIDAD })
-}
-
-/**
- * Lo que se lee es el valor real: igualdad exacta, sin tolerancia, después de quitar solo el ruido
- * de la coma flotante (15 cifras significativas: 0,1 + 0,2 = 0,3). Un centavo de diferencia en
- * $1.000.000.000,10 ya no es "igual".
- */
-function exacto(real: number, visible: number): boolean {
-  return Number(real.toPrecision(15)) === Number(visible.toPrecision(15))
 }
 
 /**
@@ -73,23 +78,24 @@ export function fmtUnitario(
   return formato(v)
 }
 
-/** Si el costo por unidad que se ve (fmtUnitario con pesos enteros desde $1) está redondeado. */
-export function unitarioRedondeado(value: number | null | undefined): boolean {
-  const v = Number(value ?? 0)
-  return !exacto(v, unitarioVisible(v))
-}
-
 const pesos = (decimales: number) =>
   new Intl.NumberFormat('es-AR', {
     style: 'currency', currency: 'ARS', minimumFractionDigits: decimales, maximumFractionDigits: decimales,
   })
+const pesosEnteros = (v: number | null | undefined) => pesos(0).format(v ?? 0)
+
+/** Si el costo por unidad que se lee (fmtUnitario, pesos enteros desde $1) no es exactamente el real. */
+export function unitarioRedondeado(value: number | null | undefined): boolean {
+  const v = Number(value ?? 0)
+  return !iguales(deNumero(v), deTexto(fmtUnitario(v, pesosEnteros)))
+}
 
 /**
  * "total ÷ cantidad = costo por unidad", lista para mostrar. El total va con centavos si los tiene;
  * la cantidad, si es menor a 1, con 6 cifras significativas (0,004 · 0,0000001: una cantidad positiva
  * nunca se lee 0), y si no, con hasta 6 decimales; el costo por unidad, con la regla de fmtUnitario.
- * `aproximado`: alguno de los tres que se leen no es el valor real, y entonces el signo es "≈";
- * si los tres son exactos, "=".
+ * `aproximado` decide el signo, con aritmética exacta sobre los números **que se leen**: "=" solo si
+ * total = cantidad × costo por unidad con esos números, y la cantidad que se lee es la real. Si no, "≈".
  */
 export function cuentaPorUnidad(total: number, cantidad: number): {
   total: string; cantidad: string; unitario: string; signo: '=' | '≈'; aproximado: boolean
@@ -98,9 +104,9 @@ export function cuentaPorUnidad(total: number, cantidad: number): {
   const totalTexto = pesos(Number.isInteger(centavos) ? 0 : 2).format(centavos)
   const cantidadTexto = fmtCantidad(cantidad, 2)
   const unitario = cantidad ? total / cantidad : 0
-  const unitarioTexto = fmtUnitario(unitario, (v) => pesos(0).format(v ?? 0))
-  const aproximado = !exacto(total, centavos) || !exacto(cantidad, cantidadVisible(cantidad))
-    || unitarioRedondeado(unitario)
+  const unitarioTexto = fmtUnitario(unitario, pesosEnteros)
+  const cuentaCierta = iguales(deTexto(totalTexto), por(deTexto(cantidadTexto), deTexto(unitarioTexto)))
+  const aproximado = !cuentaCierta || !iguales(deNumero(cantidad), deTexto(cantidadTexto))
   return { total: totalTexto, cantidad: cantidadTexto, unitario: unitarioTexto, signo: aproximado ? '≈' : '=', aproximado }
 }
 
