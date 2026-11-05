@@ -51,6 +51,7 @@ from app.catalog_prices import normalize_codigo, parse_fecha
 from app.db import get_data_db
 from app.obra_import import (
     SHEET,
+    obra_sheet,
     build_plan,
     excel_prices,
     item_notes,
@@ -87,11 +88,13 @@ async def _read_workbook(file: UploadFile):  # type: ignore[no-untyped-def]
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            wb = openpyxl.load_workbook(BytesIO(content), data_only=True)
+            # read_only: streams the sheets. Opened whole, a big Maestro-style Excel (68 solapas)
+            # used ~450 MB and took the 512 MB server down ("Failed to fetch" in the browser).
+            wb = openpyxl.load_workbook(BytesIO(content), data_only=True, read_only=True)
     except Exception as exc:
         raise HTTPException(400, "No se pudo abrir el Excel") from exc
     # The obra's cómputo (01_C&P) or the simple sheet the app itself exports
-    if SHEET not in wb.sheetnames and not is_simple_sheet(wb):
+    if not obra_sheet(wb) and not is_simple_sheet(wb):
         raise HTTPException(400, _missing_sheet_message(wb))
     return wb
 
@@ -621,7 +624,7 @@ async def analizar_obra(
     result = analyze(parse_any(wb), templates, PriceBook(db, org_id, today()), _asignaciones(asignaciones),
                      _memoria(db, org_id), excel_prices(wb))
     return {"archivo": file.filename, "titulo_dudoso": titulo_dudoso(result["titulo"], file.filename),
-            "planilla_simple": SHEET not in wb.sheetnames, **_public(result)}
+            "planilla_simple": not obra_sheet(wb), **_public(result)}
 
 
 # ── Carga ────────────────────────────────────────────────────────────────────
