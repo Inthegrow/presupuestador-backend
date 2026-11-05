@@ -285,17 +285,29 @@ class TestItemPatch:
         assert numbers(db) == antes
         check(client, db)
 
+    @pytest.mark.parametrize("extra", [
+        {},  # only the edited unit (2ª ronda)
+        {"cantidad": 1000},  # the saved quantity sent along (3ª ronda)
+        {"cantidad": 1000.0},
+        {"otro_unitario": True},  # the other unit sent with its saved value
+        {"cantidad": 1000, "otro_unitario": True},
+    ])
     @pytest.mark.parametrize("edita, otro", [("mo_unitario", "mat_total"), ("mat_unitario", "mo_total")])
-    def test_editing_one_unit_keeps_the_other_total(self, client, db, edita, otro):
-        # Codex (PR 52, 2ª ronda): 1000 units, $1 of materials ($0,00 per unit); editing the
-        # mano de obra to $1 per unit used to rebuild materials from $0,00 → $1000, not $1001
+    def test_editing_one_unit_keeps_the_other_total(self, client, db, edita, otro, extra):
+        # Codex (PR 52): 1000 units, $1 of materials ($0,00 per unit); editing the mano de
+        # obra to $1 per unit used to rebuild materials from $0,00 → $1000, not $1001.
+        # What counts is whether a value changed, not whether it came in the request.
         tipo = "material" if otro == "mat_total" else "mano_obra"
         r = next(x for x in db.tables["item_resources"] if x["id"] == R31)
         r.update(tipo=tipo, cantidad=1, precio_unitario=1, trabajadores=1, dias=1, cargas_sociales_pct=0)
         assert client.patch(url(B1, "items", W3, "resources", R31), json={"cantidad": 1}).status_code == 200
         assert client.patch(url(B1, "items", W3), json={"cantidad": 1000}).status_code == 200
         assert item(db, W3)[otro] == 1
-        r2 = client.patch(url(B1, "items", W3), json={edita: 1})
+        body = {edita: 1, **{k: v for k, v in extra.items() if k != "otro_unitario"}}
+        if extra.get("otro_unitario"):
+            otro_unit = "mat_unitario" if edita == "mo_unitario" else "mo_unitario"
+            body[otro_unit] = item(db, W3)[otro_unit]  # $0,00, its saved value
+        r2 = client.patch(url(B1, "items", W3), json=body)
         assert r2.status_code == 200, r2.text
         w = item(db, W3)
         assert w[otro] == 1
