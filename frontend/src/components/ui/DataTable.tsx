@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { FileText, Pencil, Loader2, Trash2 } from 'lucide-react'
 import type { BudgetItem } from '../../types'
-import { fmtCurrency, fmtNumber, fmtUnitario } from '../../lib/format'
+import { fmtCantidad, fmtCurrency, fmtUnitario } from '../../lib/format'
 import { ESTILO } from '../../lib/semaforo'
 import type { Semaforo } from '../../lib/semaforo'
 
@@ -241,7 +241,7 @@ export default function DataTable({ items, onEditItem, onViewDetail, onDeleteIte
                 </span>
               </td>
               <td className="px-3 py-2.5 text-gray-400 text-[10px] uppercase whitespace-nowrap">{item.unidad}</td>
-              {renderEditableCell(item, 'cantidad', (v) => fmtNumber(v, 0))}
+              {renderEditableCell(item, 'cantidad', (v) => fmtCantidad(v))}
               {renderEditableCell(item, 'mat_unitario', (v) => fmtUnitario(v))}
               {renderEditableCell(item, 'mo_unitario', (v) => fmtUnitario(v))}
               {/* Calculated columns — read-only */}

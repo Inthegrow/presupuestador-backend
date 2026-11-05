@@ -24,6 +24,7 @@ export function fmtCurrency(value: number | null | undefined): string {
 
 const CIFRAS_CHICAS = 3
 const DECIMALES_CANTIDAD = 6
+const CIFRAS_CANTIDAD_CHICA = 6
 
 /** El valor que queda a la vista del costo por unidad (lo que se lee, no lo guardado). */
 function unitarioVisible(v: number): number {
@@ -31,9 +32,30 @@ function unitarioVisible(v: number): number {
   return Math.abs(v) < 1 ? Number(v.toPrecision(CIFRAS_CHICAS)) : Math.round(v)
 }
 
-function mismo(a: number, b: number): boolean {
-  // Relative: a fixed tolerance would hide the rounding of a tiny unit ($0,000000333…)
-  return Math.abs(a - b) <= 1e-9 * Math.abs(b) + 1e-15
+/** La cantidad que queda a la vista: menor a 1, con 6 cifras significativas (nunca "0"); si no, 6 decimales. */
+function cantidadVisible(q: number): number {
+  if (q === 0) return 0
+  return Math.abs(q) < 1 ? Number(q.toPrecision(CIFRAS_CANTIDAD_CHICA)) : Number(q.toFixed(DECIMALES_CANTIDAD))
+}
+
+/**
+ * Una cantidad: menor a 1, con 6 cifras significativas (0,004 · 0,0000001: una cantidad positiva
+ * nunca se lee 0); si no, con sus decimales (al menos `minDecimales`, hasta 6: 2,5 no se lee 3).
+ */
+export function fmtCantidad(value: number | null | undefined, minDecimales = 0): string {
+  const q = Number(value ?? 0)
+  return q !== 0 && Math.abs(q) < 1
+    ? q.toLocaleString('es-AR', { maximumSignificantDigits: CIFRAS_CANTIDAD_CHICA })
+    : q.toLocaleString('es-AR', { minimumFractionDigits: minDecimales, maximumFractionDigits: DECIMALES_CANTIDAD })
+}
+
+/**
+ * Lo que se lee es el valor real: igualdad exacta, sin tolerancia, después de quitar solo el ruido
+ * de la coma flotante (15 cifras significativas: 0,1 + 0,2 = 0,3). Un centavo de diferencia en
+ * $1.000.000.000,10 ya no es "igual".
+ */
+function exacto(real: number, visible: number): boolean {
+  return Number(real.toPrecision(15)) === Number(visible.toPrecision(15))
 }
 
 /**
@@ -54,7 +76,7 @@ export function fmtUnitario(
 /** Si el costo por unidad que se ve (fmtUnitario con pesos enteros desde $1) está redondeado. */
 export function unitarioRedondeado(value: number | null | undefined): boolean {
   const v = Number(value ?? 0)
-  return !mismo(unitarioVisible(v), v)
+  return !exacto(v, unitarioVisible(v))
 }
 
 const pesos = (decimales: number) =>
@@ -63,23 +85,22 @@ const pesos = (decimales: number) =>
   })
 
 /**
- * "total ÷ cantidad = costo por unidad", lista para mostrar. El total va con centavos si los tiene,
- * la cantidad con todos sus decimales (hasta 6: 0,004 no se lee 0,00) y el costo por unidad con la
- * regla de fmtUnitario. `aproximado`: alguno de los tres está redondeado, y entonces el signo es
- * "≈"; si los tres son exactos, "=".
+ * "total ÷ cantidad = costo por unidad", lista para mostrar. El total va con centavos si los tiene;
+ * la cantidad, si es menor a 1, con 6 cifras significativas (0,004 · 0,0000001: una cantidad positiva
+ * nunca se lee 0), y si no, con hasta 6 decimales; el costo por unidad, con la regla de fmtUnitario.
+ * `aproximado`: alguno de los tres que se leen no es el valor real, y entonces el signo es "≈";
+ * si los tres son exactos, "=".
  */
 export function cuentaPorUnidad(total: number, cantidad: number): {
   total: string; cantidad: string; unitario: string; signo: '=' | '≈'; aproximado: boolean
 } {
   const centavos = Math.round(total * 100) / 100
   const totalTexto = pesos(Number.isInteger(centavos) ? 0 : 2).format(centavos)
-  const cantidadVisible = Number(cantidad.toFixed(DECIMALES_CANTIDAD))
-  const cantidadTexto = cantidad.toLocaleString('es-AR', {
-    minimumFractionDigits: 2, maximumFractionDigits: DECIMALES_CANTIDAD,
-  })
+  const cantidadTexto = fmtCantidad(cantidad, 2)
   const unitario = cantidad ? total / cantidad : 0
   const unitarioTexto = fmtUnitario(unitario, (v) => pesos(0).format(v ?? 0))
-  const aproximado = !mismo(centavos, total) || !mismo(cantidadVisible, cantidad) || unitarioRedondeado(unitario)
+  const aproximado = !exacto(total, centavos) || !exacto(cantidad, cantidadVisible(cantidad))
+    || unitarioRedondeado(unitario)
   return { total: totalTexto, cantidad: cantidadTexto, unitario: unitarioTexto, signo: aproximado ? '≈' : '=', aproximado }
 }
 

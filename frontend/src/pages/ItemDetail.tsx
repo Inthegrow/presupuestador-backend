@@ -24,7 +24,7 @@ import { budgetApi, templateApi, esFaltaConversion, esConfirmarReemplazo, esFall
 import type { FaltaConversion, PrecioFaltante, TemplateSugerencias } from '../lib/api'
 import { useAuth } from '../contexts/AuthContext'
 import { escaleraDe, fmtPct, indirectosCompletos, pctsEscalera } from '../lib/cascada'
-import { cuentaPorUnidad, fmtNumber, fmtPercent, fmtUnitario, unidadEnPalabras } from '../lib/format'
+import { cuentaPorUnidad, fmtCantidad, fmtNumber, fmtPercent, fmtUnitario, unidadEnPalabras } from '../lib/format'
 import { ESTILO, estadoDeTrabajo, precioPorUnidad } from '../lib/semaforo'
 import BuscadorFormulas from '../components/ui/BuscadorFormulas'
 import BuscarPrecio, { IconoBuscarInternet, normalizarCodigo } from '../components/BuscarPrecio'
@@ -1587,7 +1587,7 @@ export default function ItemDetail() {
               </div>
               <div className="flex items-center gap-1.5">
                 <span className="text-[10px] text-[#2D8D68] uppercase font-semibold">Cantidad</span>
-                <span className="font-bold text-[#143D34] text-sm">{fmtNumber(cantidad, 2)}</span>
+                <span className="font-bold text-[#143D34] text-sm">{fmtCantidad(cantidad, 2)}</span>
               </div>
               {item?.notas_calculo && (
                 <span className="inline-flex items-center gap-1 text-[10px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">

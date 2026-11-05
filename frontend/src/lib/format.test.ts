@@ -3,7 +3,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { cuentaPorUnidad, fmtUnitario, unitarioRedondeado } from './format.ts'
+import { cuentaPorUnidad, fmtCantidad, fmtUnitario, unitarioRedondeado } from './format.ts'
 
 const sinEspacios = (s: string) => s.replace(/\s/g, ' ')
 
@@ -55,6 +55,53 @@ test('la cantidad se lee con sus decimales: 0,004 no es 0,00', () => {
   assert.equal(cuentaPorUnidad(100, 35).cantidad, '35,00')
 })
 
+test('importes grandes: un centavo de diferencia ya no es "="', () => {
+  // Codex, ronda 618f467: «$1.000.000.000,10 ÷ 1,00 = $1.000.000.000»
+  const c = cuentaPorUnidad(1_000_000_000.1, 1)
+  assert.equal(c.signo, '≈')
+  assert.equal(sinEspacios(c.total), '$ 1.000.000.000,10')
+  assert.equal(cuentaPorUnidad(1_000_000_000, 1).signo, '=')
+  assert.equal(cuentaPorUnidad(999_999_999.99, 3).signo, '≈')
+})
+
+test('una cantidad positiva nunca se lee 0', () => {
+  // Codex, ronda 618f467: «$1 ÷ 0,00 ≈ $10.000.000» con cantidad 0,0000001
+  const c = cuentaPorUnidad(1, 0.0000001)
+  assert.equal(c.cantidad, '0,0000001')
+  assert.equal(sinEspacios(c.unitario), '$ 10.000.000')
+  assert.equal(c.signo, '=')
+  assert.equal(cuentaPorUnidad(1, 1.234567e-9).cantidad, '0,00000000123457')
+  assert.equal(cuentaPorUnidad(1, 1.234567e-9).signo, '≈')
+})
+
+// Lo que se lee, de vuelta a número: "$ 1.234,5" → 1234.5
+const leer = (s: string) => Number(s.replace(/[$\s]/g, '').replace(/\./g, '').replace(',', '.'))
+const igual = (a: number, b: number) => Number(a.toPrecision(15)) === Number(b.toPrecision(15))
+
+test('con miles de casos al azar: "=" siempre es una cuenta cierta, y nada positivo se lee 0', () => {
+  let semilla = 7
+  const azar = () => ((semilla = (semilla * 16807) % 2147483647) / 2147483647)
+  const totales = [0.01, 1, 123, 3500, 17260023.89, 1_000_000_000.1]
+  const cantidades = [1e-7, 0.004, 0.5, 1, 3, 35, 1000, 10000, 3_000_000]
+  const casos: Array<[number, number]> = []
+  for (const t of totales) for (const q of cantidades) casos.push([t, q])
+  for (let i = 0; i < 5000; i++) {
+    const t = Math.round(azar() * 10 ** Math.floor(azar() * 11)) / 100 // $0,00 … $1.000.000.000
+    const q = Number((azar() * 10 ** (Math.floor(azar() * 12) - 6)).toPrecision(1 + Math.floor(azar() * 8)))
+    if (q > 0) casos.push([t, q])
+  }
+  for (const [total, cantidad] of casos) {
+    const c = cuentaPorUnidad(total, cantidad)
+    const [lt, lq, lu] = [leer(c.total), leer(c.cantidad), leer(c.unitario)]
+    assert.ok(lq > 0, `cantidad ${cantidad} se lee ${c.cantidad}`)
+    if (total > 0) assert.ok(lu > 0, `${total} ÷ ${cantidad}: unitario se lee ${c.unitario}`)
+    if (c.signo === '=') {
+      assert.ok(igual(lt, total) && igual(lq, cantidad), `${total} ÷ ${cantidad}: "=" con ${c.total} ÷ ${c.cantidad}`)
+      assert.ok(igual(lt / lq, lu), `${total} ÷ ${cantidad}: "${c.total} ÷ ${c.cantidad} = ${c.unitario}" no es cierto`)
+    }
+  }
+})
+
 test('unitarioRedondeado', () => {
   assert.equal(unitarioRedondeado(0.001), false)
   assert.equal(unitarioRedondeado(0.0123), false)
@@ -62,4 +109,13 @@ test('unitarioRedondeado', () => {
   assert.equal(unitarioRedondeado(100), false)
   assert.equal(unitarioRedondeado(493143.54), true)
   assert.equal(unitarioRedondeado(0), false)
+})
+
+test('fmtCantidad: ninguna cantidad positiva se lee 0 ni se redondea a entero', () => {
+  assert.equal(fmtCantidad(35), '35')
+  assert.equal(fmtCantidad(35, 2), '35,00')
+  assert.equal(fmtCantidad(2.5), '2,5') // la columna «Cant.» del editor lo mostraba 3
+  assert.equal(fmtCantidad(0.004), '0,004') // y esto, 0
+  assert.equal(fmtCantidad(0.0000001, 2), '0,0000001')
+  assert.equal(fmtCantidad(0), '0')
 })
