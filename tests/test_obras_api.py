@@ -1273,3 +1273,22 @@ class TestPrecioSinFormulaAlCentavo:
     def test_only_the_rounding_of_the_unit_is_accepted(self, unit, total, acepta):
         row = self._row(1000, unit, 0.0, total, mat_total=total, mo_total=0.0)
         assert row["mat_total"] == (total if acepta else round(unit * 1000, 2))
+
+    @pytest.mark.parametrize("componente", ["mat", "mo"])
+    @pytest.mark.parametrize("qty, unit, total, acepta", [
+        (6, 0.03, 0.15, True),     # Codex (ronda 3): 0,15 / 6 = 0,025 exacto → 0,03 (en float, 0,02499…)
+        (6, 0.02, 0.15, False),    # el mismo total no redondea a 0,02
+        (6, 0.03, 0.14, False),    # 0,02333… → 0,02
+        (2, 0.01, 0.01, True),     # 0,005 → 0,01
+        (2, 0.00, 0.01, False),    # 0,005 no es 0,00
+        (8, 0.13, 1.00, True),     # 0,125 → 0,13
+        (3, 0.35, 1.05, True),     # 0,35 exacto (en float, 1,05 / 3 = 0,35000000000000003)
+        (1000, 1.0, 995.0, True),  # 0,995 → 1,00
+    ])
+    def test_half_a_cent_is_decided_in_decimal(self, componente, qty, unit, total, acepta):
+        if componente == "mat":
+            row = self._row(qty, unit, 0.0, total, mat_total=total, mo_total=0.0)
+        else:
+            row = self._row(qty, 0.0, unit, total, mat_total=0.0, mo_total=total)
+        guardado = row[f"{componente}_total"]
+        assert guardado == (total if acepta else round(unit * qty, 2))

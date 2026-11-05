@@ -643,9 +643,14 @@ def _insert(db, table: str, rows: list[dict]) -> list[dict]:
 PARA_CONFIRMAR = "Para confirmar."
 
 
-def _centavos(value: float) -> Decimal:
-    """A planilla amount rounded to cents the way Excel does it (half up, from its shown digits)."""
-    return Decimal(repr(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+def _dec(value: object) -> Decimal:
+    """A planilla number as the decimal it shows (0.15 → Decimal("0.15"), not 0.1499999…)."""
+    return Decimal(repr(float(value))) if isinstance(value, float) else Decimal(str(value))
+
+
+def _centavos(value: Decimal) -> Decimal:
+    """Rounded to cents the way Excel does it: half up (0,025 → 0,03; 0,995 → 1,00)."""
+    return value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
 def _item_row(item: dict, budget_id: str, org_id: str, templates: dict[str, dict],
@@ -667,9 +672,10 @@ def _item_row(item: dict, budget_id: str, org_id: str, templates: dict[str, dict
         def exacto(unit: float, total: object) -> float:
             if total is None or float(total) < 0:
                 return unit
-            # Only the rounding of the unit to cents: total ÷ quantity must round to that same unit
-            # (half up, like Excel: 0,995 → 1,00, which a float round would make 0,99)
-            if _centavos(float(total) / qty) == _centavos(unit):
+            # Only the rounding of the unit to cents: total ÷ quantity must round to that same unit.
+            # Divided in Decimal, not float: $0,15 / 6 is exactly 0,025 → 0,03 (in float it is
+            # 0,02499999… → 0,02 and a valid total would be refused)
+            if _centavos(_dec(total) / _dec(qty)) == _centavos(_dec(unit)):
                 return float(total) / qty
             return unit
         mat = exacto(mat, ex.get("mat_total"))
