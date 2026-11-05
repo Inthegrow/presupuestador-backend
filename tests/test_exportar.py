@@ -303,7 +303,7 @@ class TestPlanilla:
         ws = terrac(client)["01_C&P"]
         bases = {c: ws.cell(work_rows(ws)["3.1.1"], c).value for c in range(5, 12)}
         w3 = next(w for w in WORKS if w["code"] == "3.1.1")
-        assert bases[C_MAT] == w3["mat_unitario"]
+        assert bases[C_MAT] == round(w3["mat_unitario"], 2)  # the Excel shows it to the cent
         sub = {t: sum(r["subtotal"] for r in RES_BASES if r["tipo"] == t)
                for t in ("mano_obra", "equipo", "mo_material", "subcontrato")}
         for col, tipo in ((C_JORNALES, "mano_obra"), (C_EQUIPOS, "equipo"), (C_MO_MAT, "mo_material"),

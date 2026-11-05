@@ -24,7 +24,7 @@ import { budgetApi, templateApi, esFaltaConversion, esConfirmarReemplazo, esFall
 import type { FaltaConversion, PrecioFaltante, TemplateSugerencias } from '../lib/api'
 import { useAuth } from '../contexts/AuthContext'
 import { escaleraDe, fmtPct, indirectosCompletos, pctsEscalera } from '../lib/cascada'
-import { fmtNumber, fmtPercent, unidadEnPalabras } from '../lib/format'
+import { fmtNumber, fmtPercent, fmtUnitario, unidadEnPalabras } from '../lib/format'
 import { ESTILO, estadoDeTrabajo, precioPorUnidad } from '../lib/semaforo'
 import BuscadorFormulas from '../components/ui/BuscadorFormulas'
 import BuscarPrecio, { IconoBuscarInternet, normalizarCodigo } from '../components/BuscarPrecio'
@@ -681,7 +681,7 @@ function ResourceSection({ tipo, recursos, itemQty, budgetId, itemId, onReload, 
                   </div>
                   {itemQty > 0 && (
                     <div className="text-[12px] mt-0.5">
-                      {fmtARS(total)} ÷ {fmtNumber(itemQty, 2)} = <strong>{tipoUnitLabel}: {fmtARS(unitPrice)}</strong>
+                      {fmtARS(total)} ÷ {fmtNumber(itemQty, 2)} = <strong>{tipoUnitLabel}: {fmtUnitario(unitPrice, fmtARS)}</strong>
                     </div>
                   )}
                 </div>
@@ -750,7 +750,7 @@ function ResourceSection({ tipo, recursos, itemQty, budgetId, itemId, onReload, 
                     <tr className="bg-[#E8F5EE]/60">
                       <td colSpan={headers.length} className="px-3 py-1.5 text-right text-[10px] text-[#1B5E4B]">
                         {fmtARS(total)} ÷ {fmtNumber(itemQty, 2)} =&nbsp;
-                        <strong>{tipoUnitLabel}: {fmtARS(unitPrice)}</strong>
+                        <strong>{tipoUnitLabel}: {fmtUnitario(unitPrice, fmtARS)}</strong>
                       </td>
                     </tr>
                   )}
@@ -1597,7 +1597,7 @@ export default function ItemDetail() {
           ].map(({ label, value }) => (
             <div key={label} className="bg-white rounded-lg p-2 text-center border border-[#C3E5D3] min-w-0">
               <div className="text-[10px] max-md:text-[11px] leading-tight text-[#2D8D68] font-semibold mb-0.5 break-words">{label} por {porUnidad}</div>
-              <div className="font-bold text-[#143D34] text-xs max-md:text-[15px] tabular-nums">{fmtARS(value)}</div>
+              <div className="font-bold text-[#143D34] text-xs max-md:text-[15px] tabular-nums">{fmtUnitario(value, fmtARS)}</div>
             </div>
           ))}
         </div>

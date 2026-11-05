@@ -18,6 +18,22 @@ export function fmtCurrency(value: number | null | undefined): string {
 }
 
 /**
+ * Un costo por unidad: si es menor a $1 (y no es cero) se muestra con sus decimales, para que
+ * nunca se lea "$0" en un trabajo que sí cuesta. Ej. $1 en 1000 unidades → "$0,001".
+ * Si no, como lo muestra `formato` (por defecto, fmtCurrency).
+ */
+export function fmtUnitario(
+  value: number | null | undefined,
+  formato: (v: number | null | undefined) => string = fmtCurrency,
+): string {
+  const v = Number(value ?? 0)
+  if (v !== 0 && Math.abs(v) < 1) {
+    return `${v < 0 ? '-' : ''}$${Math.abs(v).toLocaleString('es-AR', { maximumSignificantDigits: 2 })}`
+  }
+  return formato(v)
+}
+
+/**
  * Pesos enteros, sin abreviar: 142_213_456.7 → "$142.213.457". Para los totales que se comparan entre pantallas.
  */
 export function fmtPesos(value: number | null | undefined): string {
