@@ -235,13 +235,14 @@ def calc_item_from_resources(item: dict, resources: list[dict]) -> dict:
         item["mat_total"] = item["mo_total"] = item["directo_total"] = 0.0
         return item
 
-    # The totals are the real sum of the resources. The cost per unit is only what the
-    # editor shows (rounded to cents): rebuilding the total from it lost money, ej.
-    # $1 over 1000 units → $0,00 per unit → $0 total.
+    # The totals are the real sum of the resources, never rebuilt from a rounded unit
+    # ($1 over 1000 units → $0,00 per unit → $0 total). The cost per unit keeps every
+    # decimal ($0,001), so unit × quantity always explains the total; the screens and the
+    # exported Excel round it only to show it.
     mat_total = round(mat_sum, 2)
     mo_total = round(mo_sum + eq_sum + mat_ind_sum + sub_sum, 2)
-    item["mat_unitario"] = round(mat_total / qty, 2)
-    item["mo_unitario"] = round(mo_total / qty, 2)
+    item["mat_unitario"] = mat_total / qty
+    item["mo_unitario"] = mo_total / qty
     item["mat_total"] = mat_total
     item["mo_total"] = mo_total
     item["directo_total"] = round(mat_total + mo_total, 2)

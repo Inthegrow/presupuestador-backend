@@ -26,6 +26,7 @@ import re
 import time
 import warnings
 from datetime import date, datetime, timezone
+from decimal import ROUND_HALF_UP, Decimal
 from io import BytesIO
 from uuid import UUID
 
@@ -642,6 +643,16 @@ def _insert(db, table: str, rows: list[dict]) -> list[dict]:
 PARA_CONFIRMAR = "Para confirmar."
 
 
+def _dec(value: object) -> Decimal:
+    """A planilla number as the decimal it shows (0.15 → Decimal("0.15"), not 0.1499999…)."""
+    return Decimal(repr(float(value))) if isinstance(value, float) else Decimal(str(value))
+
+
+def _centavos(value: Decimal) -> Decimal:
+    """Rounded to cents the way Excel does it: half up (0,025 → 0,03; 0,995 → 1,00)."""
+    return value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
 def _item_row(item: dict, budget_id: str, org_id: str, templates: dict[str, dict],
               amarillas: set[str] | frozenset[str] = frozenset()) -> dict:
     """``amarillas``: task keys loaded without confirming; their notes end in "Para confirmar."."""
@@ -652,13 +663,27 @@ def _item_row(item: dict, budget_id: str, org_id: str, templates: dict[str, dict
     mat = float(ex.get("mat_unit", 0)) if sin else 0.0
     mo = float(ex.get("mo_unit", 0)) if sin else 0.0
     if sin and qty:
-        # The per-unit prices of the planilla are rounded to cents; its direct cost (N) is the
-        # real total. When they differ only by that rounding, the cost per unit keeps every
-        # decimal so that unit × quantity gives the planilla's total to the cent.
-        exacto = float(ex.get("directo") or 0)
-        mat_total = round(mat * qty, 2)
-        if exacto > 0 and abs(exacto - mat_total - round(mo * qty, 2)) <= 0.01 * qty + 0.01:
-            mo = (exacto - mat_total) / qty
+        # The per-unit prices of the planilla are rounded to cents; its own totals of materials (L)
+        # and M.O. (M) are the real ones. Each one, on its own: when it differs from unit × quantity
+        # only by that rounding, the cost per unit keeps every decimal so that unit × quantity
+        # gives the planilla's total to the cent. Nothing moves between materials and M.O., and a
+        # planilla without those totals (or with a bigger difference) loads as before: the
+        # difference shows in "Ver diferencias con el Excel", never fixed silently.
+        def exacto(unit: float, total: object) -> float:
+            if total is None or float(total) < 0:
+                return unit
+            # A unit with more than cents (ej. 1,0049, a formula =L/D in the planilla) is already the
+            # precise one: it is kept, and a total that contradicts it shows as a difference
+            if _dec(unit) != _centavos(_dec(unit)):
+                return unit
+            # Only the rounding of the unit to cents: total ÷ quantity must round to that same unit.
+            # Divided in Decimal, not float: $0,15 / 6 is exactly 0,025 → 0,03 (in float it is
+            # 0,02499999… → 0,02 and a valid total would be refused)
+            if _centavos(_dec(total) / _dec(qty)) == _centavos(_dec(unit)):
+                return float(total) / qty
+            return unit
+        mat = exacto(mat, ex.get("mat_total"))
+        mo = exacto(mo, ex.get("mo_total"))
     directo = round(round(mat * (qty or 0), 2) + round(mo * (qty or 0), 2), 2)
     notas = item_notes(item)
     if es_item and item.get("clave") in amarillas:

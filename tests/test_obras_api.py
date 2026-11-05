@@ -1220,3 +1220,90 @@ class TestHormigonCelular:
         assert contrapiso["porque"] == "La obra usa hormigón celular (hoja 4.1-6)"
         telgopor = tareas["TELGOPOR 50 MM + CONTRAPISO EN AZOTEA ACCESIBLE E: 8CM | m2"]["receta"]
         assert [p["codigo"] for p in telgopor["partes"]] == ["8.3", "5.2.4"]
+
+
+class TestPrecioSinFormulaAlCentavo:
+    """Cargar obra, work without formula: each of materials and M.O. keeps its own planilla total
+    (columns L and M) when the per-unit price only differs by its rounding to cents (Codex, PR 52)."""
+
+    @staticmethod
+    def _row(qty, mat_unit, mo_unit, directo, mat_total=None, mo_total=None):
+        from app.routers.obras import _item_row
+        item = {"nivel": "item", "plantilla": None, "plantillas": [], "cantidad": qty, "codigo": "3.1.1",
+                "descripcion": "BASES AISLADAS", "unidad": "u", "orden": 1, "clave": "k", "parametros": {},
+                "notas": [], "excel": {"mat_unit": mat_unit, "mo_unit": mo_unit, "directo": directo,
+                                       "neto": directo, "mat_total": mat_total, "mo_total": mo_total}}
+        return _item_row(item, "b", ORG, {})
+
+    def test_each_total_stays_in_its_own_column(self):
+        row = self._row(1000, 0.0, 0.0, 1.0, mat_total=1.0, mo_total=0.0)
+        assert (row["mat_total"], row["mo_total"], row["directo_total"]) == (1.0, 0.0, 1.0)
+        row = self._row(1000, 0.0, 0.0, 1.0, mat_total=0.0, mo_total=1.0)
+        assert (row["mat_total"], row["mo_total"], row["directo_total"]) == (0.0, 1.0, 1.0)
+
+    def test_bases_aisladas_to_the_cent(self):
+        row = self._row(35, 493143.54, 271885.71, 26776023.89, mat_total=17260023.89, mo_total=9516000.0)
+        assert (row["mat_total"], row["mo_total"]) == (17260023.89, 9516000.0)
+        assert row["directo_total"] == round(17260023.89 + 9516000.0, 2)
+
+    def test_without_l_and_m_nothing_is_moved(self):
+        # Codex case 1: no per-rubro totals → no silent assignment of the direct cost to M.O.
+        row = self._row(1000, 0.0, 0.0, 1.0)
+        assert (row["mat_total"], row["mo_total"], row["directo_total"]) == (0.0, 0.0, 0.0)
+        assert row["excel_directo"] == 1.0  # the difference shows in "Ver diferencias con el Excel"
+        # Codex case 2: never a negative M.O.
+        row = self._row(1000, 1.0, 0.0, 999.0)
+        assert (row["mat_total"], row["mo_total"], row["directo_total"]) == (1000.0, 0.0, 1000.0)
+
+    def test_a_real_difference_is_not_hidden(self):
+        # L says something else than unit × quantity (more than the rounding): the unit wins
+        row = self._row(10, 100.0, 0.0, 5000.0, mat_total=5000.0)
+        assert row["mat_total"] == 1000.0
+        row = self._row(10, 100.0, 0.0, 1000.0, mat_total=-5.0)
+        assert row["mat_total"] == 1000.0
+
+    @pytest.mark.parametrize("unit, total, acepta", [
+        (1.0, 1004.0, True),    # 1,004 per unit rounds to 1,00: only the rounding
+        (1.0, 1009.0, False),   # Codex (ronda 2): 1,009 rounds to 1,01 → a real difference
+        (1.0, 995.0, True),     # 0,995 → 1,00
+        (1.0, 994.0, False),    # 0,994 → 0,99
+        (0.0, 4.0, True),       # $0,00 per unit, $4 over 1000 units
+        (0.0, 6.0, False),      # 0,006 → 0,01: not a $0,00 unit
+    ])
+    def test_only_the_rounding_of_the_unit_is_accepted(self, unit, total, acepta):
+        row = self._row(1000, unit, 0.0, total, mat_total=total, mo_total=0.0)
+        assert row["mat_total"] == (total if acepta else round(unit * 1000, 2))
+
+    @pytest.mark.parametrize("componente", ["mat", "mo"])
+    @pytest.mark.parametrize("qty, unit, total, acepta", [
+        (6, 0.03, 0.15, True),     # Codex (ronda 3): 0,15 / 6 = 0,025 exacto → 0,03 (en float, 0,02499…)
+        (6, 0.02, 0.15, False),    # el mismo total no redondea a 0,02
+        (6, 0.03, 0.14, False),    # 0,02333… → 0,02
+        (2, 0.01, 0.01, True),     # 0,005 → 0,01
+        (2, 0.00, 0.01, False),    # 0,005 no es 0,00
+        (8, 0.13, 1.00, True),     # 0,125 → 0,13
+        (3, 0.35, 1.05, True),     # 0,35 exacto (en float, 1,05 / 3 = 0,35000000000000003)
+        (1000, 1.0, 995.0, True),  # 0,995 → 1,00
+    ])
+    def test_half_a_cent_is_decided_in_decimal(self, componente, qty, unit, total, acepta):
+        if componente == "mat":
+            row = self._row(qty, unit, 0.0, total, mat_total=total, mo_total=0.0)
+        else:
+            row = self._row(qty, 0.0, unit, total, mat_total=0.0, mo_total=total)
+        guardado = row[f"{componente}_total"]
+        assert guardado == (total if acepta else round(unit * qty, 2))
+
+    @pytest.mark.parametrize("componente", ["mat", "mo"])
+    def test_a_precise_unit_of_the_planilla_is_kept(self, componente):
+        # Codex (448ec99): unit 1,0049 (more than cents) and total 995 over 1000 units. Both round to
+        # 1,00, but the unit is the precise one: $1.004,90 stays, the 995 shows as a difference
+        if componente == "mat":
+            row = self._row(1000, 1.0049, 0.0, 995.0, mat_total=995.0, mo_total=0.0)
+        else:
+            row = self._row(1000, 0.0, 1.0049, 995.0, mat_total=0.0, mo_total=995.0)
+        assert row[f"{componente}_unitario"] == 1.0049
+        assert row[f"{componente}_total"] == 1004.9
+        assert row["excel_directo"] == 995.0  # «Ver diferencias con el Excel»
+        # A precise unit that agrees with its total also stays as it is
+        row = self._row(35, 493143.5397142857, 0.0, 17260023.89, mat_total=17260023.89, mo_total=0.0)
+        assert row["mat_total"] == 17260023.89

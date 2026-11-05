@@ -40,6 +40,8 @@ def obra_sheet(wb) -> str | None:  # type: ignore[no-untyped-def]
 COL_ITEM, COL_DESC, COL_UNIDAD, COL_CANTIDAD = 1, 2, 3, 4
 COL_MAT_UNIT = 5    # E: materiales por unidad
 COL_MO_UNIT = 10    # J: M.O. por unidad (jornales + equipos + materiales + subcontratos)
+COL_MAT_TOTAL = 12  # L: directo de materiales
+COL_MO_TOTAL = 13   # M: directo de M.O.
 COL_DIR_TOTAL = 14  # N: directo general
 COL_NETO_TOTAL = 26  # Z: total neto
 
@@ -442,6 +444,9 @@ def parse_obra(wb, sheet: str | None = None) -> dict:  # type: ignore[no-untyped
             "excel": {
                 "mat_unit": _num(cell(COL_MAT_UNIT)) or 0.0,
                 "mo_unit": _num(cell(COL_MO_UNIT)) or 0.0,
+                # None when the planilla does not carry them (not 0: "no dato" ≠ "$0")
+                "mat_total": _num(cell(COL_MAT_TOTAL)),
+                "mo_total": _num(cell(COL_MO_TOTAL)),
                 "directo": _num(cell(COL_DIR_TOTAL)) or 0.0,
                 "neto": _num(cell(COL_NETO_TOTAL)) or 0.0,
             },
@@ -464,6 +469,8 @@ _SIMPLE_COLS = {
     "cantidad": ("cantidad",),
     "mat_unit": ("mat unitario", "mat unit.", "materiales por unidad"),
     "mo_unit": ("mo unitario", "mo unit.", "mano de obra por unidad"),
+    "mat_total": ("mat total",),
+    "mo_total": ("mo total",),
     "directo": ("directo total", "costo directo"),
     "neto": ("precio sin iva", "neto total"),
     "notas": ("notas",),
@@ -540,6 +547,8 @@ def parse_simple(wb) -> dict:  # type: ignore[no-untyped-def]
             "excel": {
                 "mat_unit": _num(cell(row, "mat_unit")) or 0.0,
                 "mo_unit": _num(cell(row, "mo_unit")) or 0.0,
+                "mat_total": _num(cell(row, "mat_total")),
+                "mo_total": _num(cell(row, "mo_total")),
                 "directo": _num(cell(row, "directo")) or 0.0,
                 "neto": _num(cell(row, "neto")) or 0.0,
             },
