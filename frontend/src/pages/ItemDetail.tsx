@@ -24,7 +24,7 @@ import { budgetApi, templateApi, esFaltaConversion, esConfirmarReemplazo, esFall
 import type { FaltaConversion, PrecioFaltante, TemplateSugerencias } from '../lib/api'
 import { useAuth } from '../contexts/AuthContext'
 import { escaleraDe, fmtPct, indirectosCompletos, pctsEscalera } from '../lib/cascada'
-import { fmtNumber, fmtPercent, fmtUnitario, unidadEnPalabras, unitarioRedondeado } from '../lib/format'
+import { cuentaPorUnidad, fmtNumber, fmtPercent, fmtUnitario, unidadEnPalabras } from '../lib/format'
 import { ESTILO, estadoDeTrabajo, precioPorUnidad } from '../lib/semaforo'
 import BuscadorFormulas from '../components/ui/BuscadorFormulas'
 import BuscarPrecio, { IconoBuscarInternet, normalizarCodigo } from '../components/BuscarPrecio'
@@ -76,27 +76,17 @@ const fmtARS = (v: number | null | undefined) => fmt.format(v ?? 0)
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const fmtConCentavos = new Intl.NumberFormat('es-AR', {
-  style: 'currency',
-  currency: 'ARS',
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-})
-
 /**
- * "total ÷ cantidad = costo por unidad". Con "=" solo si lo que se lee es exacto; si el costo por
- * unidad que se ve está redondeado, "≈" y la aclaración: el total es el de los recursos.
+ * "total ÷ cantidad = costo por unidad" (regla única: cuentaPorUnidad). Con "=" solo si los tres
+ * números que se leen son exactos; si no, "≈" y la aclaración: el total es el de los recursos.
  */
-function CuentaPorUnidad({ total, cantidad, unitario, etiqueta }: {
-  total: number; cantidad: number; unitario: number; etiqueta: string
-}) {
-  const aprox = unitarioRedondeado(unitario, 0)
-  const totalTexto = Number.isInteger(total) ? fmtARS(total) : fmtConCentavos.format(total)
+function CuentaPorUnidad({ total, cantidad, etiqueta }: { total: number; cantidad: number; etiqueta: string }) {
+  const c = cuentaPorUnidad(total, cantidad)
   return (
-    <span data-testid="cuenta-por-unidad" data-aproximado={aprox ? 'si' : 'no'}>
-      {totalTexto} ÷ {fmtNumber(cantidad, 2)} {aprox ? '≈' : '='}&nbsp;
-      <strong>{etiqueta}: {fmtUnitario(unitario, fmtARS)}</strong>
-      {aprox && <span className="text-gray-500"> (redondeado; el total es el de los recursos)</span>}
+    <span data-testid="cuenta-por-unidad" data-aproximado={c.aproximado ? 'si' : 'no'}>
+      {c.total} ÷ {c.cantidad} {c.signo}&nbsp;
+      <strong>{etiqueta}: {c.unitario}</strong>
+      {c.aproximado && <span className="text-gray-500"> (redondeado; el total es el de los recursos)</span>}
     </span>
   )
 }
@@ -612,7 +602,6 @@ function ResourceSection({ tipo, recursos, itemQty, budgetId, itemId, onReload, 
 
   const filtered = recursos.filter((r) => r.tipo === tipo)
   const total = filtered.reduce((s, r) => s + r.subtotal, 0)
-  const unitPrice = itemQty > 0 ? total / itemQty : 0
 
   const handleSave = async (id: string, data: Partial<ItemResource>) => {
     await budgetApi.updateResource(budgetId, itemId, id, data)
@@ -706,7 +695,7 @@ function ResourceSection({ tipo, recursos, itemQty, budgetId, itemId, onReload, 
                   </div>
                   {itemQty > 0 && (
                     <div className="text-[12px] mt-0.5">
-                      <CuentaPorUnidad total={total} cantidad={itemQty} unitario={unitPrice} etiqueta={tipoUnitLabel} />
+                      <CuentaPorUnidad total={total} cantidad={itemQty} etiqueta={tipoUnitLabel} />
                     </div>
                   )}
                 </div>
@@ -774,7 +763,7 @@ function ResourceSection({ tipo, recursos, itemQty, budgetId, itemId, onReload, 
                   {itemQty > 0 && (
                     <tr className="bg-[#E8F5EE]/60">
                       <td colSpan={headers.length} className="px-3 py-1.5 text-right text-[10px] text-[#1B5E4B]">
-                        <CuentaPorUnidad total={total} cantidad={itemQty} unitario={unitPrice} etiqueta={tipoUnitLabel} />
+                        <CuentaPorUnidad total={total} cantidad={itemQty} etiqueta={tipoUnitLabel} />
                       </td>
                     </tr>
                   )}

@@ -17,12 +17,28 @@ export function fmtCurrency(value: number | null | undefined): string {
   return `${sign}$${abs.toLocaleString('es-AR', { maximumFractionDigits: 0 })}`
 }
 
-const DECIMALES_CHICOS = 6
+// ─── Costo por unidad ────────────────────────────────────────────────────────
+// Regla única: un costo por unidad menor a $1 se muestra con sus 3 primeras cifras significativas,
+// así nunca se lee "$0" en un trabajo que cuesta ($1 / 3.000.000 → $0,000000333). Desde $1, en
+// pesos enteros. Y una cuenta se escribe con "=" solo si los tres números que se leen son exactos.
+
+const CIFRAS_CHICAS = 3
+const DECIMALES_CANTIDAD = 6
+
+/** El valor que queda a la vista del costo por unidad (lo que se lee, no lo guardado). */
+function unitarioVisible(v: number): number {
+  if (v === 0) return 0
+  return Math.abs(v) < 1 ? Number(v.toPrecision(CIFRAS_CHICAS)) : Math.round(v)
+}
+
+function mismo(a: number, b: number): boolean {
+  // Relative: a fixed tolerance would hide the rounding of a tiny unit ($0,000000333…)
+  return Math.abs(a - b) <= 1e-9 * Math.abs(b) + 1e-15
+}
 
 /**
- * Un costo por unidad: si es menor a $1 (y no es cero) se muestra con hasta 6 decimales, para que
- * nunca se lea "$0" en un trabajo que sí cuesta. Ej. $1 en 1000 unidades → "$0,001";
- * $123 en 10.000 → "$0,0123". Si no, como lo muestra `formato` (por defecto, fmtCurrency).
+ * Un costo por unidad: menor a $1 (y no cero), con sus 3 cifras significativas
+ * ($0,001 · $0,0123 · $0,000000333). Si no, como lo muestra `formato` (por defecto, fmtCurrency).
  */
 export function fmtUnitario(
   value: number | null | undefined,
@@ -30,20 +46,41 @@ export function fmtUnitario(
 ): string {
   const v = Number(value ?? 0)
   if (v !== 0 && Math.abs(v) < 1) {
-    return `${v < 0 ? '-' : ''}$${Math.abs(v).toLocaleString('es-AR', { maximumFractionDigits: DECIMALES_CHICOS })}`
+    return `${v < 0 ? '-' : ''}$${Math.abs(v).toLocaleString('es-AR', { maximumSignificantDigits: CIFRAS_CHICAS })}`
   }
   return formato(v)
 }
 
-/**
- * Si el costo por unidad que se ve (fmtUnitario) es el valor exacto o está redondeado.
- * `decimales`: los que muestra el formato para $1 o más (fmtARS: 0). Para escribir
- * "total ÷ cantidad = unitario" solo cuando es exacto, y "≈ … (redondeado)" si no.
- */
-export function unitarioRedondeado(value: number | null | undefined, decimales = 0): boolean {
+/** Si el costo por unidad que se ve (fmtUnitario con pesos enteros desde $1) está redondeado. */
+export function unitarioRedondeado(value: number | null | undefined): boolean {
   const v = Number(value ?? 0)
-  const d = v !== 0 && Math.abs(v) < 1 ? DECIMALES_CHICOS : decimales
-  return Math.abs(Number(v.toFixed(d)) - v) > 1e-9
+  return !mismo(unitarioVisible(v), v)
+}
+
+const pesos = (decimales: number) =>
+  new Intl.NumberFormat('es-AR', {
+    style: 'currency', currency: 'ARS', minimumFractionDigits: decimales, maximumFractionDigits: decimales,
+  })
+
+/**
+ * "total ÷ cantidad = costo por unidad", lista para mostrar. El total va con centavos si los tiene,
+ * la cantidad con todos sus decimales (hasta 6: 0,004 no se lee 0,00) y el costo por unidad con la
+ * regla de fmtUnitario. `aproximado`: alguno de los tres está redondeado, y entonces el signo es
+ * "≈"; si los tres son exactos, "=".
+ */
+export function cuentaPorUnidad(total: number, cantidad: number): {
+  total: string; cantidad: string; unitario: string; signo: '=' | '≈'; aproximado: boolean
+} {
+  const centavos = Math.round(total * 100) / 100
+  const totalTexto = pesos(Number.isInteger(centavos) ? 0 : 2).format(centavos)
+  const cantidadVisible = Number(cantidad.toFixed(DECIMALES_CANTIDAD))
+  const cantidadTexto = cantidad.toLocaleString('es-AR', {
+    minimumFractionDigits: 2, maximumFractionDigits: DECIMALES_CANTIDAD,
+  })
+  const unitario = cantidad ? total / cantidad : 0
+  const unitarioTexto = fmtUnitario(unitario, (v) => pesos(0).format(v ?? 0))
+  const aproximado = !mismo(centavos, total) || !mismo(cantidadVisible, cantidad) || unitarioRedondeado(unitario)
+  return { total: totalTexto, cantidad: cantidadTexto, unitario: unitarioTexto, signo: aproximado ? '≈' : '=', aproximado }
 }
 
 /**
