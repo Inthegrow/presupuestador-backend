@@ -1220,3 +1220,44 @@ class TestHormigonCelular:
         assert contrapiso["porque"] == "La obra usa hormigón celular (hoja 4.1-6)"
         telgopor = tareas["TELGOPOR 50 MM + CONTRAPISO EN AZOTEA ACCESIBLE E: 8CM | m2"]["receta"]
         assert [p["codigo"] for p in telgopor["partes"]] == ["8.3", "5.2.4"]
+
+
+class TestPrecioSinFormulaAlCentavo:
+    """Cargar obra, work without formula: each of materials and M.O. keeps its own planilla total
+    (columns L and M) when the per-unit price only differs by its rounding to cents (Codex, PR 52)."""
+
+    @staticmethod
+    def _row(qty, mat_unit, mo_unit, directo, mat_total=None, mo_total=None):
+        from app.routers.obras import _item_row
+        item = {"nivel": "item", "plantilla": None, "plantillas": [], "cantidad": qty, "codigo": "3.1.1",
+                "descripcion": "BASES AISLADAS", "unidad": "u", "orden": 1, "clave": "k", "parametros": {},
+                "notas": [], "excel": {"mat_unit": mat_unit, "mo_unit": mo_unit, "directo": directo,
+                                       "neto": directo, "mat_total": mat_total, "mo_total": mo_total}}
+        return _item_row(item, "b", ORG, {})
+
+    def test_each_total_stays_in_its_own_column(self):
+        row = self._row(1000, 0.0, 0.0, 1.0, mat_total=1.0, mo_total=0.0)
+        assert (row["mat_total"], row["mo_total"], row["directo_total"]) == (1.0, 0.0, 1.0)
+        row = self._row(1000, 0.0, 0.0, 1.0, mat_total=0.0, mo_total=1.0)
+        assert (row["mat_total"], row["mo_total"], row["directo_total"]) == (0.0, 1.0, 1.0)
+
+    def test_bases_aisladas_to_the_cent(self):
+        row = self._row(35, 493143.54, 271885.71, 26776023.89, mat_total=17260023.89, mo_total=9516000.0)
+        assert (row["mat_total"], row["mo_total"]) == (17260023.89, 9516000.0)
+        assert row["directo_total"] == round(17260023.89 + 9516000.0, 2)
+
+    def test_without_l_and_m_nothing_is_moved(self):
+        # Codex case 1: no per-rubro totals → no silent assignment of the direct cost to M.O.
+        row = self._row(1000, 0.0, 0.0, 1.0)
+        assert (row["mat_total"], row["mo_total"], row["directo_total"]) == (0.0, 0.0, 0.0)
+        assert row["excel_directo"] == 1.0  # the difference shows in "Ver diferencias con el Excel"
+        # Codex case 2: never a negative M.O.
+        row = self._row(1000, 1.0, 0.0, 999.0)
+        assert (row["mat_total"], row["mo_total"], row["directo_total"]) == (1000.0, 0.0, 1000.0)
+
+    def test_a_real_difference_is_not_hidden(self):
+        # L says something else than unit × quantity (more than the rounding): the unit wins
+        row = self._row(10, 100.0, 0.0, 5000.0, mat_total=5000.0)
+        assert row["mat_total"] == 1000.0
+        row = self._row(10, 100.0, 0.0, 1000.0, mat_total=-5.0)
+        assert row["mat_total"] == 1000.0

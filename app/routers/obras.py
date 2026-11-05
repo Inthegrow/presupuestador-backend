@@ -649,13 +649,20 @@ def _item_row(item: dict, budget_id: str, org_id: str, templates: dict[str, dict
     mat = float(ex.get("mat_unit", 0)) if sin else 0.0
     mo = float(ex.get("mo_unit", 0)) if sin else 0.0
     if sin and qty:
-        # The per-unit prices of the planilla are rounded to cents; its direct cost (N) is the
-        # real total. When they differ only by that rounding, the cost per unit keeps every
-        # decimal so that unit × quantity gives the planilla's total to the cent.
-        exacto = float(ex.get("directo") or 0)
-        mat_total = round(mat * qty, 2)
-        if exacto > 0 and abs(exacto - mat_total - round(mo * qty, 2)) <= 0.01 * qty + 0.01:
-            mo = (exacto - mat_total) / qty
+        # The per-unit prices of the planilla are rounded to cents; its own totals of materials (L)
+        # and M.O. (M) are the real ones. Each one, on its own: when it differs from unit × quantity
+        # only by that rounding, the cost per unit keeps every decimal so that unit × quantity
+        # gives the planilla's total to the cent. Nothing moves between materials and M.O., and a
+        # planilla without those totals (or with a bigger difference) loads as before: the
+        # difference shows in "Ver diferencias con el Excel", never fixed silently.
+        def exacto(unit: float, total: object) -> float:
+            if total is None or float(total) < 0:
+                return unit
+            if abs(float(total) - round(unit * qty, 2)) <= 0.01 * qty + 0.01:
+                return float(total) / qty
+            return unit
+        mat = exacto(mat, ex.get("mat_total"))
+        mo = exacto(mo, ex.get("mo_total"))
     directo = round(round(mat * (qty or 0), 2) + round(mo * (qty or 0), 2), 2)
     notas = item_notes(item)
     if es_item and item.get("clave") in amarillas:
