@@ -672,6 +672,10 @@ def _item_row(item: dict, budget_id: str, org_id: str, templates: dict[str, dict
         def exacto(unit: float, total: object) -> float:
             if total is None or float(total) < 0:
                 return unit
+            # A unit with more than cents (ej. 1,0049, a formula =L/D in the planilla) is already the
+            # precise one: it is kept, and a total that contradicts it shows as a difference
+            if _dec(unit) != _centavos(_dec(unit)):
+                return unit
             # Only the rounding of the unit to cents: total ÷ quantity must round to that same unit.
             # Divided in Decimal, not float: $0,15 / 6 is exactly 0,025 → 0,03 (in float it is
             # 0,02499999… → 0,02 and a valid total would be refused)

@@ -1292,3 +1292,18 @@ class TestPrecioSinFormulaAlCentavo:
             row = self._row(qty, 0.0, unit, total, mat_total=0.0, mo_total=total)
         guardado = row[f"{componente}_total"]
         assert guardado == (total if acepta else round(unit * qty, 2))
+
+    @pytest.mark.parametrize("componente", ["mat", "mo"])
+    def test_a_precise_unit_of_the_planilla_is_kept(self, componente):
+        # Codex (448ec99): unit 1,0049 (more than cents) and total 995 over 1000 units. Both round to
+        # 1,00, but the unit is the precise one: $1.004,90 stays, the 995 shows as a difference
+        if componente == "mat":
+            row = self._row(1000, 1.0049, 0.0, 995.0, mat_total=995.0, mo_total=0.0)
+        else:
+            row = self._row(1000, 0.0, 1.0049, 995.0, mat_total=0.0, mo_total=995.0)
+        assert row[f"{componente}_unitario"] == 1.0049
+        assert row[f"{componente}_total"] == 1004.9
+        assert row["excel_directo"] == 995.0  # «Ver diferencias con el Excel»
+        # A precise unit that agrees with its total also stays as it is
+        row = self._row(35, 493143.5397142857, 0.0, 17260023.89, mat_total=17260023.89, mo_total=0.0)
+        assert row["mat_total"] == 17260023.89
