@@ -17,10 +17,12 @@ export function fmtCurrency(value: number | null | undefined): string {
   return `${sign}$${abs.toLocaleString('es-AR', { maximumFractionDigits: 0 })}`
 }
 
+const DECIMALES_CHICOS = 6
+
 /**
- * Un costo por unidad: si es menor a $1 (y no es cero) se muestra con sus decimales, para que
- * nunca se lea "$0" en un trabajo que sí cuesta. Ej. $1 en 1000 unidades → "$0,001".
- * Si no, como lo muestra `formato` (por defecto, fmtCurrency).
+ * Un costo por unidad: si es menor a $1 (y no es cero) se muestra con hasta 6 decimales, para que
+ * nunca se lea "$0" en un trabajo que sí cuesta. Ej. $1 en 1000 unidades → "$0,001";
+ * $123 en 10.000 → "$0,0123". Si no, como lo muestra `formato` (por defecto, fmtCurrency).
  */
 export function fmtUnitario(
   value: number | null | undefined,
@@ -28,9 +30,20 @@ export function fmtUnitario(
 ): string {
   const v = Number(value ?? 0)
   if (v !== 0 && Math.abs(v) < 1) {
-    return `${v < 0 ? '-' : ''}$${Math.abs(v).toLocaleString('es-AR', { maximumSignificantDigits: 2 })}`
+    return `${v < 0 ? '-' : ''}$${Math.abs(v).toLocaleString('es-AR', { maximumFractionDigits: DECIMALES_CHICOS })}`
   }
   return formato(v)
+}
+
+/**
+ * Si el costo por unidad que se ve (fmtUnitario) es el valor exacto o está redondeado.
+ * `decimales`: los que muestra el formato para $1 o más (fmtARS: 0). Para escribir
+ * "total ÷ cantidad = unitario" solo cuando es exacto, y "≈ … (redondeado)" si no.
+ */
+export function unitarioRedondeado(value: number | null | undefined, decimales = 0): boolean {
+  const v = Number(value ?? 0)
+  const d = v !== 0 && Math.abs(v) < 1 ? DECIMALES_CHICOS : decimales
+  return Math.abs(Number(v.toFixed(d)) - v) > 1e-9
 }
 
 /**

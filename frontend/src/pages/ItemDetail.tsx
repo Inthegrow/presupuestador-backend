@@ -24,7 +24,7 @@ import { budgetApi, templateApi, esFaltaConversion, esConfirmarReemplazo, esFall
 import type { FaltaConversion, PrecioFaltante, TemplateSugerencias } from '../lib/api'
 import { useAuth } from '../contexts/AuthContext'
 import { escaleraDe, fmtPct, indirectosCompletos, pctsEscalera } from '../lib/cascada'
-import { fmtNumber, fmtPercent, fmtUnitario, unidadEnPalabras } from '../lib/format'
+import { fmtNumber, fmtPercent, fmtUnitario, unidadEnPalabras, unitarioRedondeado } from '../lib/format'
 import { ESTILO, estadoDeTrabajo, precioPorUnidad } from '../lib/semaforo'
 import BuscadorFormulas from '../components/ui/BuscadorFormulas'
 import BuscarPrecio, { IconoBuscarInternet, normalizarCodigo } from '../components/BuscarPrecio'
@@ -75,6 +75,31 @@ const fmt = new Intl.NumberFormat('es-AR', {
 const fmtARS = (v: number | null | undefined) => fmt.format(v ?? 0)
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+const fmtConCentavos = new Intl.NumberFormat('es-AR', {
+  style: 'currency',
+  currency: 'ARS',
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+})
+
+/**
+ * "total ÷ cantidad = costo por unidad". Con "=" solo si lo que se lee es exacto; si el costo por
+ * unidad que se ve está redondeado, "≈" y la aclaración: el total es el de los recursos.
+ */
+function CuentaPorUnidad({ total, cantidad, unitario, etiqueta }: {
+  total: number; cantidad: number; unitario: number; etiqueta: string
+}) {
+  const aprox = unitarioRedondeado(unitario, 0)
+  const totalTexto = Number.isInteger(total) ? fmtARS(total) : fmtConCentavos.format(total)
+  return (
+    <span data-testid="cuenta-por-unidad" data-aproximado={aprox ? 'si' : 'no'}>
+      {totalTexto} ÷ {fmtNumber(cantidad, 2)} {aprox ? '≈' : '='}&nbsp;
+      <strong>{etiqueta}: {fmtUnitario(unitario, fmtARS)}</strong>
+      {aprox && <span className="text-gray-500"> (redondeado; el total es el de los recursos)</span>}
+    </span>
+  )
+}
 
 const ORIGEN_LABEL: Record<string, string> = {
   presupuesto: 'presupuesto',
@@ -681,7 +706,7 @@ function ResourceSection({ tipo, recursos, itemQty, budgetId, itemId, onReload, 
                   </div>
                   {itemQty > 0 && (
                     <div className="text-[12px] mt-0.5">
-                      {fmtARS(total)} ÷ {fmtNumber(itemQty, 2)} = <strong>{tipoUnitLabel}: {fmtUnitario(unitPrice, fmtARS)}</strong>
+                      <CuentaPorUnidad total={total} cantidad={itemQty} unitario={unitPrice} etiqueta={tipoUnitLabel} />
                     </div>
                   )}
                 </div>
@@ -749,8 +774,7 @@ function ResourceSection({ tipo, recursos, itemQty, budgetId, itemId, onReload, 
                   {itemQty > 0 && (
                     <tr className="bg-[#E8F5EE]/60">
                       <td colSpan={headers.length} className="px-3 py-1.5 text-right text-[10px] text-[#1B5E4B]">
-                        {fmtARS(total)} ÷ {fmtNumber(itemQty, 2)} =&nbsp;
-                        <strong>{tipoUnitLabel}: {fmtUnitario(unitPrice, fmtARS)}</strong>
+                        <CuentaPorUnidad total={total} cantidad={itemQty} unitario={unitPrice} etiqueta={tipoUnitLabel} />
                       </td>
                     </tr>
                   )}
