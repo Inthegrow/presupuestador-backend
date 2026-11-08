@@ -25,10 +25,25 @@ from app.tree import normalize_date_code, normalize_item_code
 SHEET = "01_C&P"
 FIRST_ROW = 8
 
+
+def forget_dimensions(wb):  # type: ignore[no-untyped-def]
+    """Read every row of a read-only workbook, not only the ones its saved size says.
+
+    In read-only mode openpyxl trusts the size the file declares (<dimension>), and some programs save
+    a stale one ("A1", "A1:Z10"): the sheet then reads empty or cut, without any error. Returns wb.
+    """
+    for ws in getattr(wb, "worksheets", []):
+        if hasattr(ws, "reset_dimensions"):
+            ws.reset_dimensions()
+    return wb
+
+
 # Columnas de 01_C&P (1 = A)
 COL_ITEM, COL_DESC, COL_UNIDAD, COL_CANTIDAD = 1, 2, 3, 4
 COL_MAT_UNIT = 5    # E: materiales por unidad
 COL_MO_UNIT = 10    # J: M.O. por unidad (jornales + equipos + materiales + subcontratos)
+COL_MAT_TOTAL = 12  # L: directo de materiales
+COL_MO_TOTAL = 13   # M: directo de M.O.
 COL_DIR_TOTAL = 14  # N: directo general
 COL_NETO_TOTAL = 26  # Z: total neto
 
@@ -422,7 +437,8 @@ def _find_header(ws) -> tuple[int, dict[str, int]] | None:  # type: ignore[no-un
 
 _TERRAC_COLS = {"codigo": COL_ITEM, "descripcion": COL_DESC, "unidad": COL_UNIDAD, "cantidad": COL_CANTIDAD}
 # Price columns of the TERRAC layout (01_C&P / CYP): E, J, N and Z
-_TERRAC_PRICES = {"mat_unit": COL_MAT_UNIT, "mo_unit": COL_MO_UNIT, "directo": COL_DIR_TOTAL, "neto": COL_NETO_TOTAL}
+_TERRAC_PRICES = {"mat_unit": COL_MAT_UNIT, "mo_unit": COL_MO_UNIT, "mat_total": COL_MAT_TOTAL, "mo_total": COL_MO_TOTAL,
+                  "directo": COL_DIR_TOTAL, "neto": COL_NETO_TOTAL}
 
 
 def _sheet_name_rank(name: str) -> int | None:
@@ -567,6 +583,9 @@ def computo_rows(ws, info: dict) -> list[dict]:  # type: ignore[no-untyped-def]
         excel = {k: _num(cell(col)) or 0.0 for k, col in
                  (("mat_unit", precios.get("mat_unit")), ("mo_unit", precios.get("mo_unit")),
                   ("directo", precios.get("directo")), ("neto", precios.get("neto")))}
+        # Totals of materials (L) and M.O. (M): None when the planilla does not carry them ("no dato" ≠ "$0")
+        excel["mat_total"] = _num(cell(precios.get("mat_total")))
+        excel["mo_total"] = _num(cell(precios.get("mo_total")))
         codigo = _code(raw_code) if raw_code is not None else ""
         if cantidad is None and unidad is None and not any(excel.values()) and _CODE_RE.match(codigo):
             # Code in A and name in B, with nothing to price: a rubro or piso title ("1" | "ALBAÑILERÍA")
@@ -656,6 +675,8 @@ _SIMPLE_COLS = {
     "cantidad": ("cantidad",),
     "mat_unit": ("mat unitario", "mat unit.", "materiales por unidad"),
     "mo_unit": ("mo unitario", "mo unit.", "mano de obra por unidad"),
+    "mat_total": ("mat total",),
+    "mo_total": ("mo total",),
     "directo": ("directo total", "costo directo"),
     "neto": ("precio sin iva", "neto total"),
     "notas": ("notas",),
@@ -732,6 +753,8 @@ def parse_simple(wb) -> dict:  # type: ignore[no-untyped-def]
             "excel": {
                 "mat_unit": _num(cell(row, "mat_unit")) or 0.0,
                 "mo_unit": _num(cell(row, "mo_unit")) or 0.0,
+                "mat_total": _num(cell(row, "mat_total")),
+                "mo_total": _num(cell(row, "mo_total")),
                 "directo": _num(cell(row, "directo")) or 0.0,
                 "neto": _num(cell(row, "neto")) or 0.0,
             },

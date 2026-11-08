@@ -36,7 +36,7 @@ from app.calculations import (
     sale_totals,
 )
 from app.db import get_data_db
-from app.obra_import import SIMPLE_SHEET, find_computo, is_simple_sheet, parse_obra
+from app.obra_import import SIMPLE_SHEET, find_computo, forget_dimensions, is_simple_sheet, parse_obra
 from app.routers.catalogs import insert_entries, start_history, update_entries
 from app.terrac_export import FMT_PESOS as TERRAC_FMT_PESOS
 from app.terrac_export import terrac_bytes
@@ -324,7 +324,7 @@ def _open_workbook(contents: bytes):  # type: ignore[no-untyped-def]
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            return openpyxl.load_workbook(BytesIO(contents), data_only=True, read_only=True)
+            return forget_dimensions(openpyxl.load_workbook(BytesIO(contents), data_only=True, read_only=True))
     except Exception as exc:
         raise HTTPException(400, "No se pudo abrir el Excel. Si es un .xls, guardalo como .xlsx y subilo de nuevo.") \
             from exc

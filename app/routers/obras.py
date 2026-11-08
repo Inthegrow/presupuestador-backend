@@ -29,6 +29,7 @@ import re
 import time
 import warnings
 from datetime import date, datetime, timezone
+from decimal import ROUND_HALF_UP, Decimal
 from io import BytesIO
 from uuid import UUID
 
@@ -58,6 +59,7 @@ from app.obra_import import (
     build_plan,
     code_recipe,
     excel_prices,
+    forget_dimensions,
     has_computo,
     item_notes,
     match_recipe,
@@ -94,13 +96,24 @@ def _read_workbook(file: UploadFile):  # type: ignore[no-untyped-def]
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            wb = openpyxl.load_workbook(BytesIO(content), data_only=True)
+            # read_only: streams the sheets. Opened whole, a big Maestro-style Excel (68 solapas)
+            # used ~450 MB and took the 512 MB server down ("Failed to fetch" in the browser).
+            wb = forget_dimensions(openpyxl.load_workbook(BytesIO(content), data_only=True, read_only=True))
     except Exception as exc:
         raise HTTPException(400, "No se pudo abrir el Excel") from exc
     # The obra's cómputo (01_C&P, CYP, or a sheet with Descripción and Cantidad) or the app's own simple sheet
     if not has_computo(wb):
         raise HTTPException(400, _missing_sheet_message(wb))
     return wb
+
+
+def _parse(wb) -> dict:  # type: ignore[no-untyped-def]
+    """The obra read from the Excel; 400 when its cómputo has no works (never an empty obra in silence)."""
+    parsed = parse_any(wb)
+    if not any(f["nivel"] == "item" for f in parsed["filas"]):
+        raise HTTPException(400, f"No encontré trabajos en la solapa «{parsed.get('hoja') or COMPUTO_NAMES[0]}»: revisá que "
+                                 "tenga una columna Descripción y otra Cantidad, con un trabajo por renglón.")
+    return parsed
 
 
 def _missing_sheet_message(wb) -> str:  # type: ignore[no-untyped-def]
@@ -642,7 +655,7 @@ def analizar_obra(
     templates = _templates(db, org_id)
     if not templates:
         raise HTTPException(409, "No hay fórmulas cargadas en la app: primero hay que importar el Maestro")
-    parsed = parse_any(wb)
+    parsed = _parse(wb)
     result = analyze(parsed, templates, PriceBook(db, org_id, today()), _asignaciones(asignaciones),
                      _memoria(db, org_id), excel_prices(wb))
     return {"archivo": file.filename, "titulo_dudoso": titulo_dudoso(result["titulo"], file.filename),
@@ -665,6 +678,16 @@ def _insert(db, table: str, rows: list[dict]) -> list[dict]:
 PARA_CONFIRMAR = "Para confirmar."
 
 
+def _dec(value: object) -> Decimal:
+    """A planilla number as the decimal it shows (0.15 → Decimal("0.15"), not 0.1499999…)."""
+    return Decimal(repr(float(value))) if isinstance(value, float) else Decimal(str(value))
+
+
+def _centavos(value: Decimal) -> Decimal:
+    """Rounded to cents the way Excel does it: half up (0,025 → 0,03; 0,995 → 1,00)."""
+    return value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
 def _item_row(item: dict, budget_id: str, org_id: str, templates: dict[str, dict],
               amarillas: set[str] | frozenset[str] = frozenset()) -> dict:
     """``amarillas``: task keys loaded without confirming; their notes end in "Para confirmar."."""
@@ -675,7 +698,32 @@ def _item_row(item: dict, budget_id: str, org_id: str, templates: dict[str, dict
     qty = item["cantidad"]
     mat = float(ex.get("mat_unit", 0)) if sin else 0.0
     mo = float(ex.get("mo_unit", 0)) if sin else 0.0
-    directo = round(mat * (qty or 0), 2) + round(mo * (qty or 0), 2)
+    # Totals in Decimal, rounded half up like Excel (in float, round(1.005, 2) gives 1.00 and the planilla says 1,01)
+    mat_total = _centavos(_dec(mat) * _dec(qty or 0))
+    mo_total = _centavos(_dec(mo) * _dec(qty or 0))
+    if sin and qty:
+        # The per-unit prices of the planilla are rounded to cents; its own totals of materials (L)
+        # and M.O. (M) are the real ones. Each one, on its own: when it differs from unit × quantity
+        # only by that rounding, the cost per unit keeps every decimal and the total is the planilla's,
+        # to the cent. Nothing moves between materials and M.O., and a planilla without those totals
+        # (or with a bigger difference) loads as before: the difference shows in "Ver diferencias con
+        # el Excel", never fixed silently.
+        def exacto(unit: float, total: object, calculado: Decimal) -> tuple[float, Decimal]:
+            if total is None or float(total) < 0:
+                return unit, calculado
+            # A unit with more than cents (ej. 1,0049, a formula =L/D in the planilla) is already the
+            # precise one: it is kept, and a total that contradicts it shows as a difference
+            if _dec(unit) != _centavos(_dec(unit)):
+                return unit, calculado
+            # Only the rounding of the unit to cents: total ÷ quantity must round to that same unit.
+            # Divided in Decimal, not float: $0,15 / 6 is exactly 0,025 → 0,03 (in float it is
+            # 0,02499999… → 0,02 and a valid total would be refused)
+            if _centavos(_dec(total) / _dec(qty)) == _centavos(_dec(unit)):
+                return float(total) / qty, _centavos(_dec(total))
+            return unit, calculado
+        mat, mat_total = exacto(mat, ex.get("mat_total"), mat_total)
+        mo, mo_total = exacto(mo, ex.get("mo_total"), mo_total)
+    directo = float(mat_total + mo_total)
     notas = item_notes(item)
     if es_item and item.get("clave") in amarillas:
         notas = f"{notas} {PARA_CONFIRMAR}" if notas else PARA_CONFIRMAR
@@ -683,7 +731,7 @@ def _item_row(item: dict, budget_id: str, org_id: str, templates: dict[str, dict
         "budget_id": budget_id, "org_id": org_id, "code": item["codigo"],
         "description": item["descripcion"], "unidad": item["unidad"], "cantidad": qty,
         "mat_unitario": mat, "mo_unitario": mo,
-        "mat_total": round(mat * (qty or 0), 2), "mo_total": round(mo * (qty or 0), 2),
+        "mat_total": float(mat_total), "mo_total": float(mo_total),
         "directo_total": directo, "indirecto_total": 0, "beneficio_total": 0, "neto_total": directo,
         "notas": notas, "sort_order": item["orden"],
         "template_id": templates[item["plantilla"]]["id"] if item.get("plantilla") else None,
@@ -783,7 +831,7 @@ def cargar_obra(
     elegidas = _asignaciones(asignaciones)
     memoria = _memoria(db, org_id)
     t0 = time.perf_counter()
-    result = analyze(parse_any(wb), templates, book, elegidas, memoria, excel_prices(wb))
+    result = analyze(_parse(wb), templates, book, elegidas, memoria, excel_prices(wb))
     tiempos = {"analisis_s": time.perf_counter() - t0}
 
     rojos = [t for t in result["tareas"] if t["estado"] == "rojo"]

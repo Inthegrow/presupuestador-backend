@@ -246,11 +246,108 @@ class TestReference:
 
 class TestItemPatch:
     def test_cantidad(self, client, db):
+        # Fixed resources (no formula): the direct cost is still their sum, like the Excel
+        # and like the full recalculation; only the cost per unit follows the new quantity
         r = client.patch(url(B1, "items", W3), json={"cantidad": 7})
         assert r.status_code == 200, r.text
-        assert item(db, W3)["directo_total"] == pytest.approx(7 * item(db, W3)["mat_unitario"])
+        assert item(db, W3)["directo_total"] == pytest.approx(7 * 333.33, abs=0.05)
+        assert item(db, W3)["mat_unitario"] == pytest.approx(333.33)
         check(client, db)
         assert r.json()["item"]["neto_total"] == item(db, W3)["neto_total"]
+
+    def test_cantidad_item_saved_at_zero_takes_its_resources(self, client, db):
+        # Bases aisladas (Ginkgo): imported from the Excel at $0 (#VALOR!) with its resources
+        # loaded; changing the quantity left it at $0 while the ficha showed the resources
+        w = item(db, W3)
+        w.update(dict.fromkeys(NUMBERS[1:], 0))
+        r = client.patch(url(B1, "items", W3), json={"cantidad": 5})
+        assert r.status_code == 200, r.text
+        assert item(db, W3)["directo_total"] == pytest.approx(7 * 333.33, abs=0.05)
+        assert item(db, W3)["neto_total"] > 0
+        antes = numbers(db)
+        assert client.post(f"/budgets/{B1}/cascade-recalculate").status_code == 200
+        assert numbers(db) == antes  # the same number as «Recálculo completo»
+        check(client, db)
+
+    @pytest.mark.parametrize("cantidad", [1000, 3, 123457])
+    def test_cantidad_keeps_the_real_sum_of_the_resources(self, client, db, cantidad):
+        # Codex (PR 52): $1 over 1000 units is $0,00 per unit; the total must still be $1.
+        # 3 and 123457 do not divide $1 nor $2333,31 exactly.
+        r = next(x for x in db.tables["item_resources"] if x["id"] == R31)
+        r.update(cantidad=1, precio_unitario=1)
+        assert client.patch(url(B1, "items", W3, "resources", R31), json={"cantidad": 1}).status_code == 200
+        assert client.patch(url(B1, "items", W3), json={"cantidad": cantidad}).status_code == 200
+        assert item(db, W3)["directo_total"] == 1
+        assert item(db, W3)["mat_total"] == 1
+        assert item(db, W3)["neto_total"] > 1
+        antes = numbers(db)
+        assert client.post(f"/budgets/{B1}/cascade-recalculate").status_code == 200
+        assert numbers(db) == antes
+        check(client, db)
+
+    @staticmethod
+    def _sin_recursos(db, client, cantidad, mat_unitario, mo_unitario=0):
+        """W3 as a work priced by hand: no resources, its saved per-unit prices."""
+        db.tables["item_resources"] = [x for x in db.tables["item_resources"] if x["item_id"] != W3]
+        item(db, W3).update(cantidad=cantidad, mat_unitario=mat_unitario, mo_unitario=mo_unitario)
+        assert client.post(f"/budgets/{B1}/cascade-recalculate").status_code == 200
+
+    @pytest.mark.parametrize("body", [
+        {"mat_unitario": 20},
+        {"mo_unitario": 20},
+        {"cantidad": 7, "mat_unitario": 20},  # a quantity change sent together
+        {"cantidad": 3.5, "mo_unitario": 20},  # the saved quantity sent together
+    ])
+    def test_a_work_with_resources_refuses_a_price_by_hand(self, client, db, body):
+        # Codex (PR 52, ronda 2): a price typed by hand on a work with resources was replaced by
+        # the sum of the resources on the next quantity change (and in «Recálculo completo»).
+        # One source per work: its resources. Refused, and nothing is written.
+        antes = numbers(db)
+        r = client.patch(url(B1, "items", W3), json=body)
+        assert r.status_code == 409, r.text
+        assert "recursos" in r.json()["detail"]
+        assert numbers(db) == antes
+        # The same unit sent with its saved value is not a change: allowed
+        same = {"mat_unitario": item(db, W3)["mat_unitario"], "notas_calculo": "ok"}
+        assert client.patch(url(B1, "items", W3), json=same).status_code == 200
+        assert numbers(db) == antes
+        # And a quantity change still takes the sum of the resources
+        assert client.patch(url(B1, "items", W3), json={"cantidad": 7}).status_code == 200
+        assert item(db, W3)["directo_total"] == pytest.approx(7 * 333.33, abs=0.005)
+        check(client, db)
+
+    @pytest.mark.parametrize("extra", [{}, {"cantidad": 3}, {"cantidad": 3.0}, {"otro_unitario": True},
+                                       {"cantidad": 3, "otro_unitario": True}])
+    @pytest.mark.parametrize("edita, otro", [("mo_unitario", "mat_total"), ("mat_unitario", "mo_total")])
+    def test_editing_one_unit_keeps_the_other_total(self, client, db, edita, otro, extra):
+        # A work priced by hand: editing one cost per unit never moves the other's total, and
+        # what counts is whether a value changed, not whether it came in the request
+        unit_otro = "mat_unitario" if edita == "mo_unitario" else "mo_unitario"
+        self._sin_recursos(db, client, 3, **{unit_otro: 0.5, edita: 0})
+        assert item(db, W3)[otro] == 1.5
+        body = {edita: 1, **{k: v for k, v in extra.items() if k != "otro_unitario"}}
+        if extra.get("otro_unitario"):
+            body[unit_otro] = 0.5  # its saved value
+        r2 = client.patch(url(B1, "items", W3), json=body)
+        assert r2.status_code == 200, r2.text
+        w = item(db, W3)
+        assert w[otro] == 1.5
+        assert w["mo_total" if otro == "mat_total" else "mat_total"] == 3
+        assert w["directo_total"] == 4.5
+        check(client, db)
+
+    def test_cantidad_large_and_not_exact(self, client, db):
+        assert client.patch(url(B1, "items", W3), json={"cantidad": 123457}).status_code == 200
+        assert item(db, W3)["directo_total"] == pytest.approx(7 * 333.33, abs=0.005)
+        assert client.post(f"/budgets/{B1}/cascade-recalculate").status_code == 200
+        assert item(db, W3)["directo_total"] == pytest.approx(7 * 333.33, abs=0.005)
+
+    def test_cantidad_zero_costs_nothing(self, client, db):
+        # Quantity 0 = the work is not quoted: $0, not the sum of its resources as if it were 1
+        assert client.patch(url(B1, "items", W3), json={"cantidad": 0}).status_code == 200
+        w = item(db, W3)
+        assert (w["mat_total"], w["mo_total"], w["directo_total"], w["neto_total"]) == (0, 0, 0, 0)
+        check(client, db)
 
     def test_cantidad_with_formula_resources(self, client, db):
         r = client.patch(url(B1, "items", W2), json={"cantidad": 40})
@@ -260,6 +357,7 @@ class TestItemPatch:
         check(client, db)
 
     def test_unit_price(self, client, db):
+        self._sin_recursos(db, client, 3.5, 666.66)
         assert client.patch(url(B1, "items", W3), json={"mo_unitario": 100.5}).status_code == 200
         assert item(db, W3)["mo_total"] == pytest.approx(351.75)
         check(client, db)
@@ -657,7 +755,7 @@ class TestVersions:
     def test_each_version_has_its_price(self, client, db):
         assert client.post(url(B1, "versions"), json={}).status_code == 200
         primero = client.get(url(B1, "full")).json()["analysis"]["neto_total"]
-        assert client.patch(url(B1, "items", W3), json={"cantidad": 70}).status_code == 200
+        assert client.patch(url(B1, "items", W3, "resources", R31), json={"precio_unitario": 999}).status_code == 200
         assert client.post(url(B1, "versions"), json={}).status_code == 200
         segundo = check(client, db)["neto_total"]
         assert segundo > primero

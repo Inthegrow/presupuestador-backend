@@ -24,7 +24,7 @@ import { budgetApi, mensajeDeError } from '../lib/api'
 import type { PrecioFaltante } from '../lib/api'
 import { useAuth } from '../contexts/AuthContext'
 import { escaleraDe, fmtPct, indirectosCompletos, pctsEscalera } from '../lib/cascada'
-import { fmtNumber, fmtPercent, unidadEnPalabras } from '../lib/format'
+import { cuentaPorUnidad, fmtCantidad, fmtNumber, fmtPercent, fmtUnitario, unidadEnPalabras } from '../lib/format'
 import { ESTILO, estadoDeTrabajo, precioPorUnidad } from '../lib/semaforo'
 import BuscarPrecio, { IconoBuscarInternet, normalizarCodigo } from '../components/BuscarPrecio'
 import type { PrecioGuardado } from '../components/BuscarPrecio'
@@ -75,6 +75,21 @@ const fmt = new Intl.NumberFormat('es-AR', {
 const fmtARS = (v: number | null | undefined) => fmt.format(v ?? 0)
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * "total ÷ cantidad = costo por unidad" (regla única: cuentaPorUnidad). Con "=" solo si los tres
+ * números que se leen son exactos; si no, "≈" y la aclaración: el total es el de los recursos.
+ */
+function CuentaPorUnidad({ total, cantidad, etiqueta }: { total: number; cantidad: number; etiqueta: string }) {
+  const c = cuentaPorUnidad(total, cantidad)
+  return (
+    <span data-testid="cuenta-por-unidad" data-aproximado={c.aproximado ? 'si' : 'no'}>
+      {c.total} ÷ {c.cantidad} {c.signo}&nbsp;
+      <strong>{etiqueta}: {c.unitario}</strong>
+      {c.aproximado && <span className="text-gray-500"> (redondeado; el total es el de los recursos)</span>}
+    </span>
+  )
+}
 
 const ORIGEN_LABEL: Record<string, string> = {
   presupuesto: 'presupuesto',
@@ -596,7 +611,6 @@ function ResourceSection({ tipo, recursos, itemQty, budgetId, itemId, onReload, 
 
   const filtered = recursos.filter((r) => r.tipo === tipo)
   const total = filtered.reduce((s, r) => s + r.subtotal, 0)
-  const unitPrice = itemQty > 0 ? total / itemQty : 0
 
   const handleSave = async (id: string, data: Partial<ItemResource>) => {
     await budgetApi.updateResource(budgetId, itemId, id, data)
@@ -690,7 +704,7 @@ function ResourceSection({ tipo, recursos, itemQty, budgetId, itemId, onReload, 
                   </div>
                   {itemQty > 0 && (
                     <div className="text-[12px] mt-0.5">
-                      {fmtARS(total)} ÷ {fmtNumber(itemQty, 2)} = <strong>{tipoUnitLabel}: {fmtARS(unitPrice)}</strong>
+                      <CuentaPorUnidad total={total} cantidad={itemQty} etiqueta={tipoUnitLabel} />
                     </div>
                   )}
                 </div>
@@ -758,8 +772,7 @@ function ResourceSection({ tipo, recursos, itemQty, budgetId, itemId, onReload, 
                   {itemQty > 0 && (
                     <tr className="bg-[#E8F5EE]/60">
                       <td colSpan={headers.length} className="px-3 py-1.5 text-right text-[10px] text-[#1B5E4B]">
-                        {fmtARS(total)} ÷ {fmtNumber(itemQty, 2)} =&nbsp;
-                        <strong>{tipoUnitLabel}: {fmtARS(unitPrice)}</strong>
+                        <CuentaPorUnidad total={total} cantidad={itemQty} etiqueta={tipoUnitLabel} />
                       </td>
                     </tr>
                   )}
@@ -1351,7 +1364,7 @@ export default function ItemDetail() {
               </div>
               <div className="flex items-center gap-1.5">
                 <span className="text-[10px] text-[#2D8D68] uppercase font-semibold">Cantidad</span>
-                <span className="font-bold text-[#143D34] text-sm">{fmtNumber(cantidad, 2)}</span>
+                <span className="font-bold text-[#143D34] text-sm">{fmtCantidad(cantidad, 2)}</span>
               </div>
               {item?.notas_calculo && (
                 <span className="inline-flex items-center gap-1 text-[10px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">
@@ -1374,7 +1387,7 @@ export default function ItemDetail() {
           ].map(({ label, value }) => (
             <div key={label} className="bg-white rounded-lg p-2 text-center border border-[#C3E5D3] min-w-0">
               <div className="text-[10px] max-md:text-[11px] leading-tight text-[#2D8D68] font-semibold mb-0.5 break-words">{label} por {porUnidad}</div>
-              <div className="font-bold text-[#143D34] text-xs max-md:text-[15px] tabular-nums">{fmtARS(value)}</div>
+              <div className="font-bold text-[#143D34] text-xs max-md:text-[15px] tabular-nums">{fmtUnitario(value, fmtARS)}</div>
             </div>
           ))}
         </div>

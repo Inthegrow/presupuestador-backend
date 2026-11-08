@@ -399,6 +399,34 @@ async def update_item(
     if any(field in update_data for field in COST_FIELDS):
         config = _budget_config(db, bid, org_id)
         recalculated = calc_item_totals({**existing.data, **update_data})
+
+        def changed(field: str) -> bool:
+            # By value, not by presence: the editor may send a field with the saved value
+            return field in update_data and float(update_data[field] or 0) != float(existing.data.get(field) or 0)
+
+        # One source per work: a work with resources is priced from them (here, on a quantity
+        # change and in «Recálculo completo»), so a cost per unit typed by hand would be lost
+        # later without notice. It is refused before anything is written.
+        if changed("mat_unitario") or changed("mo_unitario"):
+            con_recursos = (
+                db.table("item_resources").select("id").eq("item_id", iid).eq("org_id", org_id)
+                .limit(1).execute().data
+            )
+            if con_recursos:
+                raise HTTPException(
+                    409,
+                    "Este trabajo se calcula con sus recursos: para cambiar su precio, "
+                    "cambiá los recursos en su ficha.",
+                )
+
+        if not changed("cantidad"):
+            # Editing one cost per unit never touches the other's total: the saved total is
+            # the real one (ej. $1 of materials over 1000 units is $0,00 per unit), and
+            # rebuilding it from its rounded unit lost money.
+            for unit, total in (("mat_unitario", "mat_total"), ("mo_unitario", "mo_total")):
+                if not changed(unit) and existing.data.get(total) is not None:
+                    recalculated[total] = round(float(existing.data[total]), 2)
+            recalculated["directo_total"] = round(recalculated["mat_total"] + recalculated["mo_total"], 2)
         price_item(recalculated, config)
         for field in PRICE_FIELDS:
             if field in recalculated:
@@ -891,6 +919,11 @@ def _requantify_item(db, item: dict, org_id: str, config: dict) -> int:
     )
     to_update = [r for r in resources if has_formula(r)]
     if not to_update:
+        # Fixed resources (ej. imported from Excel): their quantities stay, but the item
+        # still comes from them, the same as the full recalculation (_run_cascade).
+        # Without this, an item imported at $0 stayed at $0 after a quantity change.
+        if resources:
+            _recalc_item_from_resources(db, item["id"], org_id, config)
         return 0
 
     qty = float(item.get("cantidad") or 0)

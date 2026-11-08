@@ -189,7 +189,8 @@ class TestFindComputo:
         info = find_computo(modelo_workbook())
         assert (info["hoja"], info["fila_titulos"], info["primera_fila"]) == ("CYP", 5, 6)
         assert info["columnas"] == {"codigo": 1, "descripcion": 2, "unidad": 3, "cantidad": 4}
-        assert info["precios"] == {"mat_unit": 5, "mo_unit": 10, "directo": 14, "neto": 26}  # E/J/N/Z
+        assert info["precios"] == {"mat_unit": 5, "mo_unit": 10, "mat_total": 12, "mo_total": 13, "directo": 14,
+                                  "neto": 26}  # E/J/L/M/N/Z
 
     def test_01_cp_without_titles_row_keeps_the_terrac_layout(self):
         from tests.test_obra_import import _workbook
