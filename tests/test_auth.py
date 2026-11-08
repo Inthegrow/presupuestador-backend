@@ -50,7 +50,7 @@ ROUTE_ROLES: dict[tuple[str, str], str] = {
     ("POST", "/budgets/create-full"): EDITOR,
     ("GET", "/budgets/{budget_id}"): MEMBER,
     ("PATCH", "/budgets/{budget_id}"): EDITOR,
-    ("DELETE", "/budgets/{budget_id}"): ADMIN,
+    ("DELETE", "/budgets/{budget_id}"): EDITOR,  # admin y "Carga y edita" (entrega 11, E11)
     ("POST", "/budgets/{budget_id}/items"): EDITOR,
     ("GET", "/budgets/{budget_id}/items"): MEMBER,
     ("PATCH", "/budgets/{budget_id}/items/{item_id}"): EDITOR,
@@ -135,6 +135,8 @@ ROUTE_ROLES: dict[tuple[str, str], str] = {
     # Buscador de precios en internet (no guarda nada; consume la clave de OpenAI)
     ("POST", "/precios/buscar"): EDITOR,
     ("GET", "/precios/buscador"): MEMBER,
+    # Modelo de presupuestación de Terrac (Trabajos típicos de Nuevo presupuesto)
+    ("GET", "/modelo-terrac"): MEMBER,
 }
 
 # Rutas sin empresa elegida: la portada, /health y /me (que muestra el selector).

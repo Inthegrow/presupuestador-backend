@@ -140,6 +140,8 @@ class IndirectConfigUpdate(BaseModel):
 class GeneralIndirectsUpdate(IndirectConfigUpdate):
     # True: besides saving, recalculate the budgets that follow the general values
     aplicar: bool = False
+    # A price older than this many days is "viejo" (Lista de precios; migration 013). null = 90
+    precio_viejo_dias: int | None = Field(default=None, ge=1, le=3650)
 
 
 # ── Budget copy ─────────────────────────────────────────────────────────────
@@ -164,8 +166,11 @@ class PriceUpdateRequest(BaseModel):
 class ItemInput(BaseModel):
     codigo: str
     descripcion: str
-    unidad: str = ""
-    cantidad: float = 0
+    unidad: str | None = ""
+    cantidad: float | None = 0  # empty = 0 (Sol puts it later)
+    # Code of a fórmula of the company (Trabajos típicos of the TERRAC model): the work is created with
+    # that fórmula applied and its prices from the oficial list, like POST /budgets/{id}/trabajos
+    plantilla: str | None = None
 
 
 class SeccionInput(BaseModel):

@@ -20,6 +20,32 @@ const SOLE_LOGO = (
   </svg>
 )
 
+/** El error del sistema de claves (Supabase), en palabras: la causa real */
+function causaDelError(err: unknown): string {
+  const e = (err ?? {}) as { message?: unknown; code?: unknown; status?: unknown; name?: unknown }
+  const mensaje = typeof e.message === 'string' ? e.message : ''
+  const code = typeof e.code === 'string' ? e.code : ''
+  const status = typeof e.status === 'number' ? e.status : 0
+  const name = typeof e.name === 'string' ? e.name : ''
+  const t = `${code} ${mensaje}`.toLowerCase()
+  if (code === 'email_not_confirmed' || /email not confirmed/.test(t)) {
+    return 'Tu mail todavía no está confirmado. Buscá el mail de confirmación en tu correo (mirá también en spam) y tocá el enlace.'
+  }
+  if (status === 429 || /rate limit|too many|over_request_rate_limit|over_email_send_rate_limit/.test(t)) {
+    return 'Hubo demasiados intentos seguidos. Esperá unos minutos y probá de nuevo.'
+  }
+  if (code === 'invalid_credentials' || /invalid login credentials|invalid_grant/.test(t)) {
+    return 'El mail o la clave no son correctos.'
+  }
+  if (name === 'AuthRetryableFetchError' || (status === 0 && /fetch|network|load failed/.test(t)) || /failed to fetch|networkerror|load failed/.test(t)
+    || (typeof navigator !== 'undefined' && navigator.onLine === false)) {
+    return 'No me pude conectar con el sistema de claves. Revisá tu conexión a internet y probá de nuevo.'
+  }
+  if (code === 'user_banned') return 'Tu usuario está bloqueado. Pedile a quien administra la app que lo revise.'
+  if (status >= 500) return 'El sistema de claves no está respondiendo. Probá de nuevo en un rato.'
+  return mensaje ? `No pude entrar: ${mensaje}` : 'No pude entrar. Probá de nuevo.'
+}
+
 export default function Login() {
   const { user, signIn, error: errorServidor, clearError } = useAuth()
   const navigate = useNavigate()
@@ -33,10 +59,15 @@ export default function Login() {
     setError('')
     clearError()
     setLoading(true)
-    const { error } = await signIn(email, password)
+    let error: unknown = null
+    try {
+      error = (await signIn(email, password)).error
+    } catch (e) {
+      error = e
+    }
     setLoading(false)
     if (error) {
-      setError('El mail o la clave no son correctos.')
+      setError(causaDelError(error))
     } else {
       navigate('/app/dashboard', { replace: true })
     }
@@ -74,7 +105,7 @@ export default function Login() {
             <p className="text-gray-500 text-sm mb-6">Entrá con el mismo mail y clave de SOLÉ.</p>
 
             {(error || errorServidor) && (
-              <div className="mb-4 bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-lg">
+              <div role="alert" data-testid="error-login" className="mb-4 bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-lg">
                 {error || errorServidor}
               </div>
             )}
@@ -91,7 +122,7 @@ export default function Login() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="admin@terrac.com"
-                  className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm outline-none focus:border-[#2D8D68] focus:ring-1 focus:ring-[#2D8D68] transition"
+                  className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-base sm:text-sm outline-none focus:border-[#2D8D68] focus:ring-1 focus:ring-[#2D8D68] transition"
                 />
               </div>
               <div>
@@ -104,7 +135,7 @@ export default function Login() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
-                  className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm outline-none focus:border-[#2D8D68] focus:ring-1 focus:ring-[#2D8D68] transition"
+                  className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-base sm:text-sm outline-none focus:border-[#2D8D68] focus:ring-1 focus:ring-[#2D8D68] transition"
                 />
               </div>
               <div className="text-right -mt-2">
@@ -125,6 +156,10 @@ export default function Login() {
                 ) : 'Ingresar'}
               </button>
             </form>
+
+            <p className="mt-5 text-sm text-gray-600 bg-[#F5F6F8] rounded-lg px-4 py-3 leading-relaxed" data-testid="ayuda-google">
+              Si entrás a SOLÉ con Google, tocá “Olvidé mi clave” para armarte una.
+            </p>
 
             <p className="mt-6 text-center text-xs text-gray-400">
               Sole Presupuestador PRO · v3.0 · 2026

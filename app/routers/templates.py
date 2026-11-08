@@ -404,11 +404,12 @@ def conversion_factor(template: dict, descripcion: str, unidad: object, factor: 
 
 def build_rows(
     db, org_id: str, budget: dict, template: dict, item_id: str | None,
-    qty: float, params: dict, factor: float,
+    qty: float, params: dict, factor: float, book: PriceBook | None = None,
 ) -> tuple[list[dict], dict[str, dict]]:
     """The item's resources from the recipe, priced, and the codes without a price.
 
-    Nothing is written. A bad formula raises 422 (before anything is saved).
+    Nothing is written. A bad formula raises 422 (before anything is saved). ``book``: the prices
+    already read (several works of one budget at once, POST /budgets/create-full).
     """
     org_pct = org_waste_pct(db, org_id)
 
@@ -428,7 +429,8 @@ def build_rows(
 
     # Same price rule as Cargar obra and "Actualizar precios": oficial catalog first,
     # price in force at the budget's "precios al" date (today when it has none)
-    book = PriceBook(db, org_id, _precios_al(budget)) if any(r["codigo"] for r in rows) else None
+    if book is None and any(r["codigo"] for r in rows):
+        book = PriceBook(db, org_id, _precios_al(budget))
     faltantes: dict[str, dict] = {}
     for row in rows:
         entry, precio, fecha, problema = book.price(row) if book and row["codigo"] else (None, None, None, None)
@@ -449,6 +451,34 @@ def build_rows(
         })
         calc_resource_subtotal(row)
     return rows, faltantes
+
+
+def write_applied(db, org_id: str, template_id: str, item: dict, rows: list[dict], params: dict) -> list[dict]:
+    """Replace the item's resources with ``rows`` and save its recipe and its costs per unit.
+
+    No recalculation of the budget and no way back: save_applied (one item) and create-full (a new
+    budget) do that. Returns the created resources.
+    """
+    item_id = str(item["id"])
+    db.table("item_resources").delete().eq("item_id", item_id).eq("org_id", org_id).execute()
+    created = (db.table("item_resources").insert(rows).execute().data or []) if rows else []
+    if len(created) != len(rows):
+        raise RuntimeError(f"Se guardaron {len(created)} de {len(rows)} recursos")
+
+    # Recalculate the item from its new resources (non-cost fields + a provisional total)
+    all_resources = (
+        db.table("item_resources").select("*").eq("item_id", item_id).eq("org_id", org_id).execute()
+    )
+    updated_item = calc_item_from_resources(dict(item), all_resources.data or [])
+    written = db.table("budget_items").update({
+        "template_id": template_id,
+        "parametros": params,
+        "mat_unitario": updated_item["mat_unitario"],
+        "mo_unitario": updated_item["mo_unitario"],
+    }).eq("id", item_id).eq("org_id", org_id).execute()
+    if not written.data:
+        raise RuntimeError(f"No se actualizó el ítem {item_id}")
+    return created
 
 
 def save_applied(
@@ -472,24 +502,7 @@ def save_applied(
     anteriores = [r for r in before["resources"] if str(r.get("item_id")) == item_id]
 
     try:
-        db.table("item_resources").delete().eq("item_id", item_id).eq("org_id", org_id).execute()
-        created = (db.table("item_resources").insert(rows).execute().data or []) if rows else []
-        if len(created) != len(rows):
-            raise RuntimeError(f"Se guardaron {len(created)} de {len(rows)} recursos")
-
-        # Recalculate the item from its new resources (non-cost fields + a provisional total)
-        all_resources = (
-            db.table("item_resources").select("*").eq("item_id", item_id).eq("org_id", org_id).execute()
-        )
-        updated_item = calc_item_from_resources(dict(item), all_resources.data or [])
-        written = db.table("budget_items").update({
-            "template_id": template_id,
-            "parametros": params,
-            "mat_unitario": updated_item["mat_unitario"],
-            "mo_unitario": updated_item["mo_unitario"],
-        }).eq("id", item_id).eq("org_id", org_id).execute()
-        if not written.data:
-            raise RuntimeError(f"No se actualizó el ítem {item_id}")
+        created = write_applied(db, org_id, template_id, item, rows, params)
         # Then the same full recalculation as "Recálculo completo" (inherited waste, purchase
         # rounding over the whole budget, cascade indirects), so the item shows its final price
         # right away and a later full recalculation does not move it

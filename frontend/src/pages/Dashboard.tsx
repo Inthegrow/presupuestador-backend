@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { LayoutGrid, TrendingUp, DollarSign, Plus, Search, ArrowRight } from 'lucide-react'
+import { useLocation, useNavigate } from 'react-router-dom'
+import { LayoutGrid, TrendingUp, DollarSign, Plus, Search, ArrowRight, CheckCircle, X } from 'lucide-react'
 import { budgetApi } from '../lib/api'
 import { fmtCurrency } from '../lib/format'
 import type { Budget, AnalysisResponse } from '../types'
@@ -32,6 +32,12 @@ export default function Dashboard() {
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('todos')
   const navigate = useNavigate()
+  // El presupuesto que se acaba de borrar (desde una tarjeta o desde el editor), para decirlo arriba
+  const location = useLocation()
+  const [borrado, setBorrado] = useState<string | null>(() => {
+    const st = location.state as { borrado?: unknown } | null
+    return st && typeof st.borrado === 'string' ? st.borrado : null
+  })
 
   const STATUS_PILLS = [
     { key: 'todos', label: 'Todos' },
@@ -151,6 +157,16 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {borrado && (
+        <div role="status" data-testid="presupuesto-borrado" className="mb-4 flex items-center gap-2 bg-[#E8F5EE] border border-[#2D8D68]/25 text-[#143D34] text-sm px-4 py-2.5 rounded-xl">
+          <CheckCircle size={16} className="text-[#2D8D68] flex-shrink-0" />
+          <span className="flex-1 min-w-0 [overflow-wrap:anywhere]">Listo: se borró «{borrado}».</span>
+          <button onClick={() => setBorrado(null)} aria-label="Cerrar" className="w-10 h-10 md:w-6 md:h-6 -my-2 flex items-center justify-center rounded-full opacity-60 hover:opacity-100">
+            <X size={14} />
+          </button>
+        </div>
+      )}
+
       {/* Loading / error */}
       {loading && (
         <div className="flex items-center gap-2 text-sm text-gray-400 mb-4">
@@ -213,7 +229,7 @@ export default function Dashboard() {
               directTotal={a?.directo_total}
               netoTotal={a?.neto_total}
               subtitle={a ? `${a.items_count} ${a.items_count === 1 ? 'trabajo' : 'trabajos'}` : undefined}
-              onDelete={() => loadBudgets()}
+              onDelete={() => { setBorrado(b.name); loadBudgets() }}
             />
           )
         })}

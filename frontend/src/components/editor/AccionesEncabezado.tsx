@@ -15,6 +15,10 @@ export interface Accion {
   girando?: boolean
   // Cuanto más alto, más tiempo queda a la vista antes de pasar a "Más"
   prioridad: number
+  // Siempre en "Más", nunca suelta en el encabezado (ej. borrar el presupuesto)
+  siempreEnMas?: boolean
+  // En rojo (una acción que borra)
+  peligro?: boolean
 }
 
 interface Props {
@@ -69,14 +73,17 @@ export default function AccionesEncabezado({ acciones, principal, todasEnMas, fi
       const anchoMas = ancho('__mas')
       const anchoPrincipal = principalRef.current?.getBoundingClientRect().width ?? 0
       let libre = el.clientWidth - minIzqRef.current() - (anchoPrincipal ? anchoPrincipal + SEPARACION : 0)
-      const total = acciones.reduce((s, a) => s + ancho(a.key) + SEPARACION, 0)
+      const sueltas = acciones.filter((a) => !a.siempreEnMas)
+      // Con alguna acción que va siempre en "Más", el botón "Más" está siempre
+      if (sueltas.length < acciones.length) libre -= anchoMas + SEPARACION
+      const total = sueltas.reduce((s, a) => s + ancho(a.key) + SEPARACION, 0)
       let nuevas: Set<string>
       if (total <= libre) {
-        nuevas = new Set(acciones.map((a) => a.key))
+        nuevas = new Set(sueltas.map((a) => a.key))
       } else {
-        libre -= anchoMas + SEPARACION
+        if (sueltas.length === acciones.length) libre -= anchoMas + SEPARACION
         nuevas = new Set()
-        for (const a of [...acciones].sort((x, y) => y.prioridad - x.prioridad)) {
+        for (const a of [...sueltas].sort((x, y) => y.prioridad - x.prioridad)) {
           const w = ancho(a.key) + SEPARACION
           if (w > libre) break
           libre -= w
@@ -100,8 +107,10 @@ export default function AccionesEncabezado({ acciones, principal, todasEnMas, fi
     return () => document.removeEventListener('keydown', tecla)
   }, [abierto, todasEnMas])
 
-  const visibles = todasEnMas ? [] : acciones.filter((a) => aLaVista.has(a.key))
-  const enMas = todasEnMas ? acciones : acciones.filter((a) => !aLaVista.has(a.key))
+  const visibles = todasEnMas ? [] : acciones.filter((a) => !a.siempreEnMas && aLaVista.has(a.key))
+  // Lo que borra va al final del menú, separado
+  const enMasSinOrden = todasEnMas ? acciones : acciones.filter((a) => a.siempreEnMas || !aLaVista.has(a.key))
+  const enMas = [...enMasSinOrden.filter((a) => !a.peligro), ...enMasSinOrden.filter((a) => a.peligro)]
   const elegir = (a: Accion) => { setAbierto(false); a.onClick() }
 
   return (
@@ -110,7 +119,7 @@ export default function AccionesEncabezado({ acciones, principal, todasEnMas, fi
       {!todasEnMas && (
         <div ref={medirRef} aria-hidden inert className="absolute w-0 h-0 overflow-hidden invisible pointer-events-none">
           <div className="flex w-max gap-2">
-            {acciones.map((a) => (
+            {acciones.filter((a) => !a.siempreEnMas).map((a) => (
               <div key={a.key} data-medir={a.key}><BotonAccion a={a} /></div>
             ))}
             <div data-medir="__mas">
@@ -152,9 +161,10 @@ export default function AccionesEncabezado({ acciones, principal, todasEnMas, fi
                       onClick={() => elegir(a)}
                       disabled={a.disabled}
                       title={a.title}
-                      className="w-full text-left px-3.5 py-2 max-lg:min-h-11 max-lg:text-[13px] text-xs font-medium text-gray-700 hover:bg-gray-50 flex items-center gap-2.5 disabled:opacity-50"
+                      className={`w-full text-left px-3.5 py-2 max-lg:min-h-11 max-lg:text-[13px] text-xs font-medium flex items-center gap-2.5 disabled:opacity-50 ${
+                        a.peligro ? 'text-red-600 hover:bg-red-50 border-t border-gray-100 mt-1 pt-2.5' : 'text-gray-700 hover:bg-gray-50'}`}
                     >
-                      <Icono size={14} className={`text-gray-400 ${a.girando ? 'animate-spin' : ''}`} />
+                      <Icono size={14} className={`${a.peligro ? 'text-red-500' : 'text-gray-400'} ${a.girando ? 'animate-spin' : ''}`} />
                       {a.label}
                     </button>
                   )
@@ -179,9 +189,9 @@ export default function AccionesEncabezado({ acciones, principal, todasEnMas, fi
                   role="menuitem"
                   onClick={() => elegir(a)}
                   disabled={a.disabled}
-                  className="w-full text-left px-3 min-h-[52px] rounded-xl text-[15px] font-medium text-gray-800 active:bg-gray-100 flex items-center gap-3 disabled:opacity-50"
+                  className={`w-full text-left px-3 min-h-[52px] rounded-xl text-[15px] font-medium active:bg-gray-100 flex items-center gap-3 disabled:opacity-50 ${a.peligro ? 'text-red-600' : 'text-gray-800'}`}
                 >
-                  <span className="w-9 h-9 rounded-full bg-[#E8F5EE] text-[#2D8D68] flex items-center justify-center flex-shrink-0">
+                  <span className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${a.peligro ? 'bg-red-50 text-red-500' : 'bg-[#E8F5EE] text-[#2D8D68]'}`}>
                     <Icono size={17} className={a.girando ? 'animate-spin' : ''} />
                   </span>
                   <span className="flex-1">

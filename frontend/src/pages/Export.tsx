@@ -9,6 +9,7 @@ import { escaleraDe, indirectosCompletos } from '../lib/cascada'
 import { estadoEnTabla } from '../lib/semaforo'
 import { fmtPesos } from '../lib/format'
 import type { Budget, BudgetItem, IndirectConfig } from '../types'
+import { usePrecioViejoDias } from '../components/PrecioViejo'
 
 // ─── Las cuatro opciones, en este orden ────────────────────────────────────────
 
@@ -151,6 +152,9 @@ export default function Export() {
   // null = todavía no se sabe o la consulta falló (nunca "todo bien" sin saber)
   const [faltantes, setFaltantes] = useState<Faltantes | null>(null)
   const [faltantesFallo, setFaltantesFallo] = useState(false)
+  // Precios viejos (más días que «precio viejo» de la empresa): cuántos trabajos y cuántos precios
+  const [viejos, setViejos] = useState<{ trabajos: number; precios: number; dias: number | null } | null>(null)
+  const umbralViejo = usePrecioViejoDias()
   const [estados, setEstados] = useState<Record<OpcionId, Estado>>({
     cliente: { tipo: 'nada' }, terrac: { tipo: 'nada' }, interno: { tipo: 'nada' }, simple: { tipo: 'nada' },
   })
@@ -172,9 +176,19 @@ export default function Export() {
           ? r.recursos_por_item : null
         if (porItem && recursosPorItem) setFaltantes({ porItem, recursosPorItem, ids: new Set(its.map((i) => i.id)) })
         else { setFaltantes(null); setFaltantesFallo(true) }
+        // `viejos`: por trabajo ({id: cuántos}) o el total
+        const v = r?.viejos
+        const dias = typeof r?.precio_viejo_dias === 'number' ? r.precio_viejo_dias : null
+        if (v && typeof v === 'object') {
+          const ns = Object.values(v).map((x) => Number(x) || 0).filter((x) => x > 0)
+          setViejos({ trabajos: ns.length, precios: ns.reduce((a, b) => a + b, 0), dias })
+        } else if (typeof v === 'number') {
+          setViejos({ trabajos: 0, precios: v, dias })
+        } else setViejos(null)
       } catch {
         setFaltantes(null)
         setFaltantesFallo(true)
+        setViejos(null)
       }
     } catch (err) {
       setItems(null)
@@ -297,6 +311,27 @@ export default function Export() {
             <p className="mt-2.5 px-1 flex items-center gap-1.5 text-xs text-[#1B5E4B]" data-testid="sin-faltantes">
               <CheckCircle2 size={14} className="text-[#2D8D68] flex-shrink-0" /> Todos los trabajos tienen sus precios.
             </p>
+          )}
+          {!errorTotal && viejos && viejos.precios > 0 && (
+            <div role="status" data-testid="aviso-precios-viejos" className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-2.5 @3xs:p-3 text-xs @3xs:text-sm text-amber-900 flex items-start gap-2">
+              <AlertTriangle size={16} className="text-amber-600 flex-shrink-0 mt-0.5" />
+              <div className="min-w-0 flex-1">
+                <p className="font-semibold">
+                  {viejos.trabajos > 0
+                    ? `${viejos.trabajos === 1 ? 'Hay 1 trabajo' : `Hay ${viejos.trabajos} trabajos`} con precios de hace más de ${viejos.dias ?? umbralViejo} días`
+                    : `${viejos.precios === 1 ? 'Hay 1 precio' : `Hay ${viejos.precios} precios`} de hace más de ${viejos.dias ?? umbralViejo} días`}.
+                </p>
+                <p className="text-xs text-amber-800 mt-1">
+                  Se puede exportar igual. Para traer los de hoy: Versiones → «Actualizar a precios de hoy».
+                </p>
+                <Link
+                  to={`/app/budgets/${id ?? ''}/versions`}
+                  className="mt-2 max-md:min-h-10 inline-flex items-center gap-1 text-xs font-semibold bg-white border border-amber-300 text-amber-900 rounded-lg px-3 py-1.5 hover:bg-amber-100"
+                >
+                  Ir a Versiones
+                </Link>
+              </div>
+            </div>
           )}
           {!errorTotal && !cargando && faltantesFallo && (
             <p className="mt-2.5 px-1 text-xs text-gray-500" data-testid="faltantes-sin-revisar">

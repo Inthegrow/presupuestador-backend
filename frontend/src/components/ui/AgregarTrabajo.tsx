@@ -82,11 +82,18 @@ export default function AgregarTrabajo({ budgetId, rubroElegido, onSoltarRubro, 
   const buscadorRef = useRef<HTMLInputElement>(null)
   const cantidadRef = useRef<HTMLInputElement>(null)
 
-  useEffect(() => {
+  const [recetasCargando, setRecetasCargando] = useState(false)
+  // La lista de fórmulas (y otra vez con «Reintentar» si falló)
+  const cargarRecetas = () => {
+    setRecetasError(false)
+    setRecetasCargando(true)
     templateApi.list()
       .then((l) => setRecetas(Array.isArray(l) ? l.filter((t) => t && t.id) : []))
       .catch(() => setRecetasError(true))
-  }, [])
+      .finally(() => setRecetasCargando(false))
+  }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { cargarRecetas() }, [])
 
   // "Quizás sea:" sobre lo que se escribe, con una espera corta entre teclas. Si falla, no aparece y listo.
   useEffect(() => {
@@ -458,7 +465,18 @@ export default function AgregarTrabajo({ budgetId, rubroElegido, onSoltarRubro, 
         <p className={`text-gray-500 ${celular ? 'text-[13px] mt-2 leading-snug' : 'text-[11px] mt-1.5'}`}>{destino}</p>
       )}
       {recetasError && (
-        <p className="text-[11px] text-amber-700 mt-1">No pude traer la lista de fórmulas; igual podés escribir y elegir de «Quizás sea».</p>
+        <div role="alert" data-testid="error-lista-formulas" className={`mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-amber-800 ${celular ? 'text-[13px]' : 'text-[11px]'}`}>
+          <span className="flex-1 min-w-[12rem]">No pude traer la lista de fórmulas; igual podés escribir y elegir de «Quizás sea».</span>
+          <button
+            type="button"
+            onClick={cargarRecetas}
+            disabled={recetasCargando}
+            className={`inline-flex items-center gap-1 font-semibold rounded-lg border border-amber-300 bg-white hover:bg-amber-50 disabled:opacity-60 ${celular ? 'min-h-10 px-3' : 'px-2 py-0.5'}`}
+          >
+            {recetasCargando && <Loader2 size={12} className="animate-spin" />}
+            Reintentar
+          </button>
+        </div>
       )}
 
       {conversion && elegida && (

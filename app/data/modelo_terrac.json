@@ -1,0 +1,551 @@
+{
+ "fuente": "Hoja CYP del modelo de presupuestación de Terrac (emilia_modelo.xlsx, 19/10/2026)",
+ "rubros": [
+  {
+   "codigo": "1",
+   "nombre": "TAREAS PRELIMINARES",
+   "trabajos": [
+    {
+     "codigo": "1.1",
+     "descripcion": "OBRADOR",
+     "unidad": "mes"
+    },
+    {
+     "codigo": "1.2",
+     "descripcion": "BAÑOS QUÍMICOS",
+     "unidad": "mes"
+    },
+    {
+     "codigo": "1.3",
+     "descripcion": "INSTALACIONES PROVISORIAS",
+     "unidad": "gl"
+    },
+    {
+     "codigo": "1.4",
+     "descripcion": "LIMPIEZA PERIÓDICA DE OBRA",
+     "unidad": "mes"
+    },
+    {
+     "codigo": "1.5",
+     "descripcion": "ACARREO DE MATERIALES",
+     "unidad": "mes"
+    },
+    {
+     "codigo": "1.6",
+     "descripcion": "AYUDA DE GREMIOS",
+     "unidad": "mes"
+    },
+    {
+     "codigo": "1.7",
+     "descripcion": "LIMPIEZA FINAL",
+     "unidad": "gl"
+    },
+    {
+     "codigo": "1.8",
+     "descripcion": "ESTRUCTURA DE ENCOFRADO Y APUNTALAMIENTO PROVISORIO",
+     "unidad": "gl"
+    },
+    {
+     "codigo": "1.9",
+     "descripcion": "CARTEL DE OBRA",
+     "unidad": "gl"
+    },
+    {
+     "codigo": "1.10",
+     "descripcion": "CERCO PERIMETRAL",
+     "unidad": "gl"
+    },
+    {
+     "codigo": "1.11",
+     "descripcion": "REPLANTEO Y NIVELACIÓN INICIAL",
+     "unidad": "u"
+    },
+    {
+     "codigo": "1.12",
+     "descripcion": "PROGRAMA DE SEGURIDAD E HIGIENE",
+     "unidad": "mes"
+    },
+    {
+     "codigo": "1.13",
+     "descripcion": "ACARREO DE MATERIALES",
+     "unidad": "gl"
+    }
+   ],
+   "pisos": []
+  },
+  {
+   "codigo": "2",
+   "nombre": "MOVIMIENTO DE SUELO",
+   "trabajos": [
+    {
+     "codigo": "2.1",
+     "descripcion": "EXCAVACIÓN MECÁNICA (SOLO EQUIPOS)",
+     "unidad": null
+    },
+    {
+     "codigo": "2.2",
+     "descripcion": "EXCAVACIÓN MANUAL (MANO DE OBRA)",
+     "unidad": null
+    },
+    {
+     "codigo": "2.3",
+     "descripcion": "MOVIMIENTO DE SUELO POR SUBCONTRATO",
+     "unidad": null
+    },
+    {
+     "codigo": "2.4",
+     "descripcion": "EXCAVACIÓN CON APUNTALAMIENTO Y ENTIBADO",
+     "unidad": null
+    },
+    {
+     "codigo": "2.5",
+     "descripcion": "EXCAVACIÓN CON APOYO DE BANDERILLERO",
+     "unidad": null
+    },
+    {
+     "codigo": "2.6",
+     "descripcion": "EXCAVACIÓN COMBINADA (MIXTA)",
+     "unidad": null
+    }
+   ],
+   "pisos": []
+  },
+  {
+   "codigo": "3",
+   "nombre": "DEMOLICIÓN",
+   "trabajos": [
+    {
+     "codigo": "3.1",
+     "descripcion": "DEMOLICIÓN A NIVEL (ESTRUCTURAS BAJAS)",
+     "unidad": null
+    },
+    {
+     "codigo": "3.2",
+     "descripcion": "DEMOLICIÓN EN ALTURA (EDIFICACIONES)",
+     "unidad": null
+    }
+   ],
+   "pisos": []
+  },
+  {
+   "codigo": "4",
+   "nombre": "ESTRUCTURA",
+   "trabajos": [],
+   "pisos": [
+    {
+     "codigo": "4.1",
+     "nombre": "FUNDACIONES",
+     "trabajos": [
+      {
+       "codigo": "4.1.1",
+       "descripcion": "PLATEA DE FUNDACIÓN h 20cm + VIGAS DE FUNDACION h 40cm (con hierros)",
+       "unidad": "m2"
+      },
+      {
+       "codigo": "4.1.2",
+       "descripcion": "PLATEA DE FUNDACIÓN h 20cm + VIGAS DE FUNDACION h 40cm (con malla)",
+       "unidad": "m2"
+      },
+      {
+       "codigo": "4.1.3",
+       "descripcion": "Bases aisladas",
+       "unidad": "m3"
+      },
+      {
+       "codigo": "4.1.4",
+       "descripcion": "Troncos de columna",
+       "unidad": "m3"
+      },
+      {
+       "codigo": "4.1.5",
+       "descripcion": "Pilotines",
+       "unidad": "m3"
+      },
+      {
+       "codigo": "4.1.6",
+       "descripcion": "Pilotes",
+       "unidad": "m3"
+      },
+      {
+       "codigo": "4.1.7",
+       "descripcion": "Tensores",
+       "unidad": "m3"
+      },
+      {
+       "codigo": "4.1.8",
+       "descripcion": "Vigas de encadenado",
+       "unidad": "m3"
+      }
+     ]
+    },
+    {
+     "codigo": "4.2",
+     "nombre": "SUBSUELO",
+     "trabajos": [
+      {
+       "codigo": "4.2.1",
+       "descripcion": "Losas",
+       "unidad": "m3"
+      },
+      {
+       "codigo": "4.2.2",
+       "descripcion": "Columnas",
+       "unidad": "m3"
+      },
+      {
+       "codigo": "4.2.3",
+       "descripcion": "Vigas",
+       "unidad": "m3"
+      },
+      {
+       "codigo": "4.2.4",
+       "descripcion": "tabiques",
+       "unidad": "m3"
+      },
+      {
+       "codigo": "4.2.5",
+       "descripcion": "tabiques de submuración",
+       "unidad": "m3"
+      },
+      {
+       "codigo": "4.2.6",
+       "descripcion": "escaleras",
+       "unidad": "gl"
+      }
+     ]
+    },
+    {
+     "codigo": "4.3",
+     "nombre": "SOBRE SUBSUELO",
+     "trabajos": []
+    },
+    {
+     "codigo": "4.4",
+     "nombre": "SOBRE PLANTA BAJA",
+     "trabajos": []
+    },
+    {
+     "codigo": "4.5",
+     "nombre": "SOBRE N PISO",
+     "trabajos": []
+    }
+   ]
+  },
+  {
+   "codigo": "5",
+   "nombre": "ALBAÑILERIA",
+   "trabajos": [],
+   "pisos": [
+    {
+     "codigo": "5.1",
+     "nombre": "MAMPOSTERIA",
+     "trabajos": [
+      {
+       "codigo": "5.1.1",
+       "descripcion": "LADRILLO CERAMICO PORTANTE DEL 18",
+       "unidad": "m2"
+      },
+      {
+       "codigo": "5.1.2",
+       "descripcion": "LADRILLO CERAMICO PORTANTE DEL 12",
+       "unidad": "m2"
+      },
+      {
+       "codigo": "5.1.3",
+       "descripcion": "LADRILLO CERAMICO PORTANTE DEL 8",
+       "unidad": "m2"
+      },
+      {
+       "codigo": "5.1.4",
+       "descripcion": "LADRILLO CERAMICO HUECO DEL 18",
+       "unidad": "m2"
+      },
+      {
+       "codigo": "5.1.5",
+       "descripcion": "LADRILLO CERAMICO HUECO DEL 12",
+       "unidad": "m2"
+      },
+      {
+       "codigo": "5.1.6",
+       "descripcion": "LADRILLO CERAMICO HUECO DEL 8",
+       "unidad": "m2"
+      },
+      {
+       "codigo": "5.1.7",
+       "descripcion": "LADRILLO COMUN",
+       "unidad": "m2"
+      },
+      {
+       "codigo": "5.1.8",
+       "descripcion": "LADRILLO COMUN VISTO",
+       "unidad": "m2"
+      },
+      {
+       "codigo": "5.1.9",
+       "descripcion": "MURO DOBLE CERAMICO DEL 18 + LADRILLO COMUN VISTO",
+       "unidad": "m2"
+      },
+      {
+       "codigo": "5.1.10",
+       "descripcion": "MURO DE STEEL FRAME. HASTA 3m DE h (NO CONTEMPLA REVOQUE EXTERIOR)",
+       "unidad": "m2"
+      }
+     ]
+    },
+    {
+     "codigo": "5.2",
+     "nombre": "CONTRAPISO",
+     "trabajos": [
+      {
+       "codigo": "5.2.1",
+       "descripcion": "BOMBEADO ALIVIANADO",
+       "unidad": "m3"
+      },
+      {
+       "codigo": "5.2.2",
+       "descripcion": "BOMBEADO ALIVIANADO CON TERMINACION DE CARPETA",
+       "unidad": "m3"
+      },
+      {
+       "codigo": "5.2.3",
+       "descripcion": "DE CASCOTE",
+       "unidad": "m3"
+      }
+     ]
+    },
+    {
+     "codigo": "5.3",
+     "nombre": "AISLACIÓN",
+     "trabajos": [
+      {
+       "codigo": "5.3.1",
+       "descripcion": "AISLACIÓN HIDROFUGA HORIZONTAL FUNDACIONES",
+       "unidad": "m2"
+      },
+      {
+       "codigo": "5.3.2",
+       "descripcion": "AISLACIÓN HIDROFUGA HORIZONTAL LOSA",
+       "unidad": "m2"
+      }
+     ]
+    },
+    {
+     "codigo": "5.4",
+     "nombre": "CARPETA",
+     "trabajos": [
+      {
+       "codigo": "5.4.1",
+       "descripcion": "CARPETA TRADICIONAL",
+       "unidad": "m2"
+      },
+      {
+       "codigo": "5.4.2",
+       "descripcion": "CARPETA TRADICIONAL CON HIDRÓFUGO",
+       "unidad": "m2"
+      }
+     ]
+    },
+    {
+     "codigo": "5.5",
+     "nombre": "REVOQUE",
+     "trabajos": [
+      {
+       "codigo": "5.5.1",
+       "descripcion": "FINO EXTERIOR",
+       "unidad": "m2"
+      },
+      {
+       "codigo": "5.5.2",
+       "descripcion": "FINO INTERIOR",
+       "unidad": "m2"
+      },
+      {
+       "codigo": "5.5.3",
+       "descripcion": "GRUESO EXTERIOR HIDROFUGO",
+       "unidad": "m2"
+      },
+      {
+       "codigo": "5.5.4",
+       "descripcion": "GRUESO INTERIOR",
+       "unidad": "m2"
+      },
+      {
+       "codigo": "5.5.5",
+       "descripcion": "YESO INTERIOR",
+       "unidad": "m2"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "codigo": "6",
+   "nombre": "YESERIA Y DURLERIA",
+   "trabajos": [
+    {
+     "codigo": "6.1",
+     "descripcion": "CIELORRASO",
+     "unidad": "m2"
+    },
+    {
+     "codigo": "6.2",
+     "descripcion": "BUÑAS",
+     "unidad": "ml"
+    },
+    {
+     "codigo": "6.3",
+     "descripcion": "GARGANTAS / CAJON 20X20",
+     "unidad": "ml"
+    },
+    {
+     "codigo": "6.4",
+     "descripcion": "TABIQUE DE PLACA DE YESO",
+     "unidad": "m2"
+    },
+    {
+     "codigo": "6.5",
+     "descripcion": "CIELOS RAZOS PLACA YESO",
+     "unidad": "m2"
+    },
+    {
+     "codigo": "6.6",
+     "descripcion": "CIELOS RAZOS PLACA VERDE DE YESO",
+     "unidad": "m2"
+    },
+    {
+     "codigo": "6.7",
+     "descripcion": "CIELOS RAZOS PLACA SEMICUBIERTOS",
+     "unidad": "m2"
+    },
+    {
+     "codigo": "6.8",
+     "descripcion": "BUÑAS PLACA YESO",
+     "unidad": "m2"
+    },
+    {
+     "codigo": "6.9",
+     "descripcion": "GARGANTAS PLACA YESO 20X20",
+     "unidad": "ml"
+    },
+    {
+     "codigo": "6.10",
+     "descripcion": "CAJON/ MOCHETA DE PLACA DE YESO 20X20",
+     "unidad": "ml"
+    }
+   ],
+   "pisos": []
+  },
+  {
+   "codigo": "7",
+   "nombre": "TERMINACIONES",
+   "trabajos": [],
+   "pisos": [
+    {
+     "codigo": "7.1",
+     "nombre": "REVESTIMIENTO",
+     "trabajos": [
+      {
+       "codigo": "7.1.1",
+       "descripcion": "REVESTIMIENTO HORIZANTAL",
+       "unidad": "m2"
+      },
+      {
+       "codigo": "7.1.2",
+       "descripcion": "REVESTIMIENTO HORIZANTAL EN AMABIENTE MENOR A 2X2",
+       "unidad": "m2"
+      },
+      {
+       "codigo": "7.1.3",
+       "descripcion": "REVESTIMIENTO HORIZANTAL EN MABIENTE DE BAÑO O COCINA",
+       "unidad": "m2"
+      },
+      {
+       "codigo": "7.1.4",
+       "descripcion": "REVESTIMIENTO HORIZONTAL ZOCALO",
+       "unidad": "ml"
+      },
+      {
+       "codigo": "7.1.5",
+       "descripcion": "REVESTIMIENTO VERTICAL",
+       "unidad": "m2"
+      },
+      {
+       "codigo": "7.1.6",
+       "descripcion": "REVESTIMIENTO ESCALERA",
+       "unidad": "gl"
+      }
+     ]
+    },
+    {
+     "codigo": "7.2",
+     "nombre": "VENTANAS",
+     "trabajos": []
+    },
+    {
+     "codigo": "7.3",
+     "nombre": "PUERTAS",
+     "trabajos": []
+    },
+    {
+     "codigo": "7.4",
+     "nombre": "PINTURA",
+     "trabajos": [
+      {
+       "codigo": "7.4.1",
+       "descripcion": "PINTURA CIELORASO",
+       "unidad": "m2"
+      },
+      {
+       "codigo": "7.4.2",
+       "descripcion": "PINTURA EN PAREDES (yeso, lija + 3 manos)",
+       "unidad": "m2"
+      },
+      {
+       "codigo": "7.4.3",
+       "descripcion": "PINTURA EN PAREDES (3 manos)",
+       "unidad": "m2"
+      }
+     ]
+    },
+    {
+     "codigo": "7.5",
+     "nombre": "OTRAS TERMINACIONES",
+     "trabajos": []
+    }
+   ]
+  },
+  {
+   "codigo": "8",
+   "nombre": "AISLACIONES",
+   "trabajos": [
+    {
+     "codigo": "8.1",
+     "descripcion": "AZOTADO HIDROFUGO + PINTURA ASFALTICA EN AZOTEA",
+     "unidad": "m2"
+    },
+    {
+     "codigo": "8.2",
+     "descripcion": "PINTURA ASFALTICA EN AZOTEA",
+     "unidad": "m2"
+    },
+    {
+     "codigo": "8.3",
+     "descripcion": "COLOCACION DE PLACAS EPS 5cm",
+     "unidad": "m2"
+    },
+    {
+     "codigo": "8.4",
+     "descripcion": "MEMBRANA ASFALTICA + GEOTEXTIL ESP: 4MM.",
+     "unidad": "m2"
+    }
+   ],
+   "pisos": []
+  },
+  {
+   "codigo": "9",
+   "nombre": "CUBIERTA",
+   "trabajos": [],
+   "pisos": []
+  }
+ ]
+}

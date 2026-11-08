@@ -31,6 +31,7 @@ from app.catalog_prices import (
     sin_fuente,
 )
 from app.db import get_data_db
+from app.obra_import import forget_dimensions
 from app.routers.analysis import _get_budget, apply_catalog
 from app.schemas import CatalogTipo
 
@@ -564,7 +565,7 @@ async def upload_excel_catalog(
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+            wb = forget_dimensions(openpyxl.load_workbook(io.BytesIO(content), read_only=True, data_only=True))
     except Exception as exc:
         raise HTTPException(400, f"No se pudo leer el archivo Excel: {exc}")
 

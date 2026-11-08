@@ -5,6 +5,7 @@ import { useAuth } from '../../contexts/AuthContext'
 import type { Budget } from '../../types'
 import { fmtPesos } from '../../lib/format'
 import { budgetApi } from '../../lib/api'
+import ConfirmarBorrado from '../ConfirmarBorrado'
 
 const STATUS_LABELS: Record<string, string> = {
   draft: 'Borrador', borrador: 'Borrador',
@@ -33,8 +34,6 @@ const BAR_COLORS: Record<string, string> = {
   review: 'bg-yellow-500',
 }
 
-type DeleteState = 'idle' | 'confirm1' | 'confirm2' | 'deleting'
-
 interface Props {
   budget: Budget
   directTotal?: number
@@ -45,36 +44,11 @@ interface Props {
 }
 
 export default function BudgetCard({ budget, directTotal, netoTotal, subtitle, tags, onDelete }: Props) {
-  const { esAdmin } = useAuth()
+  // Borran quienes cargan y editan (administrador y «Carga y edita»), con doble verificación: escribir el nombre
+  const { puedeEditar } = useAuth()
   const navigate = useNavigate()
   const status = budget.status?.toLowerCase() || 'borrador'
-  const [deleteState, setDeleteState] = useState<DeleteState>('idle')
-
-  async function handleConfirmDelete(e: React.MouseEvent) {
-    e.stopPropagation()
-    setDeleteState('deleting')
-    try {
-      await budgetApi.remove(budget.id)
-      onDelete?.()
-    } catch {
-      setDeleteState('idle')
-    }
-  }
-
-  function handleTrashClick(e: React.MouseEvent) {
-    e.stopPropagation()
-    setDeleteState('confirm1')
-  }
-
-  function handleFirstConfirm(e: React.MouseEvent) {
-    e.stopPropagation()
-    setDeleteState('confirm2')
-  }
-
-  function handleCancel(e: React.MouseEvent) {
-    e.stopPropagation()
-    setDeleteState('idle')
-  }
+  const [borrando, setBorrando] = useState(false)
 
   return (
     <div
@@ -91,81 +65,19 @@ export default function BudgetCard({ budget, directTotal, netoTotal, subtitle, t
             <span className="text-[10px] text-gray-400">
               {budget.source_file ? '✓ Excel' : 'A mano'}
             </span>
-            {esAdmin && (
+            {puedeEditar && (
               <button
-                onClick={handleTrashClick}
-                className="text-gray-300 hover:text-red-400 transition-colors w-10 h-10 -m-3 md:w-auto md:h-auto md:m-0 md:p-0.5 flex items-center justify-center"
-                title="Eliminar presupuesto"
-                aria-label="Eliminar presupuesto"
+                onClick={(e) => { e.stopPropagation(); setBorrando(true) }}
+                className="text-gray-400 hover:text-red-500 transition-colors w-10 h-10 -m-3 md:w-8 md:h-8 md:-m-1.5 rounded-full hover:bg-red-50 flex items-center justify-center"
+                title="Borrar el presupuesto"
+                aria-label={`Borrar el presupuesto ${budget.name}`}
+                data-testid="borrar-presupuesto"
               >
-                <Trash2 size={13} />
+                <Trash2 size={14} />
               </button>
             )}
           </div>
         </div>
-
-        {/* First confirmation */}
-        {deleteState === 'confirm1' && (
-          <div
-            className="mb-3 bg-red-50 border border-red-200 rounded-lg p-3"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <p className="text-xs font-medium text-red-700 mb-2">¿Eliminar este presupuesto?</p>
-            <div className="flex gap-2">
-              <button
-                onClick={handleFirstConfirm}
-                className="flex-1 bg-red-500 hover:bg-red-600 text-white text-xs font-semibold min-h-10 md:min-h-0 py-1.5 rounded transition-colors"
-              >
-                Sí, eliminar
-              </button>
-              <button
-                onClick={handleCancel}
-                className="flex-1 bg-white border border-gray-200 text-gray-600 text-xs font-medium min-h-10 md:min-h-0 py-1.5 rounded hover:bg-gray-50 transition-colors"
-              >
-                Cancelar
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Second confirmation */}
-        {deleteState === 'confirm2' && (
-          <div
-            className="mb-3 bg-red-50 border border-red-300 rounded-lg p-3"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <p className="text-xs text-red-800 mb-2 leading-relaxed">
-              <span className="font-bold">ATENCIÓN:</span> se va a eliminar para siempre{' '}
-              <span className="font-semibold">"{budget.name}"</span> con todos sus trabajos y recursos.
-              No se puede deshacer.
-            </p>
-            <div className="flex gap-2">
-              <button
-                onClick={handleConfirmDelete}
-                className="flex-1 bg-red-600 hover:bg-red-700 text-white text-xs font-bold min-h-10 md:min-h-0 py-1.5 rounded transition-colors"
-              >
-                Eliminar para siempre
-              </button>
-              <button
-                onClick={handleCancel}
-                className="flex-1 bg-white border border-gray-200 text-gray-600 text-xs font-medium min-h-10 md:min-h-0 py-1.5 rounded hover:bg-gray-50 transition-colors"
-              >
-                Cancelar
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Deleting state */}
-        {deleteState === 'deleting' && (
-          <div
-            className="mb-3 flex items-center gap-2 text-xs text-gray-500 bg-gray-50 rounded-lg p-3"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="w-3 h-3 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
-            Eliminando...
-          </div>
-        )}
 
         <h3 className="font-bold text-gray-900 break-words">{budget.name}</h3>
         {subtitle && <p className="text-gray-500 text-xs mt-1">{subtitle}</p>}
@@ -191,6 +103,17 @@ export default function BudgetCard({ budget, directTotal, netoTotal, subtitle, t
           </div>
         </div>
       </div>
+      {borrando && (
+        <ConfirmarBorrado
+          nombre={budget.name}
+          onConfirmar={async () => {
+            await budgetApi.remove(budget.id)
+            setBorrando(false)
+            onDelete?.()
+          }}
+          onCerrar={() => setBorrando(false)}
+        />
+      )}
     </div>
   )
 }

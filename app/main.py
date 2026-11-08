@@ -13,6 +13,7 @@ from app.routers import (
     health,
     indirects,
     me,
+    modelo,
     obras,
     precios,
     standard_trees,
@@ -47,6 +48,7 @@ def create_app() -> FastAPI:
     app.include_router(architect.router, prefix="/architect", tags=["ArquitectoAI"])
     app.include_router(correcciones.router, prefix="/correcciones", tags=["Correcciones"])
     app.include_router(precios.router, prefix="/precios", tags=["Buscador de precios"])
+    app.include_router(modelo.router, tags=["Modelo de Terrac"])
 
     return app
 

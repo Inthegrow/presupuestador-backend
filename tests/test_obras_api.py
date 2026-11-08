@@ -154,8 +154,9 @@ class TestAnalizar:
         assert res.status_code == 200, res.text
         body = res.json()
         assert set(body) == {"archivo", "titulo_dudoso", "planilla_simple", "catalogo_oficial", "excel_con_precios", "titulo",
-                             "fecha_precios", "resumen", "tareas", "precios", "recetas", "correcciones_excel",
-                             "listo"}
+                             "hoja", "sin_formula_sin_precio", "fecha_precios", "resumen", "tareas", "precios",
+                             "recetas", "correcciones_excel", "listo"}
+        assert (body["hoja"], body["sin_formula_sin_precio"]) == ("01_C&P", 0)
         assert body["catalogo_oficial"] is False
         assert body["excel_con_precios"] is True
         assert body["titulo_dudoso"] is False  # "obra.xlsx": nothing to compare the title with
@@ -167,7 +168,7 @@ class TestAnalizar:
         for t in body["tareas"]:
             assert set(t) == {"clave", "descripcion", "unidad", "veces", "cantidad_total", "total_excel", "codigos",
                               "estado", "motivo_rojo", "receta", "sugerencias", "pregunta", "avisos",
-                              "precios_faltantes"}
+                              "precios_faltantes", "sin_precio"}
         tareas = _tareas(body)
 
         telgopor = tareas[TELGOPOR]
@@ -423,7 +424,7 @@ class TestAnalizar:
         res = client.post("/obras/analizar", files={"file": ("otra.xlsx", _excel(wb), XLSX)})
         assert res.status_code == 400
         detail = res.json()["detail"]
-        assert "no tiene la hoja 01_C&P" in detail and "Hoja1, Cómputo" in detail
+        assert "No encontré el cómputo" in detail and "01_C&P o CYP" in detail and "Hoja1, Cómputo" in detail
 
     def test_rejects_other_files(self, client, db):
         res = client.post("/obras/analizar", files={"file": ("obra.csv", b"a,b", "text/csv")})
@@ -1079,7 +1080,7 @@ class TestDiferenciasAlNivel:
 # ── Excel sin precios ────────────────────────────────────────────────────────
 
 LIMPIEZA = "LIMPIEZA FINAL DE OBRA | gl"
-SIN_RECETA_Y_SIN_PRECIO = "Hay {n} trabajos sin fórmula y sin precio en el Excel: elegí una fórmula antes de cargar"
+SIN_RECETA_Y_SIN_PRECIO = "Hay {n} trabajos sin fórmula y sin precio en el Excel: elegí una fórmula o cargalos sin precio ($0)"
 
 
 def _workbook_sin_precios():
@@ -1142,7 +1143,7 @@ class TestExcelSinPrecios:
         res = cargar(client, wb=_workbook_sin_precios(), asignaciones={ARISTAS: {"plantillas": [["6.9", 1]]}})
         assert res.status_code == 409
         assert res.json()["detail"] == {
-            "mensaje": "Hay 1 trabajo sin fórmula y sin precio en el Excel: elegí una fórmula antes de cargar",
+            "mensaje": "Hay 1 trabajo sin fórmula y sin precio en el Excel: elegí una fórmula o cargalo sin precio ($0)",
             "rojos": [OBRADOR]}
 
         elegidas = {ARISTAS: {"plantillas": [["6.9", 1]]}, OBRADOR: {"plantillas": [["5.1.4", 1]]}}
@@ -1294,6 +1295,23 @@ class TestPrecioSinFormulaAlCentavo:
         assert guardado == (total if acepta else round(unit * qty, 2))
 
     @pytest.mark.parametrize("componente", ["mat", "mo"])
+    @pytest.mark.parametrize("qty, unit, total, esperado", [
+        # Revisión del PR 53: el total que se guarda redondea medio centavo para arriba, como la planilla
+        (1, 1.01, 1.005, 1.01),    # en float, round(1,005, 2) da 1,00
+        (1, 0.02, 0.015, 0.02),    # round(0,015, 2) da 0,01
+        (3, 0.34, 1.005, 1.01),    # 1,005 / 3 en float, por 3, da 1,00499…
+        (2, 2.675, None, 5.35),    # sin total de la planilla: 2,675 × 2 = 5,35 exacto
+        (1, 2.675, None, 2.68),    # round(2,675, 2) en float da 2,67
+    ])
+    def test_the_saved_total_rounds_half_a_cent_up(self, componente, qty, unit, total, esperado):
+        if componente == "mat":
+            row = self._row(qty, unit, 0.0, total or 0.0, mat_total=total, mo_total=None)
+        else:
+            row = self._row(qty, 0.0, unit, total or 0.0, mat_total=None, mo_total=total)
+        assert row[f"{componente}_total"] == esperado
+        assert row["directo_total"] == esperado
+
+    @pytest.mark.parametrize("componente", ["mat", "mo"])
     def test_a_precise_unit_of_the_planilla_is_kept(self, componente):
         # Codex (448ec99): unit 1,0049 (more than cents) and total 995 over 1000 units. Both round to
         # 1,00, but the unit is the precise one: $1.004,90 stays, the 995 shows as a difference
@@ -1307,3 +1325,45 @@ class TestPrecioSinFormulaAlCentavo:
         # A precise unit that agrees with its total also stays as it is
         row = self._row(35, 493143.5397142857, 0.0, 17260023.89, mat_total=17260023.89, mo_total=0.0)
         assert row["mat_total"] == 17260023.89
+
+
+def _with_stale_dimension(content: bytes, ref: str) -> bytes:
+    """The same .xlsx with the size of its sheets saved as ``ref`` (what some programs leave behind)."""
+    import re
+    import zipfile
+    from io import BytesIO
+
+    src, out = zipfile.ZipFile(BytesIO(content)), BytesIO()
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as dst:
+        for info in src.infolist():
+            data = src.read(info.filename)
+            if info.filename.startswith("xl/worksheets/sheet"):
+                data, n = re.subn(rb'<dimension ref="[^"]*"\s*/>', f'<dimension ref="{ref}"/>'.encode(), data)
+                assert n == 1
+            dst.writestr(info, data)
+    return out.getvalue()
+
+
+class TestExcelLeidoEntero:
+    """Revisión del PR 51: el modo liviano confía en el tamaño que dice el archivo; uno viejo lo leía cortado."""
+
+    @pytest.mark.parametrize("ref", ["A1", "A1:D7", "A1:Z10"])
+    def test_a_stale_saved_size_does_not_cut_the_obra(self, client, db, ref):
+        entero = analizar(client).json()["resumen"]
+        res = client.post("/obras/analizar",
+                          files={"file": ("obra.xlsx", _with_stale_dimension(_excel(None), ref), XLSX)})
+        assert res.status_code == 200, res.text
+        assert res.json()["resumen"] == entero
+
+    def test_an_excel_without_works_is_refused_not_loaded_empty(self, client, db):
+        wb = _workbook()
+        ws = wb["01_C&P"]
+        for row in ws.iter_rows(min_row=8):
+            for c in row:
+                c.value = None
+        res = client.post("/obras/analizar", files={"file": ("obra.xlsx", _excel(wb), XLSX)})
+        assert res.status_code == 400
+        assert "No encontré trabajos" in res.json()["detail"]
+        res = cargar(client, wb=wb)
+        assert res.status_code == 400
+        assert not db.tables.get("budgets")

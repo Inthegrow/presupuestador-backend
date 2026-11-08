@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
-import { Check, ChevronRight, FileText, Loader2, MoreHorizontal, Pencil, Trash2, X } from 'lucide-react'
+import { Check, ChevronRight, FileText, Library, Loader2, MoreHorizontal, Pencil, Trash2, X } from 'lucide-react'
 import type { BudgetItem } from '../../types'
 import { fmtPesos } from '../../lib/format'
 import { ESTILO } from '../../lib/semaforo'
@@ -16,6 +16,9 @@ interface Props {
   semaforo?: (item: BudgetItem) => { estado: Semaforo; frase: string } | null
   // El trabajo recién agregado: se resalta un momento
   resaltar?: string | null
+  // Trabajo sin fórmula (en rojo): la tarjeta ofrece «Elegir fórmula»
+  necesitaFormula?: (item: BudgetItem) => boolean
+  onElegirFormula?: (item: BudgetItem) => void
 }
 
 const fmtCantidad = (v: number | null | undefined) =>
@@ -35,9 +38,10 @@ function leerCantidad(t: string): number | null {
 }
 
 function Tarjeta({
-  item, puedeEditar, editando, onEditar, onDejarDeEditar, onGuardar, onVer, onMenu, semaforo, resaltada,
+  item, puedeEditar, editando, onEditar, onDejarDeEditar, onGuardar, onVer, onMenu, semaforo, resaltada, onElegirFormula,
 }: {
   resaltada: boolean
+  onElegirFormula?: () => void
   item: BudgetItem
   puedeEditar: boolean
   editando: boolean
@@ -132,6 +136,19 @@ function Tarjeta({
         </span>
       </button>
 
+      {onElegirFormula && !editando && (
+        <div className="px-4 pt-0.5 pb-1">
+          <button
+            type="button"
+            onClick={onElegirFormula}
+            data-testid="elegir-formula-renglon"
+            className="min-h-10 px-3.5 inline-flex items-center gap-1.5 rounded-xl border border-red-200 bg-white text-[14px] font-semibold text-red-700 active:bg-red-50"
+          >
+            <Library size={15} /> Elegir fórmula
+          </button>
+        </div>
+      )}
+
       <button
         type="button"
         onClick={onMenu}
@@ -218,7 +235,7 @@ function Tarjeta({
 }
 
 /** Los trabajos como tarjetas (celular): tocar abre el detalle; la cantidad se cambia desde la tarjeta. */
-export default function TarjetasTrabajos({ items, onEditItem, onViewDetail, onDeleteItem, semaforo, resaltar }: Props) {
+export default function TarjetasTrabajos({ items, onEditItem, onViewDetail, onDeleteItem, semaforo, resaltar, necesitaFormula, onElegirFormula }: Props) {
   const [editandoId, setEditandoId] = useState<string | null>(null)
   const [menu, setMenu] = useState<BudgetItem | null>(null)
   const [confirmarBorrar, setConfirmarBorrar] = useState(false)
@@ -242,6 +259,7 @@ export default function TarjetasTrabajos({ items, onEditItem, onViewDetail, onDe
             onMenu={() => { setConfirmarBorrar(false); setMenu(item) }}
             semaforo={semaforo?.(item) ?? null}
             resaltada={!!resaltar && resaltar === item.id}
+            onElegirFormula={onElegirFormula && necesitaFormula?.(item) ? () => onElegirFormula(item) : undefined}
           />
         ))}
       </ul>
@@ -278,6 +296,7 @@ export default function TarjetasTrabajos({ items, onEditItem, onViewDetail, onDe
               {[
                 { key: 'ver', label: 'Ver el detalle', icon: FileText, on: () => { cerrarMenu(); onViewDetail(menu.id) }, mostrar: true, rojo: false },
                 { key: 'cantidad', label: 'Cambiar la cantidad', icon: Pencil, on: () => { const id = menu.id; cerrarMenu(); setEditandoId(id) }, mostrar: !!onEditItem, rojo: false },
+                { key: 'formula', label: 'Elegir fórmula', icon: Library, on: () => { const it = menu; cerrarMenu(); onElegirFormula?.(it) }, mostrar: !!onElegirFormula && !!necesitaFormula?.(menu), rojo: false },
                 { key: 'borrar', label: 'Borrar el trabajo', icon: Trash2, on: () => setConfirmarBorrar(true), mostrar: !!onDeleteItem, rojo: true },
               ].filter((o) => o.mostrar).map((o) => {
                 const Icono = o.icon

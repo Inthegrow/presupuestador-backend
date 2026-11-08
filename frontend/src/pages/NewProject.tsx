@@ -18,12 +18,12 @@ import {
   RotateCcw,
   History,
 } from 'lucide-react'
-import { ApiError, budgetApi, catalogApi } from '../lib/api'
-import type { CreateFullPayload } from '../lib/api'
+import { ApiError, budgetApi, catalogApi, modeloApi } from '../lib/api'
+import type { CreateFullPayload, ModeloRubro } from '../lib/api'
 import { useAuth } from '../contexts/AuthContext'
 import type { AIItemToInsert, PriceCatalog } from '../types'
 import FileUpload from '../components/ui/FileUpload'
-import GenericTaskSelector, { seleccionInicial, trabajosElegidos } from '../components/ui/GenericTaskSelector'
+import GenericTaskSelector, { normalizarSeleccion, seleccionInicial, trabajosElegidos } from '../components/ui/GenericTaskSelector'
 import type { SelectionState } from '../components/ui/GenericTaskSelector'
 import { CLAVES_INDIRECTOS, cascadaIndirectos, indirectosCompletos } from '../lib/cascada'
 import type { ClaveIndirecto, IndirectosPct } from '../lib/cascada'
@@ -126,7 +126,7 @@ function leerBorradorNuevo(crudo: unknown): BorradorNuevo | null {
     paso: typeof b.paso === 'number' ? b.paso : PASO_DATOS,
     project: { name: b.project.name, description: b.project.description },
     structureOption: OPCIONES_ESTRUCTURA.includes(b.structureOption as StructureOption) ? b.structureOption as StructureOption : 'template',
-    seleccion: b.seleccion,
+    seleccion: normalizarSeleccion(b.seleccion),
     sections: b.sections,
     jsonSections: b.jsonSections,
     json: b.json instanceof Blob ? b.json : null,
@@ -138,7 +138,7 @@ function leerBorradorNuevo(crudo: unknown): BorradorNuevo | null {
   }
 }
 
-// Only an admin can delete a budget: an editor cannot undo one already created
+// A user who cannot delete budgets cannot undo one already created
 function esSinPermiso(e: unknown): boolean {
   return e instanceof ApiError && e.status === 403
 }
@@ -262,22 +262,36 @@ function leerRubrosJson(data: unknown): { rubros: Section[] } | { error: string 
 
 function armarRubros(
   seleccion: SelectionState,
+  modelo: ModeloRubro[] | null,
   jsonSections: Section[],
   manuales: Section[],
 ): { secciones: Secciones; error: string | null } {
-  const rubros: { nombre: string; items: { descripcion: string; unidad: string; cantidad: number }[] }[] = []
-  function rubro(nombre: string) {
+  type Item = Secciones[number]['items'][number]
+  // Los rubros de Trabajos típicos llevan su código del modelo de Terrac (4 Estructura, 4.1.3 Bases aisladas);
+  // los demás se numeran después del último
+  const rubros: { codigo: string | null; nombre: string; items: (Omit<Item, 'codigo'> & { codigo: string | null })[] }[] = []
+  function rubro(nombre: string, codigo: string | null = null) {
+    // Los del modelo se buscan por su código (dos pisos pueden llamarse igual en rubros distintos)
     const clave = normNombre(nombre)
-    let r = rubros.find((x) => normNombre(x.nombre) === clave)
+    let r = codigo ? rubros.find((x) => x.codigo === codigo) : rubros.find((x) => normNombre(x.nombre) === clave)
     if (!r) {
-      r = { nombre: nombre.trim(), items: [] }
+      r = { codigo, nombre: nombre.trim(), items: [] }
       rubros.push(r)
     }
     return r
   }
 
-  for (const t of trabajosElegidos(seleccion)) {
-    rubro(t.categoryName).items.push({ descripcion: t.descripcion, unidad: t.unidad, cantidad: t.cantidad })
+  for (const t of trabajosElegidos(seleccion, modelo)) {
+    const r = rubro(t.rubroNombre, t.rubroCodigo || null)
+    // Un trabajo de un piso del modelo (4.1.3 en 4.1 Fundaciones) va en ese piso: el servidor lo cuelga del rubro 4
+    const destino = t.grupoCodigo && t.grupoNombre ? rubro(t.grupoNombre, t.grupoCodigo) : r
+    destino.items.push({
+      codigo: t.codigo || null,
+      descripcion: t.descripcion,
+      unidad: t.unidad,
+      cantidad: t.cantidad,
+      ...(t.plantilla ? { plantilla: t.plantilla } : {}),
+    })
   }
 
   const conItems = (s: Section) => s.items.filter((it) => it.descripcion.trim())
@@ -297,6 +311,7 @@ function armarRubros(
       const r = rubro(s.nombre)
       for (const it of items) {
         r.items.push({
+          codigo: null,
           descripcion: it.descripcion.trim(),
           unidad: it.unidad || 'gl',
           cantidad: numero(it.cantidad) || 1,
@@ -305,13 +320,31 @@ function armarRubros(
     }
   }
 
-  const secciones: Secciones = rubros.map((r, i) => ({
-    codigo: String(i + 1),
-    nombre: r.nombre,
-    items: r.items.map((it, j) => ({ codigo: `${i + 1}.${j + 1}`, ...it })),
-  }))
+  // Códigos: los del modelo quedan; los que faltan, a continuación (sin repetir uno ya usado)
+  let ultimo = Math.max(0, ...rubros.map((r) => (r.codigo && /^\d+$/.test(r.codigo) ? Number(r.codigo) : 0)))
+  const usados = new Set(rubros.map((r) => r.codigo).filter(Boolean))
+  const secciones: Secciones = rubros.map((r) => {
+    let codigo = r.codigo
+    if (!codigo) {
+      do { codigo = String(++ultimo) } while (usados.has(codigo))
+      usados.add(codigo)
+    }
+    const cod: string = codigo
+    // El siguiente número de trabajo del rubro: después del más alto que ya tenga (4.1.3 cuenta como 4.1)
+    const prefijo = new RegExp(`^${cod.replace(/\./g, '\\.')}\\.(\\d+)`)
+    let n = 0
+    for (const it of r.items) {
+      const m = it.codigo?.match(prefijo)
+      if (m) n = Math.max(n, Number(m[1]))
+    }
+    const items: Item[] = r.items.map((it) => ({ ...it, codigo: it.codigo ?? `${cod}.${++n}` }))
+    return { codigo: cod, nombre: r.nombre, items }
+  })
   return { secciones, error: null }
 }
+
+// Rubros de primer nivel: los pisos del modelo (4.1) van dentro de su rubro y no se cuentan
+const rubrosDe = (secciones: { codigo: string }[]) => secciones.filter((s) => !s.codigo.includes('.')).length
 
 // ─── Main Component ────────────────────────────────────────────────────────────
 
@@ -334,6 +367,9 @@ export default function NewProject() {
   // Estructura (todo vive acá: ir y volver entre pasos no pierde nada)
   const [structureOption, setStructureOption] = useState<StructureOption>('template')
   const [seleccion, setSeleccion] = useState<SelectionState>(() => seleccionInicial())
+  // Trabajos típicos: el modelo de Terrac (null mientras viene; si falla, se dice y se puede reintentar)
+  const [modelo, setModelo] = useState<ModeloRubro[] | null>(null)
+  const [modeloError, setModeloError] = useState('')
   const [planFile, setPlanFile] = useState<File | null>(null)
   const [aiReviewItems, setAiReviewItems] = useState<AIReviewItem[]>([])
   const [showAiReview, setShowAiReview] = useState(false)
@@ -356,7 +392,16 @@ export default function NewProject() {
       .then((l) => setListas(l))
       .catch((e) => setListasError(errorText(e)))
     cargarGenerales()
+    cargarModelo()
   }, [])
+
+  function cargarModelo() {
+    setModeloError('')
+    modeloApi
+      .terrac()
+      .then((m) => setModelo(m))
+      .catch((e) => { setModelo(null); setModeloError(errorText(e)) })
+  }
 
   function cargarGenerales() {
     setIndirectosError('')
@@ -370,8 +415,8 @@ export default function NewProject() {
       .catch((e) => setIndirectosError(errorText(e)))
   }
 
-  const armado = useMemo(() => armarRubros(seleccion, jsonSections, sections), [seleccion, jsonSections, sections])
-  const trabajosTipicos = useMemo(() => trabajosElegidos(seleccion).length, [seleccion])
+  const armado = useMemo(() => armarRubros(seleccion, modelo, jsonSections, sections), [seleccion, modelo, jsonSections, sections])
+  const trabajosTipicos = useMemo(() => trabajosElegidos(seleccion, modelo).length, [seleccion, modelo])
 
   // ─── Draft ─────────────────────────────────────────────────────────────────
 
@@ -635,7 +680,7 @@ export default function NewProject() {
     setError('')
     try {
       const res = await budgetApi.createFull(data)
-      setResult({ budgetId: res.budget.id, sectionsCount: res.sections_created, itemsCount: res.items_created })
+      setResult({ budgetId: res.budget.id, sectionsCount: rubrosDe(data.secciones), itemsCount: res.items_created })
       setStep(PASO_RESULTADO)
     } catch (e) {
       setError(`No se pudo crear el presupuesto: ${errorText(e)}`)
@@ -656,7 +701,7 @@ export default function NewProject() {
     try {
       // analyze-plan needs an existing budget: create it with everything else first
       const res = await budgetApi.createFull(data)
-      creado = { budgetId: res.budget.id, sectionsCount: res.sections_created, itemsCount: res.items_created }
+      creado = { budgetId: res.budget.id, sectionsCount: rubrosDe(data.secciones), itemsCount: res.items_created }
     } catch (e) {
       setError(`No se pudo crear el presupuesto: ${errorText(e)}`)
       setCreating(false)
@@ -667,11 +712,12 @@ export default function NewProject() {
       formData.append('file', planFile)
       const aiRes = await budgetApi.analyzePlan(creado.budgetId, formData)
 
-      // The plan's rubros go after the ones already created: number them from there
+      // The plan's rubros go after the ones already created: number them from the highest code
       const reviewItems: AIReviewItem[] = []
       let keyIdx = 0
+      const ultimoRubro = Math.max(0, ...data.secciones.map((sec) => (/^\d+$/.test(sec.codigo) ? Number(sec.codigo) : 0)))
       aiRes.secciones.forEach((sec, si) => {
-        const codigoRubro = String(creado!.sectionsCount + si + 1)
+        const codigoRubro = String(ultimoRubro + si + 1)
         sec.items.forEach((item, ii) => {
           reviewItems.push({
             _key: `rev-${keyIdx++}`,
@@ -702,7 +748,7 @@ export default function NewProject() {
       if (borrado) {
         setError(`No se pudo analizar el plano: ${motivo}`)
       } else {
-        // Could not undo it (only an admin deletes budgets): say what was created, do not create another one
+        // Could not undo it (this user cannot delete budgets): say what was created, do not create another one
         setResult({
           ...creado,
           aviso: `La IA no pudo analizar el plano (${motivo.replace(/\.+$/, '')}). El presupuesto se creó con los demás trabajos, sin los del plano. Podés volver a analizar el plano desde "Planos con IA" del presupuesto.`,
@@ -769,7 +815,7 @@ export default function NewProject() {
     } catch (e) {
       setError(
         esSinPermiso(e)
-          ? `El presupuesto ya quedó creado con ${trabajos(pendiente.itemsCount)} y solo un administrador puede borrarlo, así que no se puede cancelar. Destildá los trabajos del plano que no quieras sumar y confirmá.`
+          ? `El presupuesto ya quedó creado con ${trabajos(pendiente.itemsCount)} y tu usuario no puede borrarlo, así que no se puede cancelar. Destildá los trabajos del plano que no quieras sumar y confirmá.`
           : `No se pudo cancelar: ${errorText(e)}`,
       )
     } finally {
@@ -890,6 +936,9 @@ export default function NewProject() {
             onClearJson={clearJson}
             seleccion={seleccion}
             onSeleccion={setSeleccion}
+            modelo={modelo}
+            modeloError={modeloError}
+            onReintentarModelo={cargarModelo}
             trabajosTipicos={trabajosTipicos}
             secciones={armado.secciones}
           />
@@ -1099,6 +1148,9 @@ function StepEstructura({
   onClearJson,
   seleccion,
   onSeleccion,
+  modelo,
+  modeloError,
+  onReintentarModelo,
   trabajosTipicos,
   secciones,
 }: {
@@ -1121,10 +1173,16 @@ function StepEstructura({
   onClearJson: () => void
   seleccion: SelectionState
   onSeleccion: (next: SelectionState) => void
+  modelo: ModeloRubro[] | null
+  modeloError: string
+  onReintentarModelo: () => void
   trabajosTipicos: number
   secciones: Secciones
 }) {
   const totalTrabajos = secciones.reduce((s, r) => s + r.items.length, 0)
+  // Los pisos del modelo (4.1 Fundaciones) se crean dentro de su rubro: se cuentan aparte
+  const pisosDelModelo = secciones.filter((r) => r.codigo.includes('.')).length
+  const rubrosArriba = secciones.length - pisosDelModelo
   return (
     <div className="fade-in space-y-4">
       <div className="bg-white rounded-xl border p-4 md:p-6">
@@ -1139,7 +1197,7 @@ function StepEstructura({
             onClick={() => setStructureOption('template')}
             icon={<ClipboardList size={20} />}
             title="Trabajos típicos"
-            description="Elegir de una lista de obra"
+            description="Del modelo de Terrac, con sus códigos"
           />
           <OptionCard
             active={structureOption === 'plan'}
@@ -1168,7 +1226,8 @@ function StepEstructura({
         <div data-testid="resumen-estructura" className="mb-4 bg-[#E8F5EE] rounded-lg px-4 py-2.5 border border-green-200 text-sm text-[#143D34]">
           {totalTrabajos > 0 || secciones.length > 0 ? (
             <>
-              Se van a crear <strong>{secciones.length} {secciones.length === 1 ? 'rubro' : 'rubros'}</strong> con{' '}
+              Se van a crear <strong>{rubrosArriba} {rubrosArriba === 1 ? 'rubro' : 'rubros'}</strong>
+              {pisosDelModelo > 0 && <> ({pisosDelModelo} {pisosDelModelo === 1 ? 'piso' : 'pisos'})</>} con{' '}
               <strong>{totalTrabajos} {totalTrabajos === 1 ? 'trabajo' : 'trabajos'}</strong>
               {trabajosTipicos > 0 && structureOption !== 'template' && (
                 <span className="text-gray-500"> ({trabajosTipicos} de trabajos típicos)</span>
@@ -1185,7 +1244,25 @@ function StepEstructura({
         {/* Trabajos típicos */}
         {structureOption === 'template' && (
           <div className="fade-in">
-            <GenericTaskSelector selection={seleccion} onChange={onSeleccion} />
+            {modelo ? (
+              <GenericTaskSelector modelo={modelo} selection={seleccion} onChange={onSeleccion} />
+            ) : modeloError ? (
+              <div role="alert" data-testid="error-trabajos-tipicos" className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3 flex flex-wrap items-center gap-x-3 gap-y-2">
+                <span className="flex-1 min-w-[200px]">No pude traer los trabajos típicos: {modeloError}</span>
+                <button
+                  type="button"
+                  onClick={onReintentarModelo}
+                  className="min-h-10 md:min-h-0 bg-white border border-red-200 text-red-700 font-semibold px-3 py-1.5 rounded-lg text-sm hover:bg-red-100"
+                >
+                  Reintentar
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 text-sm text-gray-500 py-2" role="status">
+                <div className="w-4 h-4 border-2 border-[#2D8D68] border-t-transparent rounded-full animate-spin" />
+                Trayendo los trabajos del modelo de Terrac…
+              </div>
+            )}
           </div>
         )}
 

@@ -18,11 +18,29 @@ from app.main import create_app
 from tests.test_recipes_api import MOCK_USER, ORG, FakeDB
 
 
-def workbook(mat=None, mo=None) -> bytes:
-    """Excel with 00_Mat (data from row 3) and 00_MO (data from row 4), plus one other sheet."""
+def add_computo(wb, rows=None, title="01_C&P"):
+    """A small priced cómputo in the TERRAC layout (titles in row 5, data from row 8; E/J/N/Z = prices)."""
+    ws = wb.create_sheet(title)
+    ws["A1"] = "OBRA DE PRUEBA"
+    for col, text in enumerate(("ITEM", "DESCRIPCIÓN", "UNIDAD", "CANTIDAD", "SUBTOTAL 01: GASTOS DIRECTOS"), start=1):
+        ws.cell(5, col, text)
+    rows = rows if rows is not None else [
+        (None, "1- TAREAS PRELIMINARES", None, None, None, None, None, None),
+        ("1.1", "OBRADOR", "gl", 1, 100, 200, 300, 500),
+    ]
+    for r, (a, b, c, d, e, j, n, z) in enumerate(rows, start=8):
+        for col, value in ((1, a), (2, b), (3, c), (4, d), (5, e), (10, j), (14, n), (26, z)):
+            ws.cell(r, col, value)
+    return ws
+
+
+def workbook(mat=None, mo=None, computo=True) -> bytes:
+    """Excel with 00_Mat (data from row 3) and 00_MO (data from row 4), a priced 01_C&P, plus one other sheet."""
     wb = openpyxl.Workbook()
     wb.active.title = "Portada"
     wb.active.append(["Obra de prueba"])
+    if computo:
+        add_computo(wb)
     if mat is not None:
         ws = wb.create_sheet("00_Mat")
         ws.append(["MATERIALES"])

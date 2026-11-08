@@ -606,11 +606,12 @@ def _cyp_workbook_bytes() -> bytes:
 def test_cyp_sheet_read_only_with_titles_in_column_a() -> None:
     from io import BytesIO
 
-    from app.obra_import import obra_sheet, parse_any
+    from app.obra_import import find_computo, parse_any
 
     wb = openpyxl.load_workbook(BytesIO(_cyp_workbook_bytes()), data_only=True, read_only=True)
-    assert obra_sheet(wb) == "CYP"
+    assert find_computo(wb)["hoja"] == "CYP"
     parsed = parse_any(wb)
+    assert parsed["hoja"] == "CYP"
     assert parsed["titulo"] == "EDIFICIO LAS HERAS"
     assert parsed["problemas"] == []
     filas = {f["codigo"]: f for f in parsed["filas"]}

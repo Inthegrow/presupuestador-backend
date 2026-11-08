@@ -81,9 +81,9 @@ asistente con pastillas y borrador, `scripts/check_textos.cjs` que falla si vuel
 respuestas supuestas (`PLAN_AJUSTE_GINKGO.md`, PR #45; PR #46: Cargar obra acepta la planilla simple que baja la app: Fórmulas → Correcciones aplica las 14 correcciones de la
 revisión de Ginkgo con un botón y las deshace, `app/data/correcciones_ginkgo.json`; cada precio guarda de dónde salió
 (migración 012); buscador de precios en internet con OpenAI y búsqueda web, solo opciones con link; contrapiso celular y
-revoque con silleta según la obra) · 9 celular y notebook chica (`PLAN_CELULAR.md`, en revisión: cajón ☰ bajo 1024 px,
+revoque con silleta según la obra) · 9 ✅ celular y notebook chica (`PLAN_CELULAR.md`, PR #47: cajón ☰ bajo 1024 px,
 menú angosto 1024–1279, editor con escalera compacta y tarjetas en el celular, `lib/pantalla.ts`; Cargar obra confirma
-sin bloquear y "Confirmar los N"; e2e_celular y e2e_celular_editor). La guía de Ayuda de este camino,
+sin bloquear y "Confirmar los N"; e2e_celular y e2e_celular_editor) · 10 ✅ subir listas en .csv y el buscador de precios fácil de probar (`PLAN_CSV_Y_BUSCADOR.md`, PR #48: separador automático, precios "$ 1.234,50", estado "Buscador listo", errores de OpenAI en palabras, Ayuda) · 11 lo que encontró Emilia el 19/10 (`PLAN_PRUEBAS_EMILIA.md`, en revisión: la primera prueba con Emilia falló entera; `scripts/e2e_emilia.cjs` repite sus pruebas con sus archivos. Cargar obra lee cualquier solapa con Descripción y Cantidad, la hoja CYP del modelo de Terrac y los trabajos sin fórmula ni precio en $0; Importar Excel no crea nada si el Excel no trae precios y manda a Cargar obra; Trabajos típicos sale del modelo de Terrac (`app/data/modelo_terrac.json`) con sus fórmulas; borrar presupuestos con doble verificación para quien edita; precio viejo después de N días (migración 013); el editor dice cuando no pudo traer el presupuesto). Pendientes de esa reunión: entrar desde SOLÉ sin clave (repo de SOLÉ), precio de una obra distinto al oficial (decisión de Carlos), recordatorios para actualizar precios, Render pago para que no "despierte". La guía de Ayuda de este camino,
 después de la 5.
 
 *Ginkgo, diferencias (06/10):* página de seguimiento para Sol https://claude.ai/artifact/2aCjCgazrgST4HfvSbfeT5 (grupos A:

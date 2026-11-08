@@ -1,13 +1,16 @@
 """Cargar una obra desde la app: subir el Excel, revisar, corregir y cargar.
 
-1. POST /obras/analizar: lee la hoja 01_C&P, cruza cada ítem con una receta del
+1. POST /obras/analizar: lee el cómputo (01_C&P, CYP o la primera solapa con los títulos
+   Descripción y Cantidad: obra_import.find_computo), cruza cada ítem con una receta del
    Maestro (plantillas cargadas en la app) y busca el precio de cada recurso en
    los catálogos de la app, con la misma regla que "Actualizar precios" (Fase 4).
    Devuelve cada trabajo (misma descripción + unidad) con un semáforo: verde
    (listo), amarillo (confirmar algo) o rojo (no se puede cargar así), y los
    precios que faltan. La receta de cada trabajo sale, en este orden, de lo que
-   se eligió en la pantalla, de lo que se eligió en otra obra (memoria) o de la
-   regla por descripción (MAPEO). Las sugerencias por parecido nunca son la receta:
+   se eligió en la pantalla, de lo que se eligió en otra obra (memoria), del código
+   de la fórmula cuando la descripción se le parece (código del modelo) o de la
+   regla por descripción (MAPEO). Un trabajo sin fórmula y sin precio se puede
+   cargar en $0 ({"sin_precio": true}). Las sugerencias por parecido nunca son la receta:
    se ofrecen para elegir ("Quizás sea"). No escribe nada.
 2. Las correcciones de precios se hacen en los catálogos (endpoints de /catalogs):
    así quedan guardadas en el Maestro de la app para las próximas obras.
@@ -50,14 +53,17 @@ from app.calculations import calc_resource_subtotal, is_section, pct_or_default
 from app.catalog_prices import normalize_codigo, parse_fecha
 from app.db import get_data_db
 from app.obra_import import (
-    SHEET,
-    obra_sheet,
+    COMPUTO_NAMES,
+    NOTA_A_MANO,
+    NOTA_CODIGO,
     build_plan,
+    code_recipe,
     excel_prices,
+    forget_dimensions,
+    has_computo,
     item_notes,
     match_recipe,
     obra_usa,
-    is_simple_sheet,
     parse_any,
     plain,
     rule_for,
@@ -79,10 +85,12 @@ MEMORY = "obra_recetas_memoria"
 # ── Lectura ──────────────────────────────────────────────────────────────────
 
 
-async def _read_workbook(file: UploadFile):  # type: ignore[no-untyped-def]
+# Plain def (not async) here and in analizar/cargar: FastAPI runs them in a thread, so a big Excel does not hold
+# up the other requests (Emilia, 19/10: "No pude traer la lista de fórmulas" while an Excel was being read)
+def _read_workbook(file: UploadFile):  # type: ignore[no-untyped-def]
     if not file.filename or not file.filename.lower().endswith((".xlsx", ".xlsm")):
         raise HTTPException(400, "Subí el Excel de la obra (.xlsx)")
-    content = await file.read()
+    content = file.file.read()
     if len(content) > MAX_BYTES:
         raise HTTPException(400, "El archivo es muy grande (máximo 15 MB)")
     try:
@@ -90,29 +98,31 @@ async def _read_workbook(file: UploadFile):  # type: ignore[no-untyped-def]
             warnings.simplefilter("ignore")
             # read_only: streams the sheets. Opened whole, a big Maestro-style Excel (68 solapas)
             # used ~450 MB and took the 512 MB server down ("Failed to fetch" in the browser).
-            wb = openpyxl.load_workbook(BytesIO(content), data_only=True, read_only=True)
+            wb = forget_dimensions(openpyxl.load_workbook(BytesIO(content), data_only=True, read_only=True))
     except Exception as exc:
         raise HTTPException(400, "No se pudo abrir el Excel") from exc
-    # The obra's cómputo (01_C&P) or the simple sheet the app itself exports
-    if not obra_sheet(wb) and not is_simple_sheet(wb):
+    # The obra's cómputo (01_C&P, CYP, or a sheet with Descripción and Cantidad) or the app's own simple sheet
+    if not has_computo(wb):
         raise HTTPException(400, _missing_sheet_message(wb))
     return wb
 
 
+def _parse(wb) -> dict:  # type: ignore[no-untyped-def]
+    """The obra read from the Excel; 400 when its cómputo has no works (never an empty obra in silence)."""
+    parsed = parse_any(wb)
+    if not any(f["nivel"] == "item" for f in parsed["filas"]):
+        raise HTTPException(400, f"No encontré trabajos en la solapa «{parsed.get('hoja') or COMPUTO_NAMES[0]}»: revisá que "
+                                 "tenga una columna Descripción y otra Cantidad, con un trabajo por renglón.")
+    return parsed
+
+
 def _missing_sheet_message(wb) -> str:  # type: ignore[no-untyped-def]
     """Why the Excel can't be loaded, in words Sol understands (and what to upload instead)."""
-    if "Presupuesto" in wb.sheetnames:
-        first = [str(c.value or "").strip() for c in next(wb["Presupuesto"].iter_rows(max_row=1), [])]
-        if "Codigo" in first and ("Precio sin IVA" in first or "Neto Total" in first):
-            return (
-                "Este Excel es la planilla simple que baja la app (Exportar), no el cómputo de la obra: "
-                f"no tiene la hoja {SHEET}. Subí el Excel original de la obra o, desde Exportar, "
-                "la \"Planilla Terrac\", que sí se puede volver a cargar."
-            )
     hojas = ", ".join(wb.sheetnames[:6]) + ("…" if len(wb.sheetnames) > 6 else "")
     return (
-        f"El Excel no tiene la hoja {SHEET} (cómputo y presupuesto), que es la que la app lee. "
-        f"Tiene estas hojas: {hojas}."
+        "No encontré el cómputo en el Excel: busqué la solapa " + " o ".join(COMPUTO_NAMES[:2])
+        + " y una solapa con los títulos Descripción y Cantidad en sus primeras 15 filas. "
+        f"Tiene estas solapas: {hojas}."
     )
 
 
@@ -125,7 +135,11 @@ def _factor(value: object) -> float | None:
 
 
 def _asignaciones(raw: str | None) -> dict[str, dict]:
-    """What was decided on the screen: {clave: {"plantillas": [[codigo, factor|None]], "confirmada"}}."""
+    """What was decided on the screen: {clave: {"plantillas": [[codigo, factor|None]], "confirmada"}}.
+
+    {clave: {"sin_precio": true}} = load the work without fórmula and without price ($0), to complete it
+    later in the editor ("Cargarlo sin precio ($0)").
+    """
     if not raw:
         return {}
     try:
@@ -136,6 +150,9 @@ def _asignaciones(raw: str | None) -> dict[str, dict]:
         raise HTTPException(400, "Las fórmulas elegidas tienen que venir como un objeto")
     out: dict[str, dict] = {}
     for clave, value in data.items():
+        if isinstance(value, dict) and value.get("sin_precio") is True:
+            out[str(clave)] = {"plantillas": [], "confirmada": True, "sin_precio": True}
+            continue
         if isinstance(value, list):
             value = {"plantillas": value}
         pares = value.get("plantillas") if isinstance(value, dict) else None
@@ -269,10 +286,10 @@ MOTIVO_NO_ESTA_OFICIAL = "No está en el catálogo oficial"
 
 PORQUE = {
     "memoria": "Ya la usaste así en otra obra",
+    "codigo": "Tiene el código de la fórmula y se parece la descripción",
     "regla": "Coincide la descripción",
     "manual": "La elegiste vos",
 }
-NOTA_A_MANO = "Fórmula elegida a mano al cargar la obra."  # rule_for's note for a hand-picked recipe
 _CODE_IN_NOTE = re.compile(r"\s*\((\d+(?:\.\d+)*)\)")
 _PRETTY_UNIT = {"m2": "m²", "m3": "m³", "u": "unidad"}
 ESTADOS = ("rojo", "amarillo", "verde")
@@ -296,9 +313,11 @@ def _codes(pares: list) -> list[str]:
 
 def _proposal(fila: dict, templates: dict[str, dict], memoria: dict[str, dict],
               obra: list[dict] | None = None) -> dict | None:
-    """Recipe of a task before the screen's choice: memoria > regla (MAPEO).
+    """Recipe of a task before the screen's choice: memoria > código del modelo > regla (MAPEO).
 
-    A suggestion by similar words is never the recipe (a weak match like "membrana
+    "Código del modelo" (code_recipe): the work has the code of a fórmula of the company and its
+    description looks like it (4.1.3 Bases aisladas → fórmula 4.1.3), as in the TERRAC model.
+    A suggestion by similar words alone is never the recipe (a weak match like "membrana
     líquida" → "pintura en paredes" would bring its prices): it is only offered.
     "origenes" says, per pair, where its conversion came from (see rule_for).
     """
@@ -307,6 +326,9 @@ def _proposal(fila: dict, templates: dict[str, dict], memoria: dict[str, dict],
         pares = memoria[key]["plantillas"]
         return {"origen": "memoria", "pares": pares, "porque": PORQUE["memoria"],
                 "origenes": ["memoria" if p[1] is not None else None for p in pares]}
+    codigo = code_recipe(fila, templates)
+    if codigo:
+        return {"origen": "codigo", "pares": [[codigo, None]], "porque": PORQUE["codigo"], "origenes": [None]}
     if match_recipe(fila["descripcion"]):
         rule = rule_for(fila, templates, obra=obra) or {}
         # A rule variant says why ("La obra usa hormigón celular (hoja 4.1-6)")
@@ -326,6 +348,9 @@ def _decide(fila: dict, templates: dict[str, dict], memoria: dict[str, dict], el
     "origenes": per pair, where its conversion came from: "nombre", "supuesto", "regla",
     "memoria", "mano" (Sol wrote it) or None (missing). None as a whole = the rule's own.
     """
+    if elegida is not None and elegida.get("sin_precio"):
+        # Sol loads it without fórmula and without price ($0): nothing else to decide
+        return {"origen": None, "pares": [], "porque": None, "confirmada": True, "origenes": [], "sin_precio": True}
     base = _proposal(fila, templates, memoria, obra)
     if elegida is None:
         if base is None:
@@ -402,7 +427,7 @@ def _pregunta(fila: dict, partes: list[dict], origenes: list | None = None) -> d
 
 def _avisos(rule: dict | None) -> list[str]:
     nota = (rule or {}).get("nota")
-    if not nota or nota == NOTA_A_MANO:
+    if not nota or nota in (NOTA_A_MANO, NOTA_CODIGO):
         return []
     return [_CODE_IN_NOTE.sub("", nota).strip()]
 
@@ -459,7 +484,9 @@ def analyze(parsed: dict, templates: dict[str, dict], book: PriceBook, asignacio
 
     "motivo_rojo" of a red task: "receta_inexistente", "pregunta", "sin_receta" (no recipe
     in an Excel that carries no prices at all) or "precio". "excel_con_precios" is False when no item of the
-    Excel has a cost (an obra that came only with quantities).
+    Excel has a cost (an obra that came only with quantities). A task assigned {"sin_precio": true} loads
+    without fórmula at $0 (it is not red: "sin_precio" says so); "sin_formula_sin_precio" counts the red
+    "sin_receta" tasks still waiting for a fórmula or for that choice. "hoja" is the sheet that was read.
     """
     memoria = memoria or {}
     obra = obra_usa(excel)  # what its detail sheets use: rule variants (hormigón celular → 5.2.4)
@@ -483,6 +510,8 @@ def analyze(parsed: dict, templates: dict[str, dict], book: PriceBook, asignacio
         decisiones[key] = d
         if d["pares"] is not None:
             efectivas[key] = {"plantillas": d["pares"]}
+            if d["origen"] == "codigo":
+                efectivas[key]["nota"] = NOTA_CODIGO
 
     plan = build_plan(parsed, templates, efectivas, obra)
     items = [i for i in plan["items"] if i["nivel"] == "item"]
@@ -495,6 +524,7 @@ def analyze(parsed: dict, templates: dict[str, dict], book: PriceBook, asignacio
     by_key: dict[str, list[dict]] = {}
     for item in items:
         item["clave"] = task_key(item["descripcion"], item.get("unidad"))  # its task, for the load
+        item["sin_precio"] = bool(decisiones[item["clave"]].get("sin_precio"))
         by_key.setdefault(item["clave"], []).append(item)
 
     tareas = []
@@ -524,8 +554,9 @@ def analyze(parsed: dict, templates: dict[str, dict], book: PriceBook, asignacio
 
         # Without a recipe the Excel price is used. In an Excel with no prices at all there is
         # nothing to load (red). A $0 row in a priced Excel is Sol's own decision: yellow, as before.
+        sin_precio = bool(d.get("sin_precio"))
         motivo = ("receta_inexistente" if inexistente else "pregunta" if falta_conversion
-                  else "sin_receta" if receta is None and not con_precios
+                  else "sin_receta" if receta is None and not con_precios and not sin_precio
                   else "precio" if faltantes else None)
         if motivo:
             estado = "rojo"
@@ -551,6 +582,7 @@ def analyze(parsed: dict, templates: dict[str, dict], book: PriceBook, asignacio
             "codigos": [i["codigo"] for i in its],
             "estado": estado, "motivo_rojo": motivo, "receta": receta, "sugerencias": sugerencias,
             "pregunta": pregunta, "avisos": avisos, "precios_faltantes": faltantes,
+            "sin_precio": sin_precio,
         })
     tareas.sort(key=lambda t: (ESTADOS.index(t["estado"]), -t["total_excel"]))
 
@@ -559,6 +591,8 @@ def analyze(parsed: dict, templates: dict[str, dict], book: PriceBook, asignacio
         "catalogo_oficial": book.hay_oficial,
         "excel_con_precios": con_precios,
         "titulo": parsed["titulo"],
+        "hoja": parsed.get("hoja"),
+        "sin_formula_sin_precio": sum(1 for t in tareas if t["motivo_rojo"] == "sin_receta"),
         "fecha_precios": book.fecha.isoformat(),
         "resumen": {
             "rubros": sum(1 for f in parsed["filas"] if f["nivel"] == "rubro"),
@@ -609,22 +643,23 @@ def _public(result: dict) -> dict:
 
 
 @router.post("/analizar")
-async def analizar_obra(
+def analizar_obra(
     file: UploadFile = File(...),
     asignaciones: str | None = Form(None),
     user: dict = Depends(require_editor),
 ):
     """Revisa el Excel de la obra. No escribe nada."""
-    wb = await _read_workbook(file)
+    wb = _read_workbook(file)
     db = get_data_db()
     org_id = user["org_id"]
     templates = _templates(db, org_id)
     if not templates:
         raise HTTPException(409, "No hay fórmulas cargadas en la app: primero hay que importar el Maestro")
-    result = analyze(parse_any(wb), templates, PriceBook(db, org_id, today()), _asignaciones(asignaciones),
+    parsed = _parse(wb)
+    result = analyze(parsed, templates, PriceBook(db, org_id, today()), _asignaciones(asignaciones),
                      _memoria(db, org_id), excel_prices(wb))
     return {"archivo": file.filename, "titulo_dudoso": titulo_dudoso(result["titulo"], file.filename),
-            "planilla_simple": not obra_sheet(wb), **_public(result)}
+            "planilla_simple": bool(parsed.get("planilla_simple")), **_public(result)}
 
 
 # ── Carga ────────────────────────────────────────────────────────────────────
@@ -658,33 +693,37 @@ def _item_row(item: dict, budget_id: str, org_id: str, templates: dict[str, dict
     """``amarillas``: task keys loaded without confirming; their notes end in "Para confirmar."."""
     ex = item.get("excel") or {}
     es_item = item["nivel"] == "item"
-    sin = es_item and not item.get("plantilla")
+    # Without fórmula the Excel price is used; "sin precio" ($0) was Sol's choice for a work without either
+    sin = es_item and not item.get("plantilla") and not item.get("sin_precio")
     qty = item["cantidad"]
     mat = float(ex.get("mat_unit", 0)) if sin else 0.0
     mo = float(ex.get("mo_unit", 0)) if sin else 0.0
+    # Totals in Decimal, rounded half up like Excel (in float, round(1.005, 2) gives 1.00 and the planilla says 1,01)
+    mat_total = _centavos(_dec(mat) * _dec(qty or 0))
+    mo_total = _centavos(_dec(mo) * _dec(qty or 0))
     if sin and qty:
         # The per-unit prices of the planilla are rounded to cents; its own totals of materials (L)
         # and M.O. (M) are the real ones. Each one, on its own: when it differs from unit × quantity
-        # only by that rounding, the cost per unit keeps every decimal so that unit × quantity
-        # gives the planilla's total to the cent. Nothing moves between materials and M.O., and a
-        # planilla without those totals (or with a bigger difference) loads as before: the
-        # difference shows in "Ver diferencias con el Excel", never fixed silently.
-        def exacto(unit: float, total: object) -> float:
+        # only by that rounding, the cost per unit keeps every decimal and the total is the planilla's,
+        # to the cent. Nothing moves between materials and M.O., and a planilla without those totals
+        # (or with a bigger difference) loads as before: the difference shows in "Ver diferencias con
+        # el Excel", never fixed silently.
+        def exacto(unit: float, total: object, calculado: Decimal) -> tuple[float, Decimal]:
             if total is None or float(total) < 0:
-                return unit
+                return unit, calculado
             # A unit with more than cents (ej. 1,0049, a formula =L/D in the planilla) is already the
             # precise one: it is kept, and a total that contradicts it shows as a difference
             if _dec(unit) != _centavos(_dec(unit)):
-                return unit
+                return unit, calculado
             # Only the rounding of the unit to cents: total ÷ quantity must round to that same unit.
             # Divided in Decimal, not float: $0,15 / 6 is exactly 0,025 → 0,03 (in float it is
             # 0,02499999… → 0,02 and a valid total would be refused)
             if _centavos(_dec(total) / _dec(qty)) == _centavos(_dec(unit)):
-                return float(total) / qty
-            return unit
-        mat = exacto(mat, ex.get("mat_total"))
-        mo = exacto(mo, ex.get("mo_total"))
-    directo = round(round(mat * (qty or 0), 2) + round(mo * (qty or 0), 2), 2)
+                return float(total) / qty, _centavos(_dec(total))
+            return unit, calculado
+        mat, mat_total = exacto(mat, ex.get("mat_total"), mat_total)
+        mo, mo_total = exacto(mo, ex.get("mo_total"), mo_total)
+    directo = float(mat_total + mo_total)
     notas = item_notes(item)
     if es_item and item.get("clave") in amarillas:
         notas = f"{notas} {PARA_CONFIRMAR}" if notas else PARA_CONFIRMAR
@@ -692,7 +731,7 @@ def _item_row(item: dict, budget_id: str, org_id: str, templates: dict[str, dict
         "budget_id": budget_id, "org_id": org_id, "code": item["codigo"],
         "description": item["descripcion"], "unidad": item["unidad"], "cantidad": qty,
         "mat_unitario": mat, "mo_unitario": mo,
-        "mat_total": round(mat * (qty or 0), 2), "mo_total": round(mo * (qty or 0), 2),
+        "mat_total": float(mat_total), "mo_total": float(mo_total),
         "directo_total": directo, "indirecto_total": 0, "beneficio_total": 0, "neto_total": directo,
         "notas": notas, "sort_order": item["orden"],
         "template_id": templates[item["plantilla"]]["id"] if item.get("plantilla") else None,
@@ -748,7 +787,8 @@ def _save_memory(db, org_id: str, result: dict, elegidas: dict, memoria: dict[st
     nuevas, cambios = [], []
     for clave in elegidas:
         t = tareas.get(clave)
-        if t is None:
+        if t is None or elegidas[clave].get("sin_precio"):
+            # "Sin precio ($0)" is for this obra only: the next one still asks for a fórmula
             continue
         partes = (t["receta"] or {}).get("partes") or []
         row = {"descripcion": t["descripcion"], "unidad": t["unidad"],
@@ -769,7 +809,7 @@ def _save_memory(db, org_id: str, result: dict, elegidas: dict, memoria: dict[st
 
 
 @router.post("/cargar")
-async def cargar_obra(
+def cargar_obra(
     file: UploadFile = File(...),
     nombre: str = Form(...),
     asignaciones: str | None = Form(None),
@@ -783,7 +823,7 @@ async def cargar_obra(
     nombre = " ".join((nombre or "").split())
     if not nombre:
         raise HTTPException(400, "Poné un nombre para el presupuesto")
-    wb = await _read_workbook(file)
+    wb = _read_workbook(file)
     db = get_data_db()
     org_id = user["org_id"]
     templates = _templates(db, org_id)
@@ -791,7 +831,7 @@ async def cargar_obra(
     elegidas = _asignaciones(asignaciones)
     memoria = _memoria(db, org_id)
     t0 = time.perf_counter()
-    result = analyze(parse_any(wb), templates, book, elegidas, memoria, excel_prices(wb))
+    result = analyze(_parse(wb), templates, book, elegidas, memoria, excel_prices(wb))
     tiempos = {"analisis_s": time.perf_counter() - t0}
 
     rojos = [t for t in result["tareas"] if t["estado"] == "rojo"]
@@ -801,8 +841,10 @@ async def cargar_obra(
         sin_receta = bool(duros) and all(t["motivo_rojo"] == "sin_receta" for t in rojos if t["clave"] in duros)
         if sin_receta:
             mensaje = _plural(len(duros),
-                              "Hay {n} trabajo sin fórmula y sin precio en el Excel: elegí una fórmula antes de cargar",
-                              "Hay {n} trabajos sin fórmula y sin precio en el Excel: elegí una fórmula antes de cargar")
+                              "Hay {n} trabajo sin fórmula y sin precio en el Excel: elegí una fórmula o cargalo "
+                              "sin precio ($0)",
+                              "Hay {n} trabajos sin fórmula y sin precio en el Excel: elegí una fórmula o cargalos "
+                              "sin precio ($0)")
         else:
             mensaje = _plural(len(duros) or len(rojos), "Hay {n} trabajo en rojo: resolvelo antes de cargar",
                               "Hay {n} trabajos en rojo: resolvelos antes de cargar")
